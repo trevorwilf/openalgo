@@ -189,7 +189,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["broker", "blueprints", "database", "services", "utils", "restx_api", "extensions", "limiter", "cors", "csp"]
+known-first-party = ["broker", "blueprints", "database", "domain", "services", "utils", "restx_api", "extensions", "limiter", "cors", "csp"]
 
 # This is not a distributable Python package — tell setuptools not to discover packages
 [tool.setuptools]
@@ -197,7 +197,7 @@ packages = []
 
 # Pytest configuration
 [tool.pytest.ini_options]
-testpaths = ["test"]
+testpaths = ["test", "tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --timeout=60"
@@ -206,12 +206,48 @@ filterwarnings = [
     "ignore::PendingDeprecationWarning",
 ]
 
+# Phase 1a: 100% branch coverage required on the new domain/ package only.
+# Other packages are intentionally unchecked for now.
+[tool.coverage.run]
+branch = true
+source = ["domain"]
+
+[tool.coverage.report]
+# Enforced in CI for the phase-1a-domain job, not globally.
+fail_under = 100
+show_missing = true
+skip_covered = false
+exclude_also = [
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "@overload",
+]
+
+# Phase 1a: mypy strict on the domain/ package only.
+[tool.mypy]
+python_version = "3.12"
+files = ["domain"]
+strict = true
+pretty = true
+ignore_missing_imports = true  # pydantic types are fine; third-party libs vary
+# The parent directory is also named "openalgo", which confuses mypy's
+# module discovery. Anchor explicitly.
+explicit_package_bases = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR"
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
 [dependency-groups]
 dev = [
     "bandit[sarif]>=1.9.3",
     "detect-secrets>=1.5.0",
     "freezegun>=1.5.1",
+    "hypothesis>=6.112.0",
+    "mypy>=1.13.0",
     "pip-audit>=2.10.0",
+    "pytest-cov>=5.0.0",
     "pytest-timeout>=2.4.0",
     "ruff>=0.14.14",
 ]
