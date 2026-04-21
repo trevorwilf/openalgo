@@ -3,10 +3,13 @@ import os
 import random
 import socket
 import threading
+import uuid
 from abc import ABC, abstractmethod
+from typing import Any
 
 import zmq
 
+from utils.feature_flags import is_enabled
 from utils.logging import get_logger
 
 # Initialize logger
@@ -163,6 +166,12 @@ class BaseBrokerWebSocketAdapter(ABC):
             # Initialize instance variables
             self.subscriptions = {}
             self.connected = False
+
+            # Phase 3c state: (venue_code, canonical_symbol) → instrument UUID.
+            # Populated by subscribe_by_instrument_ref. Read by
+            # publish_market_data to additively enrich outbound events with
+            # instrument_id when WEBSOCKET_INSTRUMENT_V2 is enabled.
+            self._subscribed_instrument_ids: dict[tuple[str, str], uuid.UUID] = {}
 
         except Exception as e:
             self.logger.exception(f"Error in BaseBrokerWebSocketAdapter init: {e}")
@@ -411,18 +420,98 @@ class BaseBrokerWebSocketAdapter(ABC):
             data: Market data dictionary
         """
         try:
+            enriched = self._enrich_outbound_data(data)
             if self._uses_shared_zmq and self._shared_publisher:
                 # Use shared publisher (connection pooling mode)
-                self._shared_publisher.publish(topic, data)
+                self._shared_publisher.publish(topic, enriched)
             elif self.socket:
                 # Use own socket
                 self.socket.send_multipart(
-                    [topic.encode("utf-8"), json.dumps(data).encode("utf-8")]
+                    [topic.encode("utf-8"), json.dumps(enriched).encode("utf-8")]
                 )
             else:
                 self.logger.warning("No ZMQ socket available for publishing")
         except Exception as e:
             self.logger.exception(f"Error publishing market data: {e}")
+
+    def _enrich_outbound_data(self, data: Any) -> Any:
+        """Phase 3c: additively include `instrument_id` in outbound tick /
+        depth payloads when:
+          * WEBSOCKET_INSTRUMENT_V2 is enabled,
+          * `data` is a dict carrying `symbol` and `exchange`, and
+          * the (exchange, symbol) pair was subscribed via
+            `subscribe_by_instrument_ref` (or an explicit update to
+            `_subscribed_instrument_ids`).
+
+        Legacy fields are never touched. When the flag is off this returns
+        the original object unchanged, so payloads are byte-identical to
+        the pre-Phase-3c path.
+        """
+        if not is_enabled("WEBSOCKET_INSTRUMENT_V2"):
+            return data
+        if not isinstance(data, dict):
+            return data
+        symbol = data.get("symbol")
+        exchange = data.get("exchange")
+        if not symbol or not exchange:
+            return data
+        iid = self._subscribed_instrument_ids.get((exchange, symbol))
+        if iid is None:
+            return data
+        # Don't mutate the caller's dict.
+        enriched = dict(data)
+        enriched["instrument_id"] = str(iid)
+        return enriched
+
+    def subscribe_by_instrument_ref(
+        self,
+        ref: Any,
+        mode: int = 2,
+        depth_level: int = 5,
+        broker_code: str | None = None,
+    ) -> dict:
+        """Phase 3c: subscribe using a normalized `domain.InstrumentRef`.
+
+        Resolves the ref through `InstrumentResolver` (with legacy
+        ``symtoken`` fallback via `get_token` when Phase 2b has not yet
+        populated the instrument universe for the active broker), then
+        delegates to the legacy ``self.subscribe(symbol, exchange, ...)``
+        using the resolved venue_code / canonical_symbol.
+
+        The resolved ``instrument_id`` is recorded in
+        ``self._subscribed_instrument_ids`` so that subsequent outbound
+        payloads can be enriched additively (see `_enrich_outbound_data`).
+
+        `broker_code` is resolved from the arg → ``self.broker_code`` →
+        ``self.broker_name`` if available; None otherwise.
+        """
+        # Late imports: don't pull in the resolver / repo at adapter
+        # construction time — ConnectionPool creates a lot of adapter
+        # instances and the resolver lazy-imports `database.token_db`.
+        from websocket_proxy.broker_factory import get_instrument_resolver
+
+        broker = (
+            broker_code
+            or getattr(self, "broker_code", None)
+            or getattr(self, "broker_name", None)
+        )
+
+        resolver = get_instrument_resolver()
+        resolved = resolver.resolve(ref, broker_code=broker)
+
+        # Track for outbound enrichment.
+        self._subscribed_instrument_ids[
+            (resolved.venue_code, resolved.canonical_symbol)
+        ] = resolved.instrument_id
+
+        # Delegate to the legacy subscribe. Broker adapter subclasses are
+        # NOT modified in this phase — they keep the unchanged signature.
+        return self.subscribe(
+            symbol=resolved.canonical_symbol,
+            exchange=resolved.venue_code,
+            mode=mode,
+            depth_level=depth_level,
+        )
 
     def _create_success_response(self, message, **kwargs):
         """

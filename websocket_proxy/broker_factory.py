@@ -1,5 +1,5 @@
 import importlib
-from typing import Dict, Optional, Type
+from typing import Any, Dict, Optional, Type
 
 from utils.logging import get_logger
 
@@ -12,6 +12,19 @@ from .base_adapter import (
 from .connection_manager import ConnectionPool
 
 logger = get_logger(__name__)
+
+
+def get_instrument_resolver() -> Any:
+    """Phase 3c shim — return the shared `InstrumentResolver`.
+
+    The base WebSocket adapter calls this inside
+    `subscribe_by_instrument_ref`. Keeping the indirection here lets
+    tests monkeypatch the returned resolver without touching
+    `services.instrument_resolver` module state.
+    """
+    from services.instrument_resolver import get_resolver
+
+    return get_resolver()
 
 # Registry of all supported broker adapters
 BROKER_ADAPTERS: dict[str, type[BaseBrokerWebSocketAdapter]] = {}
