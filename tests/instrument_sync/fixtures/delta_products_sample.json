@@ -1,0 +1,92 @@
+{
+  "result": [
+    {
+      "id": 10001,
+      "symbol": "BTC_USDT",
+      "product_type": "spot",
+      "description": "Bitcoin spot",
+      "underlying_asset_symbol": "BTC",
+      "quoting_asset_symbol": "USDT",
+      "tick_size": "0.01",
+      "settlement_time": null,
+      "strike_price": null
+    },
+    {
+      "id": 10002,
+      "symbol": "ETH_USDT",
+      "product_type": "spot",
+      "description": "Ethereum spot",
+      "underlying_asset_symbol": "ETH",
+      "quoting_asset_symbol": "USDT",
+      "tick_size": "0.01",
+      "settlement_time": null,
+      "strike_price": null
+    },
+    {
+      "id": 20001,
+      "symbol": "BTCUSD",
+      "product_type": "perpetual_futures",
+      "description": "BTC perpetual",
+      "underlying_asset_symbol": "BTC",
+      "quoting_asset_symbol": "USD",
+      "tick_size": "0.5",
+      "settlement_time": null,
+      "strike_price": null
+    },
+    {
+      "id": 20002,
+      "symbol": "ETHUSD",
+      "product_type": "perpetual_futures",
+      "description": "ETH perpetual",
+      "underlying_asset_symbol": "ETH",
+      "quoting_asset_symbol": "USD",
+      "tick_size": "0.05",
+      "settlement_time": null,
+      "strike_price": null
+    },
+    {
+      "id": 30001,
+      "symbol": "BTCUSD28FEB2025",
+      "product_type": "futures",
+      "description": "BTC dated future",
+      "underlying_asset_symbol": "BTC",
+      "quoting_asset_symbol": "USD",
+      "tick_size": "0.5",
+      "settlement_time": "2025-02-28T12:00:00Z",
+      "strike_price": null
+    },
+    {
+      "id": 40001,
+      "symbol": "C-BTC-50000-280225",
+      "product_type": "call_options",
+      "description": "BTC 50k CALL 28-Feb-2025",
+      "underlying_asset_symbol": "BTC",
+      "quoting_asset_symbol": "USD",
+      "tick_size": "0.5",
+      "settlement_time": "2025-02-28T12:00:00Z",
+      "strike_price": "50000"
+    },
+    {
+      "id": 40002,
+      "symbol": "P-BTC-50000-280225",
+      "product_type": "put_options",
+      "description": "BTC 50k PUT 28-Feb-2025",
+      "underlying_asset_symbol": "BTC",
+      "quoting_asset_symbol": "USD",
+      "tick_size": "0.5",
+      "settlement_time": "2025-02-28T12:00:00Z",
+      "strike_price": "50000"
+    },
+    {
+      "id": 99999,
+      "symbol": "MYSTERY_TYPE",
+      "product_type": "interest_rate_swap",
+      "description": "Unsupported product",
+      "underlying_asset_symbol": "XYZ",
+      "quoting_asset_symbol": "USD",
+      "tick_size": "0.01",
+      "settlement_time": null,
+      "strike_price": null
+    }
+  ]
+}
