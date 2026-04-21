@@ -417,6 +417,12 @@ def handle_auth_success(auth_token, user_session_key, broker, feed_token=None, u
             thread = Thread(target=load_existing_master_contract, args=(broker,), daemon=True)
             thread.start()
 
+        # Phase 2b dark-launch: in parallel with the legacy path, run the
+        # non-destructive v2 sync pipeline when INSTRUMENT_CORE_V2 is on.
+        # This does NOT replace the legacy path — Phase 3+ services still
+        # read from symtoken until their own migration flag flips.
+        _maybe_start_instrument_sync_v2(broker)
+
         # Return JSON for AJAX requests (React), redirect for OAuth callbacks
         if is_ajax_request():
             return jsonify(
@@ -439,6 +445,53 @@ def handle_auth_success(auth_token, user_session_key, broker, feed_token=None, u
             ), 500
         else:
             return redirect(url_for("auth.broker_login"))
+
+
+def _run_instrument_sync_v2(broker):
+    """Daemon-thread entry point: drive the Phase 2b sync adapter for
+    `broker` to completion. Exceptions are logged and swallowed — the
+    legacy path is always the source of truth until Phase 9's canary.
+    """
+    try:
+        from services.instrument_sync_adapters import ADAPTERS
+        from services.instrument_sync_service import InstrumentSyncRunner
+
+        adapter_cls = ADAPTERS.get(broker)
+        if adapter_cls is None:
+            return  # Caller already logged the miss path
+        InstrumentSyncRunner().run(adapter_cls())
+    except Exception as e:
+        logger.exception(
+            f"Phase 2b instrument_sync_v2 crashed for broker {broker}: {e}"
+        )
+
+
+def _maybe_start_instrument_sync_v2(broker):
+    """If INSTRUMENT_CORE_V2=1 and an adapter exists for the broker,
+    spawn a daemon thread to run it. No-op otherwise.
+
+    Kept module-level (not nested in handle_auth_success) so the unit
+    tests can patch ``Thread`` and drive this in isolation.
+    """
+    from utils.feature_flags import is_enabled
+
+    if not is_enabled("INSTRUMENT_CORE_V2"):
+        return
+    # Local import — registering an import at module scope would make
+    # the entire adapter tree (and its transitive deps like httpx)
+    # load on every Flask startup, which isn't what we want.
+    from services.instrument_sync_adapters import ADAPTERS
+
+    if broker not in ADAPTERS:
+        logger.info(
+            f"INSTRUMENT_CORE_V2=1 but no Phase 2b adapter for {broker}; "
+            "skipping new pipeline for this login"
+        )
+        return
+
+    logger.info(f"INSTRUMENT_CORE_V2=1 — spawning Phase 2b sync for {broker}")
+    thread = Thread(target=_run_instrument_sync_v2, args=(broker,), daemon=True)
+    thread.start()
 
 
 def handle_auth_failure(error_message, forward_url="broker.html"):
