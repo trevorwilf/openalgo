@@ -336,7 +336,15 @@ def update_credentials():
 @broker_credentials_bp.route("/capabilities", methods=["GET"])
 @check_session_validity
 def get_capabilities():
-    """Return broker capabilities (supported exchanges, type, features) from cached plugin.json."""
+    """Return broker capabilities from cached plugin.json.
+
+    Phase 1b of the market-agnostic refactor upgraded the cached value
+    from a shallow dict to a `BrokerCapabilities` pydantic model.
+    `.model_dump(mode='json')` preserves every legacy frontend key
+    (broker_name, broker_type, supported_exchanges, leverage_config)
+    via computed fields and adds the richer capability surface
+    additively. Frontend consumers do not need changes.
+    """
     from flask import session
 
     from utils.plugin_loader import get_broker_capabilities
@@ -360,4 +368,4 @@ def get_capabilities():
             }
         )
 
-    return jsonify({"status": "success", "data": capabilities})
+    return jsonify({"status": "success", "data": capabilities.model_dump(mode="json")})
