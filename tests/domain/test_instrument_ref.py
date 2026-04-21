@@ -59,6 +59,40 @@ def test_two_shapes_set_raises() -> None:
         )
 
 
+def test_venue_symbol_and_external_both_set_raises() -> None:
+    """venue_code + canonical_symbol (full) alongside an external ref is
+    an ambiguity — a bare venue_code alongside an external ref is NOT
+    (it narrows the external lookup)."""
+    with pytest.raises(ValidationError, match="exactly one"):
+        InstrumentRef(
+            venue_code="NSE",
+            canonical_symbol="RELIANCE",
+            identifier_type=IdentifierType.ISIN,
+            identifier_value="INE002A01018",
+        )
+
+
+def test_id_and_external_both_set_raises() -> None:
+    with pytest.raises(ValidationError, match="exactly one"):
+        InstrumentRef(
+            instrument_id=uuid4(),
+            identifier_type=IdentifierType.ISIN,
+            identifier_value="INE002A01018",
+        )
+
+
+def test_external_with_bare_venue_code_is_allowed() -> None:
+    """A venue_code set alongside an external ref is legitimate optional
+    context and must NOT raise."""
+    ref = InstrumentRef(
+        identifier_type=IdentifierType.BROKER_TOKEN,
+        identifier_value="738561",
+        venue_code="NSE",
+    )
+    assert ref.kind == "external"
+    assert ref.venue_code == "NSE"
+
+
 def test_partial_venue_symbol_raises_missing_symbol() -> None:
     with pytest.raises(ValidationError, match=r"(canonical_symbol|requires exactly one)"):
         InstrumentRef(venue_code="NSE")

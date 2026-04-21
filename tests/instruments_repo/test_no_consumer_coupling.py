@@ -66,24 +66,27 @@ def _imports_instruments_repo(py_file: Path) -> bool:
     return False
 
 
-# Phase 2b allowlist — these files are legitimate consumers of
-# `database.instruments_repo` under the `INSTRUMENT_CORE_V2` flag.
-# Phase-3+ consumers will add themselves here as they're greenlit.
-PHASE_2B_ALLOWED = {
+# Allowlist of files greenlit as legitimate consumers of
+# `database.instruments_repo` on or after their stated phase. Each new
+# phase extends this set rather than touching services at large.
+PHASE_ALLOWED: set[Path] = {
+    # Phase 2b — non-destructive sync pipeline
     REPO_ROOT / "services" / "instrument_sync_service.py",
     REPO_ROOT / "services" / "instrument_sync_adapters" / "__init__.py",
     REPO_ROOT / "services" / "instrument_sync_adapters" / "zerodha_adapter.py",
     REPO_ROOT / "services" / "instrument_sync_adapters" / "delta_adapter.py",
+    # Phase 3a — instrument resolver
+    REPO_ROOT / "services" / "instrument_resolver.py",
 }
 
 
 @pytest.mark.parametrize("py_file", _iter_py_files(BANNED_ROOTS))
 def test_no_consumer_imports_instruments_repo(py_file: Path) -> None:
-    if py_file in PHASE_2B_ALLOWED:
-        # Legitimate Phase 2b consumer — skip.
+    if py_file in PHASE_ALLOWED:
+        # Legitimate per-phase consumer — skip.
         return
     assert not _imports_instruments_repo(py_file), (
         f"{py_file.relative_to(REPO_ROOT)} imports database.instruments_repo "
         "but is not on the per-phase allowlist. If this is an intentional "
-        "Phase 2b+ consumer, add it to PHASE_2B_ALLOWED."
+        "consumer, add it to PHASE_ALLOWED."
     )
