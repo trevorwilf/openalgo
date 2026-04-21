@@ -61,6 +61,9 @@ MIGRATIONS = [
     # Phase 2a of the market-agnostic refactor — additive instrument
     # universe tables. symtoken is NOT touched. Idempotent.
     ("migrate_instrument_core.py", "Phase 2a — Instrument Universe Tables"),
+    # Phase 3b — additive instrument_id column on historify tables.
+    # Nullable; no existing PK or unique constraint altered. Idempotent.
+    ("migrate_historify_instrument_id.py", "Phase 3b — Historify instrument_id"),
 ]
 
 

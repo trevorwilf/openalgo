@@ -99,7 +99,9 @@ def init_database():
     ensure_db_directory()
 
     with get_connection() as conn:
-        # Main OHLCV data table - unified table approach
+        # Main OHLCV data table - unified table approach.
+        # instrument_id is nullable — populated by HISTORIFY_INSTRUMENT_ID_V2
+        # writers and by the Phase 3b backfill script. Never part of the PK.
         conn.execute("""
             CREATE TABLE IF NOT EXISTS market_data (
                 symbol VARCHAR NOT NULL,
@@ -112,6 +114,7 @@ def init_database():
                 close DOUBLE NOT NULL,
                 volume BIGINT NOT NULL,
                 oi BIGINT DEFAULT 0,
+                instrument_id VARCHAR,
                 created_at TIMESTAMP DEFAULT current_timestamp,
                 PRIMARY KEY (symbol, exchange, interval, timestamp)
             )
@@ -124,6 +127,7 @@ def init_database():
                 symbol VARCHAR NOT NULL,
                 exchange VARCHAR NOT NULL,
                 display_name VARCHAR,
+                instrument_id VARCHAR,
                 added_at TIMESTAMP DEFAULT current_timestamp,
                 UNIQUE (symbol, exchange)
             )
@@ -140,6 +144,7 @@ def init_database():
                 last_timestamp BIGINT,
                 record_count BIGINT DEFAULT 0,
                 last_download_at TIMESTAMP,
+                instrument_id VARCHAR,
                 UNIQUE (symbol, exchange, interval)
             )
         """)
@@ -175,7 +180,8 @@ def init_database():
                 records_downloaded INTEGER DEFAULT 0,
                 error_message VARCHAR,
                 started_at TIMESTAMP,
-                completed_at TIMESTAMP
+                completed_at TIMESTAMP,
+                instrument_id VARCHAR
             )
         """)
 
@@ -190,6 +196,7 @@ def init_database():
                 lotsize INTEGER,
                 instrumenttype VARCHAR,
                 tick_size DOUBLE,
+                instrument_id VARCHAR,
                 last_updated TIMESTAMP DEFAULT current_timestamp,
                 PRIMARY KEY (symbol, exchange)
             )
@@ -293,9 +300,22 @@ def get_watchlist() -> list[dict[str, Any]]:
         return result.to_dict("records")
 
 
-def add_to_watchlist(symbol: str, exchange: str, display_name: str = None) -> tuple[bool, str]:
+def add_to_watchlist(
+    symbol: str,
+    exchange: str,
+    display_name: str = None,
+    instrument_id: str | None = None,
+) -> tuple[bool, str]:
     """
     Add a symbol to the watchlist.
+
+    Args:
+        symbol: Trading symbol.
+        exchange: Venue / exchange code.
+        display_name: Optional display label.
+        instrument_id: Optional Phase 2a instrument UUID (str form).
+            Populated by the service layer when ``HISTORIFY_INSTRUMENT_ID_V2``
+            is enabled; NULL otherwise.
 
     Returns:
         Tuple of (success, message)
@@ -319,10 +339,10 @@ def add_to_watchlist(symbol: str, exchange: str, display_name: str = None) -> tu
 
             conn.execute(
                 """
-                INSERT INTO watchlist (id, symbol, exchange, display_name)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO watchlist (id, symbol, exchange, display_name, instrument_id)
+                VALUES (?, ?, ?, ?, ?)
             """,
-                [next_id, symbol.upper(), exchange.upper(), display_name],
+                [next_id, symbol.upper(), exchange.upper(), display_name, instrument_id],
             )
 
         logger.info(f"Added {symbol}:{exchange} to watchlist")
@@ -364,6 +384,7 @@ def bulk_add_to_watchlist(symbols: list[dict[str, str]]) -> tuple[int, int, list
                 symbol = item.get("symbol", "").upper()
                 exchange = item.get("exchange", "").upper()
                 display_name = item.get("display_name")
+                instrument_id = item.get("instrument_id")  # Phase 3b optional
 
                 if not symbol or not exchange:
                     failed.append(
@@ -380,7 +401,9 @@ def bulk_add_to_watchlist(symbols: list[dict[str, str]]) -> tuple[int, int, list
                     skipped += 1
                     continue
 
-                records_to_insert.append((next_id, symbol, exchange, display_name))
+                records_to_insert.append(
+                    (next_id, symbol, exchange, display_name, instrument_id)
+                )
                 existing_set.add((symbol, exchange))  # Prevent duplicates within batch
                 next_id += 1
 
@@ -388,8 +411,9 @@ def bulk_add_to_watchlist(symbols: list[dict[str, str]]) -> tuple[int, int, list
             if records_to_insert:
                 conn.executemany(
                     """
-                    INSERT INTO watchlist (id, symbol, exchange, display_name)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO watchlist
+                        (id, symbol, exchange, display_name, instrument_id)
+                    VALUES (?, ?, ?, ?, ?)
                 """,
                     records_to_insert,
                 )
@@ -510,7 +534,13 @@ def clear_watchlist() -> tuple[bool, str]:
 # =============================================================================
 
 
-def upsert_market_data(df: pd.DataFrame, symbol: str, exchange: str, interval: str) -> int:
+def upsert_market_data(
+    df: pd.DataFrame,
+    symbol: str,
+    exchange: str,
+    interval: str,
+    instrument_id: str | None = None,
+) -> int:
     """
     Insert or update OHLCV data from a pandas DataFrame.
 
@@ -519,6 +549,10 @@ def upsert_market_data(df: pd.DataFrame, symbol: str, exchange: str, interval: s
         symbol: Trading symbol
         exchange: Exchange code
         interval: Time interval (1m, 5m, 15m, 30m, 1h, D)
+        instrument_id: Optional Phase 2a instrument UUID (str form). When
+            provided, stamped on every inserted row AND on the data_catalog
+            row. When None, column is left NULL — legacy read paths are
+            unaffected.
 
     Returns:
         Number of records inserted/updated
@@ -532,6 +566,7 @@ def upsert_market_data(df: pd.DataFrame, symbol: str, exchange: str, interval: s
         df["symbol"] = symbol.upper()
         df["exchange"] = exchange.upper()
         df["interval"] = interval
+        df["instrument_id"] = instrument_id  # None → NULL in DuckDB
 
         # Ensure required columns exist
         if "oi" not in df.columns:
@@ -554,15 +589,19 @@ def upsert_market_data(df: pd.DataFrame, symbol: str, exchange: str, interval: s
                 "close",
                 "volume",
                 "oi",
+                "instrument_id",
             ]
         ]
 
         with get_connection() as conn:
-            # Use INSERT with ON CONFLICT for upsert (DuckDB requires explicit conflict target)
+            # Use INSERT with ON CONFLICT for upsert (DuckDB requires explicit conflict target).
+            # On conflict we preserve an existing non-null instrument_id (don't
+            # overwrite with NULL from a legacy-mode writer); but we DO overwrite
+            # when the incoming value is non-null.
             conn.execute("""
                 INSERT INTO market_data
-                (symbol, exchange, interval, timestamp, open, high, low, close, volume, oi)
-                SELECT symbol, exchange, interval, timestamp, open, high, low, close, volume, oi
+                (symbol, exchange, interval, timestamp, open, high, low, close, volume, oi, instrument_id)
+                SELECT symbol, exchange, interval, timestamp, open, high, low, close, volume, oi, instrument_id
                 FROM df
                 ON CONFLICT (symbol, exchange, interval, timestamp) DO UPDATE SET
                     open = EXCLUDED.open,
@@ -570,7 +609,8 @@ def upsert_market_data(df: pd.DataFrame, symbol: str, exchange: str, interval: s
                     low = EXCLUDED.low,
                     close = EXCLUDED.close,
                     volume = EXCLUDED.volume,
-                    oi = EXCLUDED.oi
+                    oi = EXCLUDED.oi,
+                    instrument_id = COALESCE(EXCLUDED.instrument_id, market_data.instrument_id)
             """)
 
             # Update catalog - check if exists first due to multiple constraints
@@ -583,7 +623,9 @@ def upsert_market_data(df: pd.DataFrame, symbol: str, exchange: str, interval: s
             ).fetchone()
 
             if existing:
-                # Update existing record
+                # Update existing record. Preserve a previously set
+                # instrument_id (COALESCE) so a legacy-mode writer never
+                # clobbers back to NULL.
                 conn.execute(
                     """
                     UPDATE data_catalog SET
@@ -593,7 +635,8 @@ def upsert_market_data(df: pd.DataFrame, symbol: str, exchange: str, interval: s
                                          WHERE symbol = ? AND exchange = ? AND interval = ?),
                         record_count = (SELECT COUNT(*) FROM market_data
                                        WHERE symbol = ? AND exchange = ? AND interval = ?),
-                        last_download_at = current_timestamp
+                        last_download_at = current_timestamp,
+                        instrument_id = COALESCE(?, instrument_id)
                     WHERE symbol = ? AND exchange = ? AND interval = ?
                 """,
                     [
@@ -606,6 +649,7 @@ def upsert_market_data(df: pd.DataFrame, symbol: str, exchange: str, interval: s
                         symbol.upper(),
                         exchange.upper(),
                         interval,
+                        instrument_id,
                         symbol.upper(),
                         exchange.upper(),
                         interval,
@@ -622,11 +666,11 @@ def upsert_market_data(df: pd.DataFrame, symbol: str, exchange: str, interval: s
                     """
                     INSERT INTO data_catalog
                     (id, symbol, exchange, interval, first_timestamp, last_timestamp,
-                     record_count, last_download_at)
+                     record_count, last_download_at, instrument_id)
                     SELECT
                         ?, ?, ?, ?,
                         MIN(timestamp), MAX(timestamp), COUNT(*),
-                        current_timestamp
+                        current_timestamp, ?
                     FROM market_data
                     WHERE symbol = ? AND exchange = ? AND interval = ?
                 """,
@@ -635,6 +679,7 @@ def upsert_market_data(df: pd.DataFrame, symbol: str, exchange: str, interval: s
                         symbol.upper(),
                         exchange.upper(),
                         interval,
+                        instrument_id,
                         symbol.upper(),
                         exchange.upper(),
                         interval,
