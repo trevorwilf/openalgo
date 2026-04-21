@@ -1,0 +1,45 @@
+{
+  "cases": [
+    {
+      "error": "",
+      "input": {
+        "exchange": "NSE",
+        "symbol": "RELIANCE"
+      },
+      "ok": true
+    },
+    {
+      "error": "",
+      "input": {
+        "exchange": "NSE_INDEX",
+        "symbol": "NIFTY"
+      },
+      "ok": true
+    },
+    {
+      "error": "",
+      "input": {
+        "exchange": "BSE_INDEX",
+        "symbol": "SENSEX"
+      },
+      "ok": true
+    },
+    {
+      "error": "Symbol 'GHOST' not found in NSE master contract. Please check the symbol name.",
+      "input": {
+        "exchange": "NSE",
+        "symbol": "GHOST"
+      },
+      "ok": false
+    },
+    {
+      "error": "",
+      "input": {
+        "exchange": "CRYPTO",
+        "symbol": "BTCUSDT"
+      },
+      "ok": true
+    }
+  ],
+  "harness": "parity_historify_validate_symbol"
+}

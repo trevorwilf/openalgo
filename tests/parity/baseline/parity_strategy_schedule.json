@@ -1,0 +1,56 @@
+{
+  "fixed_now_ist": "2026-04-20T07:00:00+05:30",
+  "harness": "parity_strategy_schedule",
+  "schedules": [
+    {
+      "label": "nse_open_weekdays",
+      "next_fire_iso": "2026-04-20T09:15:00+05:30",
+      "next_fire_weekday": "Monday",
+      "schedule": {
+        "day_of_week": "mon,tue,wed,thu,fri",
+        "hour": 9,
+        "minute": 15
+      }
+    },
+    {
+      "label": "nse_close_weekdays",
+      "next_fire_iso": "2026-04-20T15:30:00+05:30",
+      "next_fire_weekday": "Monday",
+      "schedule": {
+        "day_of_week": "mon,tue,wed,thu,fri",
+        "hour": 15,
+        "minute": 30
+      }
+    },
+    {
+      "label": "mcx_evening_open",
+      "next_fire_iso": "2026-04-20T17:00:00+05:30",
+      "next_fire_weekday": "Monday",
+      "schedule": {
+        "day_of_week": "mon,tue,wed,thu,fri",
+        "hour": 17,
+        "minute": 0
+      }
+    },
+    {
+      "label": "mcx_close",
+      "next_fire_iso": "2026-04-20T23:55:00+05:30",
+      "next_fire_weekday": "Monday",
+      "schedule": {
+        "day_of_week": "mon,tue,wed,thu,fri",
+        "hour": 23,
+        "minute": 55
+      }
+    },
+    {
+      "label": "crypto_midnight_daily",
+      "next_fire_iso": "2026-04-21T00:00:00+05:30",
+      "next_fire_weekday": "Tuesday",
+      "schedule": {
+        "day_of_week": "mon,tue,wed,thu,fri,sat,sun",
+        "hour": 0,
+        "minute": 0
+      }
+    }
+  ]
+}

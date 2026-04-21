@@ -1,0 +1,56 @@
+{
+  "conversions": {
+    "naive_string": {
+      "ok": true,
+      "rows": [
+        {
+          "close": 101.0,
+          "datetime_iso": "2026-04-20T09:15:00+05:30",
+          "open": 100.0,
+          "timestamp": "2026-04-20 03:45:00"
+        },
+        {
+          "close": 102.0,
+          "datetime_iso": "2026-04-20T09:16:00+05:30",
+          "open": 101.0,
+          "timestamp": "2026-04-20 03:46:00"
+        }
+      ]
+    },
+    "unix_millis": {
+      "ok": true,
+      "rows": [
+        {
+          "close": 101.0,
+          "datetime_iso": "2026-04-24T06:55:00+05:30",
+          "open": 100.0,
+          "timestamp": 1776993900000.0
+        },
+        {
+          "close": 102.0,
+          "datetime_iso": "2026-04-24T06:56:00+05:30",
+          "open": 101.0,
+          "timestamp": 1776993960000.0
+        }
+      ]
+    },
+    "unix_seconds": {
+      "ok": true,
+      "rows": [
+        {
+          "close": 101.0,
+          "datetime_iso": "2026-04-24T06:55:00+05:30",
+          "open": 100.0,
+          "timestamp": 1776993900.0
+        },
+        {
+          "close": 102.0,
+          "datetime_iso": "2026-04-24T06:56:00+05:30",
+          "open": 101.0,
+          "timestamp": 1776993960.0
+        }
+      ]
+    }
+  },
+  "harness": "parity_iv_chart_timestamp"
+}

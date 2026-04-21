@@ -1,0 +1,47 @@
+{
+  "cases": [
+    {
+      "error": "Missing mandatory field(s): apikey, strategy, symbol, exchange, action, quantity",
+      "has_validated_data": false,
+      "label": "missing_all_required",
+      "ok": false
+    },
+    {
+      "error": null,
+      "has_validated_data": true,
+      "label": "valid_market_order",
+      "ok": true
+    },
+    {
+      "error": "Invalid exchange. Must be one of: NSE, NFO, CDS, BSE, BFO, BCD, MCX, NCDEX, NSE_INDEX, BSE_INDEX, CRYPTO",
+      "has_validated_data": false,
+      "label": "invalid_exchange",
+      "ok": false
+    },
+    {
+      "error": null,
+      "has_validated_data": true,
+      "label": "action_lowercase_gets_uppercased",
+      "ok": true
+    },
+    {
+      "error": "Invalid action. Must be one of: BUY, SELL (case insensitive)",
+      "has_validated_data": false,
+      "label": "invalid_action_bogus",
+      "ok": false
+    },
+    {
+      "error": "Invalid price type. Must be one of: MARKET, LIMIT, SL, SL-M",
+      "has_validated_data": false,
+      "label": "invalid_price_type",
+      "ok": false
+    },
+    {
+      "error": "Invalid product type. Must be one of: CNC, NRML, MIS",
+      "has_validated_data": false,
+      "label": "invalid_product_type",
+      "ok": false
+    }
+  ],
+  "harness": "parity_place_order_validation"
+}
