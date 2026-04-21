@@ -23,6 +23,7 @@ Public surface re-exported here for ergonomic imports:
 """
 
 from domain.account import NormalizedBalance, NormalizedHolding, NormalizedPosition
+from domain.capabilities import BrokerCapabilities, infer_capabilities_from_legacy
 from domain.currency import Currency, CurrencyAmount
 from domain.enums import (
     AssetClass,
@@ -68,6 +69,9 @@ __all__ = [
     "Session",
     "SettlementType",
     "TimeInForce",
+    # capabilities
+    "BrokerCapabilities",
+    "infer_capabilities_from_legacy",
     # currency
     "Currency",
     "CurrencyAmount",
