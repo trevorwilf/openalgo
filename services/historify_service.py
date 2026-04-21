@@ -41,9 +41,61 @@ from database.historify_db import bulk_delete_market_data as db_bulk_delete_mark
 from database.token_db_enhanced import get_symbol_info
 from services.history_service import get_history
 from services.intervals_service import get_intervals
+from utils.broker_context import current_broker_code
+from utils.feature_flags import is_enabled
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _maybe_resolve_instrument_id(
+    symbol: str, exchange: str, broker_code: str | None = None
+) -> str | None:
+    """Phase 3b: resolve an instrument_id for a (symbol, exchange) pair
+    when ``HISTORIFY_INSTRUMENT_ID_V2`` is enabled.
+
+    Returns the UUID as a string (format accepted by the DuckDB VARCHAR
+    column), or ``None`` if the flag is off, no broker context is
+    available, or the resolver misses. A miss is logged at warning but
+    never aborts the insert — the legacy (symbol, exchange) key remains
+    authoritative.
+    """
+    if not is_enabled("HISTORIFY_INSTRUMENT_ID_V2"):
+        return None
+    broker = broker_code or current_broker_code()
+    if not broker:
+        logger.debug(
+            "HISTORIFY_INSTRUMENT_ID_V2=1 but no broker_code available "
+            "for %s:%s; leaving instrument_id NULL",
+            symbol, exchange,
+        )
+        return None
+    try:
+        from services.instrument_resolver import (
+            ResolverAmbiguous,
+            ResolverMiss,
+            get_resolver,
+        )
+    except Exception as e:
+        logger.debug("resolver unavailable (import failed): %s", e)
+        return None
+    try:
+        resolved = get_resolver().resolve_for_quote(
+            symbol=symbol, exchange=exchange, broker_code=broker
+        )
+        return str(resolved.instrument_id)
+    except (ResolverMiss, ResolverAmbiguous) as e:
+        logger.warning(
+            "historify resolver miss symbol=%s exchange=%s broker=%s: %s",
+            symbol, exchange, broker, e,
+        )
+        return None
+    except Exception as e:
+        logger.exception(
+            "historify resolver exception symbol=%s exchange=%s: %s",
+            symbol, exchange, e,
+        )
+        return None
 
 
 def validate_symbol(symbol: str, exchange: str) -> tuple[bool, str]:
@@ -129,7 +181,10 @@ def add_to_watchlist(
         if not is_valid:
             return False, {"status": "error", "message": error_msg}, 400
 
-        success, msg = db_add_to_watchlist(symbol, exchange, display_name)
+        instrument_id = _maybe_resolve_instrument_id(symbol, exchange)
+        success, msg = db_add_to_watchlist(
+            symbol, exchange, display_name, instrument_id=instrument_id
+        )
 
         if success:
             return True, {"status": "success", "message": msg}, 200
@@ -254,6 +309,15 @@ def bulk_add_to_watchlist(symbols: list[dict[str, str]]) -> tuple[bool, dict[str
 
             validated_symbols.append(item)
 
+        # Phase 3b dual-write: enrich each validated symbol with its
+        # resolved instrument_id when HISTORIFY_INSTRUMENT_ID_V2 is on.
+        # Unresolvable rows are left with instrument_id=None (NULL).
+        broker = current_broker_code()
+        for item in validated_symbols:
+            item["instrument_id"] = _maybe_resolve_instrument_id(
+                item["symbol"], item["exchange"], broker_code=broker
+            )
+
         # Use bulk insert for validated symbols
         added, skipped, failed = db_bulk_add_to_watchlist(validated_symbols)
 
@@ -351,8 +415,12 @@ def download_data(
         elif "timestamp" not in df.columns:
             return False, {"status": "error", "message": "No timestamp column in data"}, 500
 
-        # Store in DuckDB
-        records = upsert_market_data(df, symbol, exchange, interval)
+        # Store in DuckDB. Resolve an instrument_id for dual-write when
+        # HISTORIFY_INSTRUMENT_ID_V2 is enabled; None leaves the column NULL.
+        instrument_id = _maybe_resolve_instrument_id(symbol, exchange)
+        records = upsert_market_data(
+            df, symbol, exchange, interval, instrument_id=instrument_id
+        )
 
         logger.info(f"Downloaded and stored {records} records for {symbol}:{exchange}:{interval}")
 
