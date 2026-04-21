@@ -7,10 +7,59 @@ import pandas as pd
 from database.auth_db import get_auth_token_broker
 from database.token_db import get_token
 from utils.constants import VALID_EXCHANGES
+from utils.feature_flags import is_enabled
 from utils.logging import get_logger
 
 # Initialize logger
 logger = get_logger(__name__)
+
+
+def _run_resolver_for_observability(symbol: str, exchange: str, broker: str) -> None:
+    """Phase 3a: query the new instrument resolver alongside the legacy
+    path for observability. Does NOT change the broker API call — that
+    remains the legacy `get_token`-driven flow. Gated by ``RESOLVER_V2``.
+
+    Any exception is caught and logged. This function never changes
+    control flow for the caller, so the `/api/v1` response stays
+    byte-identical whether the flag is on or off.
+    """
+    if not is_enabled("RESOLVER_V2"):
+        return
+    try:
+        from services.instrument_resolver import (
+            ResolverAmbiguous,
+            ResolverMiss,
+            get_resolver,
+        )
+    except Exception as e:
+        logger.debug("resolver unavailable (import failed): %s", e)
+        return
+
+    try:
+        resolved = get_resolver().resolve_for_quote(
+            symbol=symbol, exchange=exchange, broker_code=broker
+        )
+        logger.debug(
+            "history resolver_hit symbol=%s exchange=%s broker=%s "
+            "legacy_fallback=%s instrument_id=%s",
+            symbol, exchange, broker,
+            resolved.legacy_fallback, resolved.instrument_id,
+        )
+    except ResolverMiss as e:
+        logger.warning(
+            "history resolver_miss_falling_back symbol=%s exchange=%s broker=%s: %s",
+            symbol, exchange, broker, e,
+        )
+    except ResolverAmbiguous as e:
+        logger.warning(
+            "history resolver_ambiguous_falling_back symbol=%s exchange=%s broker=%s: %s",
+            symbol, exchange, broker, e,
+        )
+    except Exception as e:
+        logger.exception(
+            "history resolver_exception symbol=%s exchange=%s broker=%s: %s",
+            symbol, exchange, broker, e,
+        )
 
 # Rate limiter: max 3 broker history API requests per second
 # Uses minimum interval between calls to prevent burst requests
@@ -107,6 +156,9 @@ def get_history_with_auth(
     is_valid, error_msg = validate_symbol_exchange(symbol, exchange)
     if not is_valid:
         return False, {"status": "error", "message": error_msg}, 400
+
+    # Phase 3a: observability-only resolver probe. No control-flow effect.
+    _run_resolver_for_observability(symbol, exchange, broker)
 
     broker_module = import_broker_module(broker)
     if broker_module is None:

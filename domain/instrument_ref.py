@@ -56,6 +56,10 @@ class InstrumentRef(BaseModel):
         has_external = self.identifier_type is not None and self.identifier_value is not None
 
         active = sum((has_id, has_venue_symbol, has_external))
+
+        # Multiple full shapes → error. A bare venue_code alongside an
+        # external ref is allowed (narrowing context), but venue+symbol
+        # both set alongside another shape is not.
         if active > 1:
             raise ValueError(
                 "InstrumentRef accepts exactly one of: "
@@ -63,16 +67,19 @@ class InstrumentRef(BaseModel):
                 "(identifier_type + identifier_value) — got multiple"
             )
 
-        # Half-set pairs do not count as "active"; surface them with a
-        # specific message before the generic "requires exactly one".
-        if self.venue_code is not None and self.canonical_symbol is None:
-            raise ValueError("venue_code set without canonical_symbol")
-        if self.canonical_symbol is not None and self.venue_code is None:
-            raise ValueError("canonical_symbol set without venue_code")
+        # Identifier half-set is always an error (the pair is atomic).
         if self.identifier_type is not None and self.identifier_value is None:
             raise ValueError("identifier_type set without identifier_value")
         if self.identifier_value is not None and self.identifier_type is None:
             raise ValueError("identifier_value set without identifier_type")
+
+        # venue/symbol half-set is only an error when NOT attached to an
+        # external ref as optional narrowing context.
+        if not has_external:
+            if self.venue_code is not None and self.canonical_symbol is None:
+                raise ValueError("venue_code set without canonical_symbol")
+            if self.canonical_symbol is not None and self.venue_code is None:
+                raise ValueError("canonical_symbol set without venue_code")
 
         if active == 0:
             raise ValueError(
