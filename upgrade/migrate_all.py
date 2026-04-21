@@ -64,6 +64,9 @@ MIGRATIONS = [
     # Phase 3b — additive instrument_id column on historify tables.
     # Nullable; no existing PK or unique constraint altered. Idempotent.
     ("migrate_historify_instrument_id.py", "Phase 3b — Historify instrument_id"),
+    # Phase 4 — venue_schedule_templates + venue_calendar_exceptions.
+    # Additive; market_calendar_db tables untouched. Idempotent.
+    ("migrate_venue_schedule.py", "Phase 4 — Venue Schedule Tables"),
 ]
 
 

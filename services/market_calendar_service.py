@@ -13,9 +13,33 @@ from database.market_calendar_db import (
     get_market_timings_for_date,
     is_market_holiday,
 )
+from utils.feature_flags import is_enabled
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _resolve_timezone_label(default: str = "Asia/Kolkata") -> str:
+    """Phase 4: when VENUE_SESSION_V2 is enabled, resolve the response
+    `timezone` field via the venue record instead of the hardcoded
+    default. For Indian venues the venue-sourced value is still
+    "Asia/Kolkata", so existing /api/v1 clients are unaffected.
+
+    The marketcalendar endpoint is venue-agnostic (no venue arg), so
+    we return the default venue's timezone. NSE is the canonical
+    default for this installation.
+    """
+    if not is_enabled("VENUE_SESSION_V2"):
+        return default
+    try:
+        from database.instruments_repo import venues_get
+
+        venue = venues_get("NSE")
+        if venue is not None and venue.timezone_name:
+            return venue.timezone_name
+    except Exception as e:
+        logger.debug("VENUE_SESSION_V2 timezone lookup failed, using default: %s", e)
+    return default
 
 
 def get_holidays(year: int | None = None) -> tuple[bool, dict[str, Any], int]:
@@ -41,9 +65,10 @@ def get_holidays(year: int | None = None) -> tuple[bool, dict[str, Any], int]:
 
         holidays = get_holidays_by_year(year)
 
+        tz_label = _resolve_timezone_label()
         return (
             True,
-            {"status": "success", "year": year, "timezone": "Asia/Kolkata", "data": holidays},
+            {"status": "success", "year": year, "timezone": tz_label, "data": holidays},
             200,
         )
 
