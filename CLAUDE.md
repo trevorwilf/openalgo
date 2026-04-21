@@ -9,6 +9,32 @@ OpenAlgo is a production-ready algorithmic trading platform built with Flask (ba
 **Repository**: https://github.com/marketcalls/openalgo
 **Documentation**: https://docs.openalgo.in
 
+## Market-agnostic refactor (in progress)
+
+A multi-phase refactor is underway to make the *internal* domain model
+market-family-agnostic while the deployment model stays single-broker.
+The ADRs are the source of truth:
+
+- [ADR 0001 — Track A scope](docs/adr/0001-track-a-scope.md): market-family-agnostic core, one broker per instance
+- [ADR 0002 — no specific target broker](docs/adr/0002-no-specific-target-broker.md): design for Indian, US, EU, crypto without naming an SDK
+- [ADR 0003 — `/api/v1` frozen, `/api/v2` later](docs/adr/0003-api-v1-frozen-v2-later.md)
+- [ADR 0004 — analyzer stays India-limited](docs/adr/0004-analyzer-india-only.md)
+
+**Invariants — any new code must respect these:**
+
+1. `symtoken` is read-only from Phase 2 onward. Never add columns, never change schema, never change broker modules' use of it. New code reads from the new instrument tables introduced in Phase 2a.
+2. No destructive migrations. Every schema change is `ADD`, never `DROP`. Columns and tables are retired only in Phase 9 after parity passes.
+3. `/api/v1` response shapes and field names are frozen. Internal refactors must not change a single byte of `/api/v1` output for current Indian or Delta Exchange flows.
+4. Legacy Indian behavior must remain bit-identical through Phase 8. Parity fixtures in `tests/parity/baseline/` are the arbiter — `python tests/parity/run_parity.py` must pass at every phase boundary.
+5. **No new code may import `VALID_EXCHANGES`, `VALID_PRODUCT_TYPES`, or `VALID_PRICE_TYPES` from `utils/constants.py`.** These are legacy. New code uses the domain enums from Phase 1a.
+6. **No new code may reference `Asia/Kolkata` or `IST` as a literal.** Timezones come from the venue record (Phase 4).
+7. Feature flags gate every new read/write path. Default off until Phase 9 canary.
+8. US and European support is a *design target*, not a *delivery target*. The model must not hardcode Indian assumptions, but do not add US/EU-specific code (e.g., FINRA, MiFID) without explicit instruction.
+
+**Never extend** `VALID_EXCHANGES`, `VALID_PRODUCT_TYPES`, or the `SymToken` schema. If a change seems to require one of these, stop and re-read the ADRs.
+
+Per-phase dependency inventory lives in [`docs/refactor/inventory/`](docs/refactor/inventory/) — grep there (not across the whole codebase) to locate the legacy assumption you are about to touch.
+
 ## Security and Deployment Model
 
 - **Single user per deployment** — no multi-user, no privilege escalation. One user, one broker session per instance.

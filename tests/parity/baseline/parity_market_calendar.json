@@ -1,0 +1,63 @@
+{
+  "harness": "parity_market_calendar",
+  "supported_exchanges": [
+    "NSE",
+    "BSE",
+    "NFO",
+    "BFO",
+    "MCX",
+    "BCD",
+    "CDS",
+    "CRYPTO"
+  ],
+  "timings": {
+    "BCD": {
+      "end_hhmm": "17:00",
+      "end_offset_ms": 61200000,
+      "start_hhmm": "09:00",
+      "start_offset_ms": 32400000
+    },
+    "BFO": {
+      "end_hhmm": "15:30",
+      "end_offset_ms": 55800000,
+      "start_hhmm": "09:15",
+      "start_offset_ms": 33300000
+    },
+    "BSE": {
+      "end_hhmm": "15:30",
+      "end_offset_ms": 55800000,
+      "start_hhmm": "09:15",
+      "start_offset_ms": 33300000
+    },
+    "CDS": {
+      "end_hhmm": "17:00",
+      "end_offset_ms": 61200000,
+      "start_hhmm": "09:00",
+      "start_offset_ms": 32400000
+    },
+    "CRYPTO": {
+      "end_hhmm": "23:59",
+      "end_offset_ms": 86399000,
+      "start_hhmm": "00:00",
+      "start_offset_ms": 0
+    },
+    "MCX": {
+      "end_hhmm": "23:55",
+      "end_offset_ms": 86100000,
+      "start_hhmm": "09:00",
+      "start_offset_ms": 32400000
+    },
+    "NFO": {
+      "end_hhmm": "15:30",
+      "end_offset_ms": 55800000,
+      "start_hhmm": "09:15",
+      "start_offset_ms": 33300000
+    },
+    "NSE": {
+      "end_hhmm": "15:30",
+      "end_offset_ms": 55800000,
+      "start_hhmm": "09:15",
+      "start_offset_ms": 33300000
+    }
+  }
+}

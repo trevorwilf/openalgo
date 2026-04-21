@@ -1,0 +1,53 @@
+{
+  "cases": [
+    {
+      "error": null,
+      "input": {
+        "exchange": "NSE",
+        "symbol": "RELIANCE"
+      },
+      "ok": true
+    },
+    {
+      "error": "Symbol 'reliance' not found for exchange 'nse'. Please verify the symbol name and ensure master contracts are downloaded.",
+      "input": {
+        "exchange": "nse",
+        "symbol": "reliance"
+      },
+      "ok": false
+    },
+    {
+      "error": "Invalid exchange 'XNAS'. Must be one of: NSE, NFO, CDS, BSE, BFO, BCD, MCX, NCDEX, NSE_INDEX, BSE_INDEX, CRYPTO",
+      "input": {
+        "exchange": "XNAS",
+        "symbol": "RELIANCE"
+      },
+      "ok": false
+    },
+    {
+      "error": "Symbol 'NONEXISTENT' not found for exchange 'NSE'. Please verify the symbol name and ensure master contracts are downloaded.",
+      "input": {
+        "exchange": "NSE",
+        "symbol": "NONEXISTENT"
+      },
+      "ok": false
+    },
+    {
+      "error": null,
+      "input": {
+        "exchange": "CRYPTO",
+        "symbol": "BTCUSDT"
+      },
+      "ok": true
+    },
+    {
+      "error": null,
+      "input": {
+        "exchange": "NFO",
+        "symbol": "NIFTY28MAR2420800CE"
+      },
+      "ok": true
+    }
+  ],
+  "harness": "parity_quote"
+}

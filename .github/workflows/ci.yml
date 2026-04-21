@@ -32,6 +32,21 @@ jobs:
         run: uv run ruff format --check .
         continue-on-error: true  # Pre-existing formatting in broker modules
 
+  # Phase 0 parity baseline — legacy Indian behavior must stay bit-identical
+  # through the market-agnostic refactor. Runs the harness set in
+  # tests/parity/ and fails if any fixture drifts. See docs/adr/0003.
+  parity-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --dev
+      - name: Run parity harness
+        run: uv run python tests/parity/run_parity.py
+
   # Backend tests (CI-safe subset - no broker credentials needed)
   backend-test:
     runs-on: ubuntu-latest
