@@ -77,6 +77,9 @@ PHASE_ALLOWED: set[Path] = {
     REPO_ROOT / "services" / "instrument_sync_adapters" / "delta_adapter.py",
     # Phase 3a — instrument resolver
     REPO_ROOT / "services" / "instrument_resolver.py",
+    # Phase 4 — venue session service (needs venues_get + session_scope)
+    REPO_ROOT / "services" / "venue_session_service.py",
+    REPO_ROOT / "services" / "market_calendar_service.py",
 }
 
 
