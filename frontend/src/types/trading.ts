@@ -7,8 +7,8 @@ export interface Position {
   ltp: number
   pnl: number
   pnlpercent: number
-  lot_size?: number            // contract_value multiplier (e.g. 0.01 for ETHUSD.P)
-  today_realized_pnl?: number  // Sandbox: today's realized P&L from closed partial trades
+  lot_size?: number // contract_value multiplier (e.g. 0.01 for ETHUSD.P)
+  today_realized_pnl?: number // Sandbox: today's realized P&L from closed partial trades
 }
 
 export interface Order {
@@ -93,3 +93,21 @@ export interface ApiResponse<T> {
   message?: string
   data?: T
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5 — platform-level order metadata types.
+// These do NOT replace the legacy Indian-only unions above; existing
+// components keep rendering against those. New components that need to
+// honor richer broker capabilities (e.g. a non-Indian broker adapter)
+// should render options from these platform types and translate to the
+// legacy wire format at submit time via `platformOrderTypeToLegacy`.
+// ---------------------------------------------------------------------------
+
+export type {
+  PlatformOrderType,
+  PlatformQuantityUnit,
+  PlatformSession,
+  PlatformTimeInForce,
+} from '@/types/capabilities'
+
+export { isOrderTypeSupported, platformOrderTypeToLegacy } from '@/types/capabilities'

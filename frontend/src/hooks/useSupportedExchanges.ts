@@ -22,27 +22,41 @@ const INDEX_EXCHANGES = new Set(['NSE_INDEX', 'BSE_INDEX', 'MCX_INDEX', 'CDS_IND
 /** F&O exchange codes (includes MCX/CDS which also have options) */
 const FNO_CODES = new Set(['NFO', 'BFO', 'MCX', 'CDS', 'CRYPTO'])
 
-/** Fallback exchanges when capabilities haven't loaded yet (backward compatible) */
-const FALLBACK_EXCHANGES = ['NSE', 'BSE', 'NFO', 'BFO', 'CDS', 'MCX', 'CRYPTO']
-
 /**
- * Central hook for broker-aware exchange filtering.
- *
- * All pages should use this instead of hardcoding exchange arrays.
- * Reads from brokerStore (populated at login via /api/broker/capabilities).
- *
- * Returns categorized exchange lists so each page picks what it needs:
- * - Tools pages → fnoExchanges, defaultFnoExchange, defaultUnderlyings
- * - TradingView/GoCharting → tradingExchanges, defaultExchange
- * - Historify → allExchanges
- * - Search → tradingExchanges
+ * Last-resort default used ONLY when explicitly opted in via
+ * `allowLegacyFallback`. Phase 5: callers should treat
+ * `capabilities === null` as "capabilities unavailable" and either show
+ * a loading state or an error, not render every exchange. This constant
+ * remains for the login screen, which needs *some* list before the
+ * user's broker is selected.
  */
-export function useSupportedExchanges() {
+const LEGACY_FALLBACK_EXCHANGES = ['NSE', 'BSE', 'NFO', 'BFO', 'CDS', 'MCX', 'CRYPTO']
+
+export interface UseSupportedExchangesOptions {
+  /**
+   * When true, fall back to the hardcoded Indian+CRYPTO exchange list
+   * when capabilities are unavailable. Defaults to **true** for this
+   * phase to preserve every existing caller's behavior; new callers
+   * should pass `false` and render an unavailable state instead.
+   *
+   * A future phase will flip the default to false. Callers that
+   * explicitly opt in today will not break when that happens.
+   */
+  allowLegacyFallback?: boolean
+}
+
+export function useSupportedExchanges(opts: UseSupportedExchangesOptions = {}) {
+  const allowLegacyFallback = opts.allowLegacyFallback ?? true
   const capabilities = useBrokerStore((s) => s.capabilities)
+  const isError = useBrokerStore((s) => s.isError)
 
   return useMemo(() => {
-    // Use fallback exchanges when capabilities haven't loaded yet (backward compatible)
-    const supported = capabilities?.supported_exchanges ?? FALLBACK_EXCHANGES
+    // Phase 5: prefer the rich `supported_venue_codes` when present, fall
+    // back to the legacy alias `supported_exchanges`. Without capabilities
+    // we either return the legacy fallback (opt-in) or an empty list.
+    const fromCap = capabilities?.supported_venue_codes ?? capabilities?.supported_exchanges
+    const usingFallback = fromCap === undefined
+    const supported = fromCap ?? (allowLegacyFallback ? LEGACY_FALLBACK_EXCHANGES : [])
     const isCrypto = capabilities?.broker_type === 'crypto'
 
     // All exchanges from plugin.json
@@ -69,8 +83,7 @@ export function useSupportedExchanges() {
     // Defaults
     const defaultExchange = tradingExchanges[0]?.value ?? (isCrypto ? 'CRYPTO' : 'NSE')
     const defaultFnoExchange = fnoExchanges[0]?.value ?? (isCrypto ? 'CRYPTO' : 'NFO')
-    const defaultToolsFnoExchange =
-      toolsFnoExchanges[0]?.value ?? (isCrypto ? 'CRYPTO' : 'NFO')
+    const defaultToolsFnoExchange = toolsFnoExchanges[0]?.value ?? (isCrypto ? 'CRYPTO' : 'NFO')
 
     // Underlyings filtered to only supported FNO exchanges
     const defaultUnderlyings: Record<string, string[]> = {}
@@ -102,6 +115,11 @@ export function useSupportedExchanges() {
       defaultUnderlyings,
       /** Quick check: is this a crypto broker? */
       isCrypto,
+      /** Phase 5: true when capabilities are unavailable (fetch failed). */
+      isError,
+      /** Phase 5: true when the returned lists are the legacy fallback,
+       * not capability-derived. */
+      isFallback: usingFallback,
     }
-  }, [capabilities])
+  }, [capabilities, isError, allowLegacyFallback])
 }
