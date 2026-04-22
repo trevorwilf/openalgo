@@ -80,6 +80,10 @@ PHASE_ALLOWED: set[Path] = {
     # Phase 4 — venue session service (needs venues_get + session_scope)
     REPO_ROOT / "services" / "venue_session_service.py",
     REPO_ROOT / "services" / "market_calendar_service.py",
+    # Phase 6 — /api/v2 skeleton (needs instruments_repo for lookup)
+    REPO_ROOT / "restx_api" / "v2" / "instruments.py",
+    REPO_ROOT / "restx_api" / "v2" / "orders.py",
+    REPO_ROOT / "restx_api" / "v2" / "quotes.py",
 }
 
 

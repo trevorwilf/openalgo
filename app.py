@@ -223,6 +223,18 @@ def create_app():
     # Exempt API endpoints from CSRF protection (they use API key authentication)
     csrf.exempt(api_v1_bp)
 
+    # Phase 6: /api/v2 skeleton — registered only when API_V2 flag is on.
+    try:
+        from restx_api.v2 import register_api_v2
+
+        if register_api_v2(app):
+            # Same CSRF exemption pattern as /api/v1 — API-key auth.
+            from restx_api.v2 import api_v2_bp
+            if api_v2_bp is not None:
+                csrf.exempt(api_v2_bp)
+    except Exception as e:
+        logger.exception(f"failed to register /api/v2: {e}")
+
     # Initialize security middleware before traffic logging
     init_security_middleware(app)
 
