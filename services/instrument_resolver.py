@@ -155,11 +155,47 @@ class InstrumentResolver:
         self, ref: InstrumentRef, broker_code: Optional[str]
     ) -> ResolvedInstrument:
         if ref.kind == "id":
-            return self._resolve_by_id(ref, broker_code)
+            result = self._resolve_by_id(ref, broker_code)
+            self._log_resolved("by_id", ref, broker_code, result)
+            return result
         if ref.kind == "venue_symbol":
-            return self._resolve_by_venue_symbol(ref, broker_code)
+            result = self._resolve_by_venue_symbol(ref, broker_code)
+            path = "legacy_fallback" if result.legacy_fallback else "venue_symbol"
+            self._log_resolved(path, ref, broker_code, result)
+            return result
         # external
-        return self._resolve_by_external(ref, broker_code)
+        result = self._resolve_by_external(ref, broker_code)
+        self._log_resolved("external", ref, broker_code, result)
+        return result
+
+    def _log_resolved(
+        self,
+        resolver_path: str,
+        ref: InstrumentRef,
+        broker_code: Optional[str],
+        result: "ResolvedInstrument",
+    ) -> None:
+        """Structured INFO line naming which branch of the resolver fired.
+
+        Fields: resolver_path, broker_code, venue_code, canonical_symbol,
+        instrument_id, legacy_fallback. Consumers downstream (the canary
+        runbook's miss-ratio calculation) read resolver_path to tell
+        apart cache-warm hits from legacy-fallback hits.
+        """
+        try:
+            self._log.debug(
+                "resolver resolved resolver_path=%s broker_code=%s "
+                "venue_code=%s canonical_symbol=%s instrument_id=%s "
+                "legacy_fallback=%s",
+                resolver_path,
+                broker_code or "",
+                result.venue_code,
+                result.canonical_symbol,
+                result.instrument_id,
+                result.legacy_fallback,
+            )
+        except Exception:  # logging must never raise
+            pass
 
     # ---- id ------------------------------------------------------------
 

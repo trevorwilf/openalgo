@@ -156,9 +156,15 @@ class HistorifyScheduler:
                 time_str = schedule.get("time_of_day", "09:15")
                 try:
                     hour, minute = map(int, time_str.split(":"))
-                    # Use IST timezone explicitly for Indian markets
-                    trigger = CronTrigger(hour=hour, minute=minute, timezone="Asia/Kolkata")
-                    logger.debug(f"Creating daily trigger at {time_str} IST")
+                    # Resolve timezone via VENUE_SESSION_V2 when enabled —
+                    # byte-identical to "Asia/Kolkata" for Indian venues
+                    # (and for the flag-off default).
+                    from services.venue_session_service import venue_tz_or_default
+
+                    venue_code = schedule.get("venue_code") or schedule.get("exchange")
+                    tz_name = venue_tz_or_default(venue_code)
+                    trigger = CronTrigger(hour=hour, minute=minute, timezone=tz_name)
+                    logger.debug(f"Creating daily trigger at {time_str} {tz_name}")
                 except ValueError as e:
                     logger.error(f"Invalid time format: {time_str} - {e}")
                     return None
