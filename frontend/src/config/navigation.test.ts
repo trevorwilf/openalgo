@@ -1,8 +1,11 @@
+import { LayoutDashboard } from 'lucide-react'
 import { describe, expect, it } from 'vitest'
 import {
   bottomNavItems,
+  filterNavByCapabilities,
   isActiveRoute,
   mobileSheetItems,
+  type NavItem,
   navItems,
   profileMenuItems,
 } from './navigation'
@@ -66,6 +69,59 @@ describe('Navigation Config', () => {
       expect(labels).toContain('Profile')
       expect(labels).toContain('API Key')
       expect(labels).toContain('Holdings')
+    })
+  })
+
+  describe('filterNavByCapabilities', () => {
+    const item = (overrides: Partial<NavItem> = {}): NavItem => ({
+      href: '/test',
+      label: 'Test',
+      icon: LayoutDashboard,
+      ...overrides,
+    })
+    const plain = item()
+    const gated = item({
+      href: '/sandbox',
+      label: 'Sandbox',
+      capability: 'supports_analyzer',
+    })
+
+    it('keeps items without a capability field', () => {
+      const out = filterNavByCapabilities([plain, gated], { supports_analyzer: true })
+      expect(out.map((i) => i.href)).toEqual(['/test', '/sandbox'])
+    })
+
+    it('drops gated items when the capability is false', () => {
+      const out = filterNavByCapabilities([plain, gated], { supports_analyzer: false })
+      expect(out.map((i) => i.href)).toEqual(['/test'])
+    })
+
+    it('fails closed when capabilities are null or undefined', () => {
+      expect(filterNavByCapabilities([plain, gated], null).map((i) => i.href)).toEqual(['/test'])
+      expect(filterNavByCapabilities([plain, gated], undefined).map((i) => i.href)).toEqual([
+        '/test',
+      ])
+    })
+
+    it('falls through to features dict for custom flags', () => {
+      const customGated = item({ capability: 'custom_flag' })
+      expect(
+        filterNavByCapabilities([customGated], { features: { custom_flag: true } })
+      ).toHaveLength(1)
+      expect(filterNavByCapabilities([customGated], { features: { custom_flag: false } })).toEqual(
+        []
+      )
+    })
+
+    it('hides items when the capability key exists on neither first-class nor features', () => {
+      const customGated = item({ capability: 'unknown_capability' })
+      expect(filterNavByCapabilities([customGated], { features: {} })).toEqual([])
+    })
+
+    it('the Sandbox nav item carries supports_analyzer as its gate', () => {
+      const sandbox = profileMenuItems.find((i) => i.href === '/sandbox')
+      expect(sandbox).toBeDefined()
+      expect(sandbox?.capability).toBe('supports_analyzer')
     })
   })
 
