@@ -92,12 +92,27 @@ def _get_quote_exchange(base_symbol, underlying_exchange):
     return underlying_exchange.upper()
 
 
-def _convert_timestamp_to_ist(df):
+def _convert_timestamp_to_ist(df, venue_code: str | None = None):
     """
-    Convert timestamp column in a history DataFrame to IST datetime index.
-    Returns the dataframe with 'datetime' index in IST, or None on failure.
+    Convert timestamp column in a history DataFrame to a venue-local
+    datetime index. Name is historical — the function now supports
+    non-IST venues too.
+
+    `venue_code` is optional. When the ``VENUE_SESSION_V2`` flag is on
+    AND a ``venue_code`` is supplied, the venue's configured
+    ``timezone_name`` is used (e.g. ``America/New_York`` for a US
+    venue). Otherwise — flag off, no venue_code, or venue missing —
+    the legacy Indian ``Asia/Kolkata`` default is used. This preserves
+    byte-identical behavior for every existing caller that does not
+    pass ``venue_code``.
+
+    Returns the dataframe with 'datetime' index in the resolved
+    timezone, or None on failure.
     """
-    ist = pytz.timezone("Asia/Kolkata")
+    from services.venue_session_service import venue_tz_or_default
+
+    tz_name = venue_tz_or_default(venue_code)
+    ist = pytz.timezone(tz_name)
 
     try:
         if "timestamp" not in df.columns:
@@ -283,8 +298,10 @@ def get_iv_chart_data(
         if df_underlying.empty:
             return False, {"status": "error", "message": "No underlying history data available for today"}, 404
 
-        # Convert timestamps to IST
-        df_underlying = _convert_timestamp_to_ist(df_underlying)
+        # Convert timestamps to the venue's local timezone (see Phase 4 +
+        # post-Phase-9 follow-up). When VENUE_SESSION_V2 is off the
+        # value is Asia/Kolkata — byte-identical with prior behavior.
+        df_underlying = _convert_timestamp_to_ist(df_underlying, venue_code=exchange)
         if df_underlying is None:
             return False, {"status": "error", "message": "Failed to parse underlying timestamps"}, 500
 
@@ -292,7 +309,7 @@ def get_iv_chart_data(
 
         # Step 8: Calculate IV for CE
         if not df_ce.empty:
-            df_ce = _convert_timestamp_to_ist(df_ce)
+            df_ce = _convert_timestamp_to_ist(df_ce, venue_code=exchange)
             if df_ce is not None:
                 ce_iv_data = _calculate_iv_series(
                     df_option=df_ce,
@@ -311,7 +328,7 @@ def get_iv_chart_data(
 
         # Step 9: Calculate IV for PE
         if not df_pe.empty:
-            df_pe = _convert_timestamp_to_ist(df_pe)
+            df_pe = _convert_timestamp_to_ist(df_pe, venue_code=exchange)
             if df_pe is not None:
                 pe_iv_data = _calculate_iv_series(
                     df_option=df_pe,

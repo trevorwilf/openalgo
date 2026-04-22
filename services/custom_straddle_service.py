@@ -110,7 +110,7 @@ def get_custom_straddle_simulation(
         if df_underlying.empty:
             return False, {"status": "error", "message": "No underlying history data"}, 404
 
-        df_underlying = _convert_timestamp_to_ist(df_underlying)
+        df_underlying = _convert_timestamp_to_ist(df_underlying, venue_code=quote_exchange)
         if df_underlying is None:
             return False, {"status": "error", "message": "Failed to parse timestamps"}, 500
 
@@ -146,7 +146,7 @@ def get_custom_straddle_simulation(
             if success_ce:
                 df_ce = pd.DataFrame(resp_ce.get("data", []))
                 if not df_ce.empty:
-                    df_ce = _convert_timestamp_to_ist(df_ce)
+                    df_ce = _convert_timestamp_to_ist(df_ce, venue_code=options_exchange)
                     if df_ce is not None:
                         for ts, row in df_ce.iterrows():
                             ce_lookup[ts] = float(row["close"])
@@ -159,7 +159,7 @@ def get_custom_straddle_simulation(
             if success_pe:
                 df_pe = pd.DataFrame(resp_pe.get("data", []))
                 if not df_pe.empty:
-                    df_pe = _convert_timestamp_to_ist(df_pe)
+                    df_pe = _convert_timestamp_to_ist(df_pe, venue_code=options_exchange)
                     if df_pe is not None:
                         for ts, row in df_pe.iterrows():
                             pe_lookup[ts] = float(row["close"])

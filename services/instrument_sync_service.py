@@ -210,6 +210,7 @@ class InstrumentSyncRunner:
         new_count = 0
         updated_count = 0
         seen_venues: set[str] = set()
+        seen_market_families: set[str] = set()
         external_symbols_seen: list[str] = []
 
         # Buffer broker-map rows per venue so we can upsert in chunks.
@@ -222,6 +223,8 @@ class InstrumentSyncRunner:
                 if normalized is None:
                     continue
                 chunk.append(normalized)
+                if normalized.market_family:
+                    seen_market_families.add(normalized.market_family)
                 if len(chunk) >= _CHUNK_SIZE:
                     new, updated = self._process_chunk(
                         adapter, chunk, sync_row.sync_version,
@@ -266,10 +269,11 @@ class InstrumentSyncRunner:
             duration_ms = int((self._clock.monotonic() - start) * 1000)
 
             self._log.info(
-                "instrument sync success broker=%s sync_id=%s sync_version=%d "
-                "instrument_count=%d new=%d updated=%d retired=%d duration_ms=%d "
-                "status=success",
+                "instrument sync success broker=%s market_family=%s "
+                "sync_id=%s sync_version=%d instrument_count=%d new=%d "
+                "updated=%d retired=%d duration_ms=%d status=success",
                 adapter.broker_code,
+                ",".join(sorted(seen_market_families)) or "unknown",
                 sync_row.sync_id,
                 sync_row.sync_version,
                 instrument_count,
@@ -294,9 +298,10 @@ class InstrumentSyncRunner:
             duration_ms = int((self._clock.monotonic() - start) * 1000)
             sync_run_fail(sync_row.sync_id, error=str(exc))
             self._log.exception(
-                "instrument sync FAIL broker=%s sync_id=%s sync_version=%d "
-                "duration_ms=%d status=failed",
+                "instrument sync FAIL broker=%s market_family=%s "
+                "sync_id=%s sync_version=%d duration_ms=%d status=failed",
                 adapter.broker_code,
+                ",".join(sorted(seen_market_families)) or "unknown",
                 sync_row.sync_id,
                 sync_row.sync_version,
                 duration_ms,

@@ -58,12 +58,19 @@ def _get_quote_exchange(base_symbol, underlying_exchange):
     return underlying_exchange.upper()
 
 
-def _convert_timestamp_to_ist(df):
+def _convert_timestamp_to_ist(df, venue_code: str | None = None):
     """
-    Convert timestamp column in a history DataFrame to IST datetime index.
-    Returns the dataframe with 'datetime' index in IST, or None on failure.
+    Convert timestamp column in a history DataFrame to a venue-local
+    datetime index. Name is historical — the function now supports
+    non-IST venues too.
+
+    See ``services.iv_chart_service._convert_timestamp_to_ist`` for the
+    flag-gated venue_code semantics.
     """
-    ist = pytz.timezone("Asia/Kolkata")
+    from services.venue_session_service import venue_tz_or_default
+
+    tz_name = venue_tz_or_default(venue_code)
+    ist = pytz.timezone(tz_name)
 
     try:
         if "timestamp" not in df.columns:
@@ -189,7 +196,7 @@ def get_straddle_chart_data(
         if df_underlying.empty:
             return False, {"status": "error", "message": "No underlying history data available"}, 404
 
-        df_underlying = _convert_timestamp_to_ist(df_underlying)
+        df_underlying = _convert_timestamp_to_ist(df_underlying, venue_code=exchange)
         if df_underlying is None:
             return False, {"status": "error", "message": "Failed to parse underlying timestamps"}, 500
 
@@ -244,7 +251,7 @@ def get_straddle_chart_data(
             if success_ce:
                 df_ce = pd.DataFrame(resp_ce.get("data", []))
                 if not df_ce.empty:
-                    df_ce = _convert_timestamp_to_ist(df_ce)
+                    df_ce = _convert_timestamp_to_ist(df_ce, venue_code=options_exchange)
                     if df_ce is not None:
                         for ts, row in df_ce.iterrows():
                             ce_lookup[ts] = float(row["close"])
@@ -252,7 +259,7 @@ def get_straddle_chart_data(
             if success_pe:
                 df_pe = pd.DataFrame(resp_pe.get("data", []))
                 if not df_pe.empty:
-                    df_pe = _convert_timestamp_to_ist(df_pe)
+                    df_pe = _convert_timestamp_to_ist(df_pe, venue_code=options_exchange)
                     if df_pe is not None:
                         for ts, row in df_pe.iterrows():
                             pe_lookup[ts] = float(row["close"])

@@ -288,8 +288,40 @@ class VenueSessionService:
         return dt.astimezone(timezone.utc)
 
 
+def venue_tz_or_default(
+    venue_code: str | None, default: str = "Asia/Kolkata"
+) -> str:
+    """Return the venue's IANA timezone name, or a default.
+
+    Gated by ``VENUE_SESSION_V2``. When the flag is off the default is
+    always returned — this is the migration seam legacy services use
+    to keep byte-identical Indian behavior until the canary flips.
+
+    On a cache miss or any error the default is also returned. Never
+    raises.
+
+    Returns a *string* (e.g. ``"Asia/Kolkata"``, ``"America/New_York"``)
+    rather than a ``ZoneInfo`` so legacy callers that wrap the result
+    in ``pytz.timezone(...)`` keep working unchanged.
+    """
+    from utils.feature_flags import is_enabled
+
+    if not is_enabled("VENUE_SESSION_V2"):
+        return default
+    if not venue_code:
+        return default
+    try:
+        venue = venues_get(venue_code)
+    except Exception:
+        return default
+    if venue is None or not venue.timezone_name:
+        return default
+    return venue.timezone_name
+
+
 __all__ = [
     "ActiveSession",
     "SessionWindow",
     "VenueSessionService",
+    "venue_tz_or_default",
 ]
