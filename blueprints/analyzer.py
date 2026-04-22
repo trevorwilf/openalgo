@@ -20,6 +20,7 @@ from sqlalchemy import desc, func
 
 from database.analyzer_db import AnalyzerLog, db_session
 from utils.api_analyzer import get_analyzer_stats
+from utils.capability_guards import requires_capability
 from utils.logging import get_logger
 from utils.session import check_session_validity
 
@@ -179,6 +180,7 @@ def generate_csv(requests):
 
 @analyzer_bp.route("/")
 @check_session_validity
+@requires_capability("supports_analyzer")
 def analyzer():
     """Render the analyzer dashboard"""
     try:
@@ -223,6 +225,7 @@ def analyzer():
 
 @analyzer_bp.route("/api/data")
 @check_session_validity
+@requires_capability("supports_analyzer")
 def api_get_data():
     """API endpoint to get analyzer data (stats + requests) as JSON for React frontend"""
     try:
@@ -276,6 +279,7 @@ def api_get_data():
 
 @analyzer_bp.route("/stats")
 @check_session_validity
+@requires_capability("supports_analyzer")
 def get_stats():
     """Get analyzer stats endpoint"""
     try:
@@ -304,6 +308,7 @@ def get_stats():
 
 @analyzer_bp.route("/requests")
 @check_session_validity
+@requires_capability("supports_analyzer")
 def get_requests():
     """Get analyzer requests endpoint"""
     try:
@@ -316,6 +321,7 @@ def get_requests():
 
 @analyzer_bp.route("/clear")
 @check_session_validity
+@requires_capability("supports_analyzer")
 def clear_logs():
     """Clear analyzer logs"""
     try:
@@ -333,6 +339,7 @@ def clear_logs():
 
 @analyzer_bp.route("/export", methods=["GET"])
 @check_session_validity
+@requires_capability("supports_analyzer")
 def export_requests():
     """Export analyzer requests to CSV"""
     try:

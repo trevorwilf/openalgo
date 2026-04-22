@@ -27,6 +27,16 @@ export interface NavItem {
   href: string
   label: string
   icon: LucideIcon
+  /**
+   * Phase 7: when set, the nav item is hidden if the active broker's
+   * capability with this name is false. Fail-closed: when capabilities
+   * are unavailable (null / fetch error), the item is also hidden.
+   *
+   * Accepts any boolean field on `BrokerCapabilities`
+   * (`supports_analyzer`, `supports_fractional`, etc.) or any key under
+   * `capabilities.features[...]`.
+   */
+  capability?: string
 }
 
 // Main navigation items shown in desktop navbar
@@ -69,7 +79,12 @@ export const profileMenuItems: NavItem[] = [
   { href: '/pnl-tracker', label: 'PnL Tracker', icon: BarChart3 },
   { href: '/historify', label: 'Historify', icon: Database },
   { href: '/search/token', label: 'Search', icon: Search },
-  { href: '/sandbox', label: 'Sandbox', icon: FlaskConical },
+  {
+    href: '/sandbox',
+    label: 'Sandbox',
+    icon: FlaskConical,
+    capability: 'supports_analyzer',
+  },
   { href: '/leverage', label: 'Leverage', icon: Gauge },
   { href: '/admin', label: 'Admin', icon: Settings },
 ]
@@ -86,4 +101,29 @@ export function isActiveRoute(pathname: string, href: string): boolean {
     return pathname.startsWith('/strategy')
   }
   return pathname === href
+}
+
+/**
+ * Phase 7: filter nav items by the active broker's capabilities.
+ *
+ * Returns only items whose `capability` field is true in `caps`, OR
+ * whose `capability` is unset. When `caps` is null (unfetched or
+ * error), items with a `capability` field are hidden — fail closed.
+ */
+export function filterNavByCapabilities<T extends NavItem>(
+  items: T[],
+  caps: Record<string, unknown> | null | undefined
+): T[] {
+  return items.filter((item) => {
+    if (!item.capability) return true
+    if (caps == null) return false
+    const value = caps[item.capability]
+    if (typeof value === 'boolean') return value
+    // Fall through to `features` dict for custom flags.
+    const features = caps.features
+    if (features && typeof features === 'object') {
+      return Boolean((features as Record<string, boolean>)[item.capability])
+    }
+    return false
+  })
 }

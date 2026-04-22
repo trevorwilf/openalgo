@@ -17,6 +17,7 @@ from database.sandbox_db import (
     set_config,
 )
 from limiter import limiter
+from utils.capability_guards import requires_capability
 from utils.logging import get_logger
 from utils.session import check_session_validity
 
@@ -39,6 +40,7 @@ def ratelimit_handler(e):
 @sandbox_bp.route("/")
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
+@requires_capability("supports_analyzer")
 def sandbox_config():
     """Render the sandbox configuration page"""
     try:
@@ -93,6 +95,7 @@ def sandbox_config():
 @sandbox_bp.route("/api/configs")
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
+@requires_capability("supports_analyzer")
 def api_get_configs():
     """API endpoint to get all sandbox configuration values as JSON"""
     try:
@@ -194,6 +197,7 @@ def api_get_configs():
 @sandbox_bp.route("/update", methods=["POST"])
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
+@requires_capability("supports_analyzer")
 def update_config():
     """Update sandbox configuration values"""
     try:
@@ -293,6 +297,7 @@ def update_config():
 @sandbox_bp.route("/reset", methods=["POST"])
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
+@requires_capability("supports_analyzer")
 def reset_config():
     """Reset sandbox configuration to defaults and clear all sandbox data"""
     try:
@@ -408,6 +413,7 @@ def reset_config():
 @sandbox_bp.route("/reload-squareoff", methods=["POST"])
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
+@requires_capability("supports_analyzer")
 def reload_squareoff():
     """Manually reload square-off schedule from config"""
     try:
@@ -430,6 +436,7 @@ def reload_squareoff():
 @sandbox_bp.route("/squareoff-status")
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
+@requires_capability("supports_analyzer")
 def squareoff_status():
     """Get current square-off scheduler status"""
     try:
@@ -452,6 +459,7 @@ def squareoff_status():
 @sandbox_bp.route("/mypnl/api/data")
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
+@requires_capability("supports_analyzer")
 def api_my_pnl_data():
     """API endpoint to get P&L data as JSON for React frontend"""
     try:
@@ -622,6 +630,7 @@ def api_my_pnl_data():
 @sandbox_bp.route("/mypnl")
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
+@requires_capability("supports_analyzer")
 def my_pnl():
     """Render the historical P&L page"""
     try:
@@ -1046,6 +1055,7 @@ def generate_trades_csv(trades):
 @sandbox_bp.route("/mypnl/export/daily")
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
+@requires_capability("supports_analyzer")
 def export_daily_pnl():
     """Export date-wise P&L data as CSV"""
     try:
@@ -1078,6 +1088,7 @@ def export_daily_pnl():
 @sandbox_bp.route("/mypnl/export/positions")
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
+@requires_capability("supports_analyzer")
 def export_positions():
     """Export positions data as CSV"""
     try:
@@ -1108,6 +1119,7 @@ def export_positions():
 @sandbox_bp.route("/mypnl/export/holdings")
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
+@requires_capability("supports_analyzer")
 def export_holdings():
     """Export holdings data as CSV"""
     try:
@@ -1138,6 +1150,7 @@ def export_holdings():
 @sandbox_bp.route("/mypnl/export/trades")
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
+@requires_capability("supports_analyzer")
 def export_trades():
     """Export all trades data as CSV (no limit)"""
     try:
