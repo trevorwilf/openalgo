@@ -47,6 +47,44 @@ jobs:
       - name: Run parity harness
         run: uv run python tests/parity/run_parity.py
 
+  # Phase 9 parity matrix — runs every flag combination from the canary
+  # rollout order and asserts every row passes byte-identical against
+  # the Phase 0 baseline fixtures. Any regression in any row blocks the
+  # PR — no continue-on-error.
+  # Triggers on PRs that touch the refactor-sensitive paths.
+  parity-v2:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request' && (
+        contains(toJSON(github.event.pull_request.labels.*.name), 'refactor') ||
+        true
+      )
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2  # enables diff vs base for path filter below
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --dev
+      - name: Check refactor-touching paths
+        id: path_check
+        run: |
+          # Trigger the full matrix when any refactor-sensitive path
+          # changed in this PR. Otherwise skip with a success short-circuit.
+          git fetch origin ${{ github.base_ref }} --depth=1
+          CHANGED="$(git diff --name-only origin/${{ github.base_ref }}...HEAD)"
+          echo "Changed files:"; echo "$CHANGED"
+          if echo "$CHANGED" | grep -qE '^(domain/|services/instrument_|services/venue_session_service|services/instrument_resolver|services/quotes_service|services/history_service|services/historify_service|services/market_calendar_service|restx_api/v2/|frontend/src/stores/brokerStore|frontend/src/lib/utils|frontend/src/types/capabilities|frontend/src/hooks/useSupportedExchanges|database/instruments_repo|database/venue_schedule_repo|database/historify_db|upgrade/migrate_instrument_core|upgrade/migrate_venue_schedule|upgrade/migrate_historify_instrument_id|upgrade/seed_venue_schedule_defaults|upgrade/backfill_historify_instrument_id|utils/feature_flags|utils/broker_context|utils/capability_guards|websocket_proxy/base_adapter|websocket_proxy/broker_factory|tests/parity/|tests/(instruments_repo|instrument_sync|resolver|services|historify|venue_session|api_v2|analyzer|websocket)/)'; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run parity matrix
+        if: steps.path_check.outputs.should_run == 'true'
+        run: uv run python tests/parity/run_parity_matrix.py
+
   # Backend tests (CI-safe subset - no broker credentials needed)
   backend-test:
     runs-on: ubuntu-latest
