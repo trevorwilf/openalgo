@@ -1,0 +1,5 @@
+This file marks broker/alpaca/ as a promoted-lane adapter.
+
+Lane-isolation tests (tests/contracts/test_lane_isolation.py) treat
+any broker directory containing a PROMOTED sentinel file the same as
+restx_api/v2/: its Python files must not import legacy symbols.
