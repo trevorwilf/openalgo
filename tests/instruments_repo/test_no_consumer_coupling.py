@@ -84,6 +84,10 @@ PHASE_ALLOWED: set[Path] = {
     REPO_ROOT / "restx_api" / "v2" / "instruments.py",
     REPO_ROOT / "restx_api" / "v2" / "orders.py",
     REPO_ROOT / "restx_api" / "v2" / "quotes.py",
+    # Post-Phase-9 / Phase 4 of the market-agnostic lane — promoted-lane
+    # instrument resolution and bars dispatcher.
+    REPO_ROOT / "services" / "instrument_resolution.py",
+    REPO_ROOT / "restx_api" / "v2" / "bars.py",
 }
 
 
