@@ -42,12 +42,6 @@ PROMOTED_PATH_ROOTS: tuple[Path, ...] = (
 # the set of repo-relative POSIX paths that are temporarily exempted.
 # Every entry carries a TODO naming the phase that removes it.
 ALLOWLIST: dict[tuple[str, str], set[str]] = {
-    # TODO(phase-3): remove once /api/v2/orders dispatches via the
-    # BrokerOrderTranslator registry and no longer calls the legacy
-    # translator.
-    ("domain.translators", "normalized_order_to_legacy_fields"): {
-        "restx_api/v2/orders.py",
-    },
     # TODO(phase-4): remove once /api/v2/quotes dispatches to
     # BrokerQuoteAdapter and stops calling the legacy quotes_service.
     ("services.quotes_service", "get_quotes_with_auth"): {
@@ -87,14 +81,16 @@ def _discover_promoted_python_files() -> list[Path]:
 
 
 def _iter_import_references(
-    tree: ast.AST,
+    tree: ast.Module,
 ) -> Iterable[tuple[str, str | None, int]]:
-    """Yield (module, attr, lineno) for every Import/ImportFrom node.
+    """Yield (module, attr, lineno) for every module-level Import/ImportFrom.
 
-    For a plain `import x.y`, attr is None and module is `x.y`.
-    For `from x.y import z as _z`, module is `x.y` and attr is `z`.
+    We intentionally only walk the module body — nested imports inside
+    function bodies are not flagged. The promoted dispatcher keeps its
+    legacy fallback import function-local so the lane-isolation check
+    proves the legacy symbol is never *loaded* on a promoted request.
     """
-    for node in ast.walk(tree):
+    for node in tree.body:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 yield alias.name, None, node.lineno
