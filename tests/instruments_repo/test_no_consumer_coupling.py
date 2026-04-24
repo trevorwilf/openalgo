@@ -88,6 +88,8 @@ PHASE_ALLOWED: set[Path] = {
     # instrument resolution and bars dispatcher.
     REPO_ROOT / "services" / "instrument_resolution.py",
     REPO_ROOT / "restx_api" / "v2" / "bars.py",
+    # Phase 6b — Alpaca promoted-lane adapter sync.
+    REPO_ROOT / "broker" / "alpaca" / "sync" / "instrument_sync.py",
 }
 
 
