@@ -80,26 +80,20 @@ class Orders(Resource):
 
 def _dispatch_promoted(normalized, *, broker: str, auth_token: str, promoted):
     """Promoted-lane dispatch. Does not touch the legacy translator."""
+    from datetime import datetime, timezone
+
     from domain.errors import UnsupportedCapability
+    from services.instrument_resolution import resolve_instrument
+    from services.rule_enforcement import OrderRuleViolation, check_order
 
-    ref = normalized.instrument
-    instrument = None
-    if ref.kind == "id":
-        from database.instruments_repo import instruments_get_by_id
-
-        instrument = instruments_get_by_id(ref.instrument_id)
-        if instrument is None:
-            return error("instrument_not_resolvable",
-                         f"instrument_id={ref.instrument_id} not found"), 404
-    elif ref.kind == "venue_symbol":
-        from database.instruments_repo import instruments_get_by_venue_symbol
-
-        instrument = instruments_get_by_venue_symbol(
-            ref.venue_code, ref.canonical_symbol
-        )
-        # Phase 4 introduces the resolver proper; until then, the
-        # translator can still receive the raw ref and rely on the
-        # broker adapter's own lookup.
+    resolved = resolve_instrument(normalized.instrument, broker_code=broker)
+    if resolved is None and normalized.instrument.kind != "venue_symbol":
+        # venue_symbol is lenient — a broker adapter may still recognize a
+        # symbol that isn't in the canonical universe yet (Phase 6 sync).
+        return error(
+            "instrument_not_resolvable",
+            "instrument ref not found in instrument universe",
+        ), 404
 
     account_ctx: dict[str, Any] = {
         "broker_code": broker,
@@ -107,7 +101,29 @@ def _dispatch_promoted(normalized, *, broker: str, auth_token: str, promoted):
     }
 
     try:
-        promoted.validate(normalized, instrument, account_ctx)
+        check_order(
+            normalized,
+            broker_code=broker,
+            venue_code=(
+                resolved.venue_code
+                if resolved is not None
+                else normalized.instrument.venue_code
+            ),
+            asset_class=(resolved.asset_class if resolved is not None else None),
+            now_tz_aware=datetime.now(timezone.utc),
+            allows_fractional=(
+                resolved.supports_fractional if resolved is not None else None
+            ),
+        )
+    except OrderRuleViolation as e:
+        return error(
+            "rule_violation",
+            e.message,
+            details={"code": e.code, "rule_id": e.rule_id},
+        ), 422
+
+    try:
+        promoted.validate(normalized, resolved, account_ctx)
     except UnsupportedCapability as e:
         return error("unsupported_capability", str(e), details={
             "broker_code": e.broker_code,
@@ -115,6 +131,8 @@ def _dispatch_promoted(normalized, *, broker: str, auth_token: str, promoted):
         }), 422
     except ValueError as e:
         return error("validation_error", str(e)), 422
+
+    instrument = resolved
 
     try:
         native_payload = promoted.to_native(normalized, instrument, account_ctx)
@@ -151,6 +169,7 @@ def _dispatch_promoted(normalized, *, broker: str, auth_token: str, promoted):
     except ValueError as e:
         return error("broker_error", f"malformed broker response: {e}"), 502
 
+    ref = normalized.instrument
     ref_view = {
         "instrument_id": str(ref.instrument_id) if ref.instrument_id else None,
         "venue_code": ref.venue_code,

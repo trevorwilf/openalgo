@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 
+from database import broker_rules_repo
 from services.broker_translator_registry import clear_registry_for_tests
 
 
@@ -20,6 +21,21 @@ def _clean_registry():
     clear_registry_for_tests()
     yield
     clear_registry_for_tests()
+
+
+def _seed_fake_us_permissive_rule():
+    """Seed a permissive rule so rule enforcement doesn't block the test."""
+    broker_rules_repo.rules_upsert(
+        broker_code="fake_us",
+        venue_code=None,
+        asset_class=None,
+        session_name=None,
+        allowed_order_types=["MARKET", "LIMIT"],
+        allowed_time_in_force=["DAY", "GTC"],
+        allows_fractional=True,
+        allows_notional=True,
+        allows_short=True,
+    )
 
 
 def _install_fake_auth_resolver(monkeypatch, broker_code: str):
@@ -55,6 +71,7 @@ def test_promoted_flag_on_dispatches_via_fake_translator(
     """API_V2_FAKE_US=1 with a registered fake -> fake handles the order."""
     from tests.fakes.fake_us_translator import install_fake_us_translator
 
+    _seed_fake_us_permissive_rule()
     fake = install_fake_us_translator()
     monkeypatch.setenv("API_V2_FAKE_US", "1")
     _install_fake_auth_resolver(monkeypatch, broker_code=fake.broker_code)
@@ -150,6 +167,7 @@ def test_fake_translator_rejects_unsupported_order_type(
     """STOP is not in FakeUS' allowed types — should 422."""
     from tests.fakes.fake_us_translator import install_fake_us_translator
 
+    _seed_fake_us_permissive_rule()
     fake = install_fake_us_translator()
     monkeypatch.setenv("API_V2_FAKE_US", "1")
     _install_fake_auth_resolver(monkeypatch, broker_code=fake.broker_code)
@@ -162,4 +180,7 @@ def test_fake_translator_rejects_unsupported_order_type(
     resp = client.post("/api/v2/orders", json=body)
     assert resp.status_code == 422
     j = resp.get_json()
-    assert j["error"]["code"] == "unsupported_capability"
+    # Rule enforcement runs before translator.validate and catches the
+    # unsupported order type first.
+    assert j["error"]["code"] == "rule_violation"
+    assert j["error"]["details"]["code"] == "order_type_not_allowed"
