@@ -49,23 +49,43 @@ ALLOWLIST: dict[tuple[str, str], set[str]] = {}
 
 
 def _discover_promoted_python_files() -> list[Path]:
-    """Walk the promoted path roots and yield all .py files."""
+    """Walk the promoted path roots and yield all .py files.
+
+    Broker directories are treated as promoted if either:
+
+    - a ``PROMOTED`` sentinel file exists at the directory root, OR
+    - the directory's ``plugin.json`` declares ``supported_regions``
+      with any value other than ``india`` (Phase 8 auto-discovery).
+    """
+    import json
+
     files: list[Path] = []
     for root in PROMOTED_PATH_ROOTS:
         if not root.is_dir():
             continue
         files.extend(p for p in root.rglob("*.py") if p.is_file())
 
-    # Broker directories marked with a PROMOTED sentinel file are
-    # treated as promoted paths too. This hook is here so later
-    # phases can add `broker/<name>/PROMOTED` and have the guard
-    # pick the directory up without editing this test.
     broker_root = REPO_ROOT / "broker"
     if broker_root.is_dir():
         for broker_dir in broker_root.iterdir():
             if not broker_dir.is_dir():
                 continue
+            is_promoted = False
             if (broker_dir / "PROMOTED").exists():
+                is_promoted = True
+            else:
+                plugin = broker_dir / "plugin.json"
+                if plugin.is_file():
+                    try:
+                        data = json.loads(plugin.read_text(encoding="utf-8"))
+                    except Exception:
+                        data = {}
+                    regions = data.get("supported_regions") or []
+                    if isinstance(regions, list) and regions and "india" not in [
+                        str(r).lower() for r in regions
+                    ]:
+                        is_promoted = True
+            if is_promoted:
                 files.extend(
                     p for p in broker_dir.rglob("*.py") if p.is_file()
                 )

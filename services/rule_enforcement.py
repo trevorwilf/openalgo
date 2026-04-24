@@ -127,6 +127,18 @@ def _session_is_enabled(
     return (True, None)
 
 
+def _record_violation(broker_code: str, code: str) -> None:
+    """Bump the rule-rejection counter for observability. Best-effort —
+    metric failures must not propagate to the caller.
+    """
+    try:
+        from utils.metrics import counter
+
+        counter("rule_rejections_total", {"broker": broker_code, "code": code})
+    except Exception:  # pragma: no cover
+        pass
+
+
 def check_order(
     order: "NormalizedOrderRequest",
     *,
@@ -168,6 +180,7 @@ def check_order(
         )
     ]
     if not matching:
+        _record_violation(broker_code, "no_rule_matches")
         raise OrderRuleViolation(
             code="no_rule_matches",
             message=(
@@ -180,6 +193,7 @@ def check_order(
     rule = matching[0]
 
     if order.order_type not in rule.allowed_order_types:
+        _record_violation(broker_code, "order_type_not_allowed")
         raise OrderRuleViolation(
             code="order_type_not_allowed",
             message=(
@@ -188,6 +202,7 @@ def check_order(
             ),
         )
     if order.time_in_force not in rule.allowed_time_in_force:
+        _record_violation(broker_code, "time_in_force_not_allowed")
         raise OrderRuleViolation(
             code="time_in_force_not_allowed",
             message=(
@@ -201,6 +216,7 @@ def check_order(
         and order.order_type == OrderType.LIMIT
         and order.price is None
     ):
+        _record_violation(broker_code, "limit_price_required")
         raise OrderRuleViolation(
             code="limit_price_required",
             message="LIMIT order requires a price",
@@ -213,12 +229,14 @@ def check_order(
         broker_allows = rule.allows_fractional
         instr_allows = broker_allows if allows_fractional is None else bool(allows_fractional)
         if not (broker_allows and instr_allows):
+            _record_violation(broker_code, "fractional_not_allowed")
             raise OrderRuleViolation(
                 code="fractional_not_allowed",
                 message="fractional quantity_unit not allowed",
             )
 
     if order.quantity_unit == QuantityUnit.NOTIONAL and not rule.allows_notional:
+        _record_violation(broker_code, "notional_not_allowed")
         raise OrderRuleViolation(
             code="notional_not_allowed",
             message="notional quantity_unit not allowed",
@@ -246,6 +264,7 @@ def check_order(
             now=now_tz_aware,
         )
         if not enabled:
+            _record_violation(broker_code, "session_closed")
             raise OrderRuleViolation(
                 code="session_closed",
                 message=(reason or "session disabled by broker override"),
