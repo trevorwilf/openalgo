@@ -41,18 +41,11 @@ PROMOTED_PATH_ROOTS: tuple[Path, ...] = (
 # Phase-scoped allowlist. Keys are (module, symbol) tuples; values are
 # the set of repo-relative POSIX paths that are temporarily exempted.
 # Every entry carries a TODO naming the phase that removes it.
-ALLOWLIST: dict[tuple[str, str], set[str]] = {
-    # TODO(phase-4): remove once /api/v2/quotes dispatches to
-    # BrokerQuoteAdapter and stops calling the legacy quotes_service.
-    ("services.quotes_service", "get_quotes_with_auth"): {
-        "restx_api/v2/quotes.py",
-    },
-    # TODO(phase-4): remove once /api/v2/bars dispatches to
-    # BrokerBarAdapter and stops calling the legacy history_service.
-    ("services.history_service", "get_history_with_auth"): {
-        "restx_api/v2/bars.py",
-    },
-}
+# Allowlist is empty as of Phase 4. The import invariant is now fully
+# enforced: every forbidden legacy symbol is loaded only on the
+# legacy-fallback branch, inside a function body, where the AST check
+# (module-level only) does not see it.
+ALLOWLIST: dict[tuple[str, str], set[str]] = {}
 
 
 def _discover_promoted_python_files() -> list[Path]:
