@@ -19,6 +19,7 @@ The ADRs are the source of truth:
 - [ADR 0002 — no specific target broker](docs/adr/0002-no-specific-target-broker.md): design for Indian, US, EU, crypto without naming an SDK
 - [ADR 0003 — `/api/v1` frozen, `/api/v2` later](docs/adr/0003-api-v1-frozen-v2-later.md)
 - [ADR 0004 — analyzer stays India-limited](docs/adr/0004-analyzer-india-only.md)
+- [ADR 0005 — two lanes: legacy and promoted](docs/adr/0005-two-lanes-legacy-and-promoted.md): per-broker promotion of `/api/v2` via `API_V2_<BROKER>` flags
 
 **Invariants — any new code must respect these:**
 
@@ -34,6 +35,64 @@ The ADRs are the source of truth:
 **Never extend** `VALID_EXCHANGES`, `VALID_PRODUCT_TYPES`, or the `SymToken` schema. If a change seems to require one of these, stop and re-read the ADRs.
 
 Per-phase dependency inventory lives in [`docs/refactor/inventory/`](docs/refactor/inventory/) — grep there (not across the whole codebase) to locate the legacy assumption you are about to touch.
+
+## Promoted lane
+
+ADR 0005 defines two lanes. **Which lane a request runs through is
+decided per broker, per request, by feature flag.**
+
+### Legacy lane (frozen)
+
+Do not add features here; bug fixes and compliance only. The lane is
+pinned by parity fixtures and must remain bit-identical.
+
+- `/api/v1/*`
+- `/api/v2/*` when the per-broker flag `API_V2_<BROKER>=0` (or unset)
+- `services/place_order_service.py`,
+  `services/quotes_service.py`, `services/history_service.py`
+- `utils/constants.py` — `VALID_EXCHANGES`, `VALID_PRODUCT_TYPES`,
+  `VALID_PRICE_TYPES`
+- `database/token_db.py` — `get_token`
+- `domain/translators.py` — `normalized_order_to_legacy_fields`
+- Broker modules under `broker/<indian_broker>/` (24 brokers today)
+
+### Promoted lane (new code goes here)
+
+Gated per broker via `API_V2_<BROKER_CODE_UPPER>=1`. Rollback is a
+single env-var flip.
+
+- `/api/v2/*` when `API_V2_<BROKER>=1`
+- `restx_api/v2/*` (routing dispatches promoted vs legacy inline)
+- `domain/broker_translator.py` (Phase 3)
+- `services/broker_translator_registry.py` (Phase 3)
+- `services/instrument_resolution.py` (Phase 4)
+- `domain/broker_market_data.py` and
+  `services/broker_market_data_registry.py` (Phase 4)
+- `domain/broker_rules.py` and
+  `services/rule_enforcement.py` (Phase 5)
+- Future non-Indian broker adapters under `broker/<code>/` that
+  declare `supported_regions` without `"india"` in `plugin.json`
+
+### Import invariants for promoted paths
+
+Enforced by `tests/contracts/test_lane_isolation.py`. Promoted code
+**must not** import:
+
+- `utils.constants.VALID_EXCHANGES`
+- `utils.constants.VALID_PRODUCT_TYPES`
+- `utils.constants.VALID_PRICE_TYPES`
+- `database.token_db.get_token`
+- `domain.translators.normalized_order_to_legacy_fields`
+- `services.quotes_service.get_quotes_with_auth`
+- `services.history_service.get_history_with_auth`
+
+Promoted code resolves instruments through `database.instruments_repo`
+/ `services.instrument_resolution`, dispatches orders through a
+registered `BrokerOrderTranslator`, and fetches market data through a
+registered `BrokerQuoteAdapter` / `BrokerBarAdapter`.
+
+A phase-scoped allowlist in the test covers the small set of
+legacy call-sites that Phases 3 and 4 remove.
 
 ## Security and Deployment Model
 
