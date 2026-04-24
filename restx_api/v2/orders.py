@@ -24,6 +24,8 @@ from restx_api.v2._auth import error, ok, resolve_auth
 from services.broker_translator_registry import get_broker_translator
 from utils.feature_flags import is_enabled
 from utils.logging import get_logger
+from utils.logging_context import log_context
+from utils.metrics import counter
 
 logger = get_logger(__name__)
 
@@ -67,15 +69,29 @@ class Orders(Resource):
         # translator must be registered; otherwise fall through to legacy.
         broker_upper = (broker or "").upper()
         flag_name = f"API_V2_{broker_upper}"
-        promoted = get_broker_translator(broker) if is_enabled(flag_name) else None
+        flag_on = is_enabled(flag_name)
+        promoted = get_broker_translator(broker) if flag_on else None
 
         if promoted is not None:
-            return _dispatch_promoted(
-                normalized, broker=broker, auth_token=auth_token, promoted=promoted
+            with log_context(
+                broker_code=broker,
+                session=normalized.session.value,
+                time_in_force=normalized.time_in_force.value,
+                quantity_unit=normalized.quantity_unit.value,
+                legacy_fallback=False,
+            ):
+                return _dispatch_promoted(
+                    normalized, broker=broker, auth_token=auth_token, promoted=promoted
+                )
+        # Legacy fallback. Only count it if the flag was set — that is
+        # the surprising case we want operators to alert on. Flag-off
+        # is the baseline and must stay flat.
+        if flag_on:
+            counter("promoted_legacy_fallback_total", {"broker": broker or "unknown"})
+        with log_context(broker_code=broker, legacy_fallback=True):
+            return _dispatch_legacy(
+                normalized, broker=broker, auth_token=auth_token, body=body
             )
-        return _dispatch_legacy(
-            normalized, broker=broker, auth_token=auth_token, body=body
-        )
 
 
 def _dispatch_promoted(normalized, *, broker: str, auth_token: str, promoted):

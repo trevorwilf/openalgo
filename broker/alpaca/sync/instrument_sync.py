@@ -190,6 +190,21 @@ def sync_instruments(
         status="ok",
     )
 
+    # Observability: sync lag = seconds since the sync *started*.
+    # The sync runner is a one-shot call; lag goes back to 0 on every
+    # completion. Operators alert on "lag never decreases" as a stall
+    # signal.
+    try:
+        from utils.metrics import gauge
+
+        gauge(
+            "instrument_sync_lag_seconds",
+            {"broker": BROKER_CODE},
+            value=0.0,
+        )
+    except Exception:  # pragma: no cover
+        pass
+
     return SyncSummary(
         sync_id=sync_id,
         fetched_count=len(rows),

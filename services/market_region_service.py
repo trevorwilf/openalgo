@@ -87,6 +87,13 @@ def update_default_market_region(
         )
 
     set_default_market_region(normalized)
+    # Observability: surface region flips in metrics.
+    try:
+        from utils.metrics import counter
+
+        counter("default_region_changes_total", {"region": normalized})
+    except Exception:  # pragma: no cover
+        pass
     catalog = get_market_region_catalog(active_broker=active_broker)
     catalog["message"] = f"Default market region updated to {region.display_name}."
     return catalog

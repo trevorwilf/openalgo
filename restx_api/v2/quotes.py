@@ -22,6 +22,8 @@ from restx_api.v2._auth import error, ok, resolve_auth
 from services.broker_market_data_registry import get_broker_quote_adapter
 from utils.feature_flags import is_enabled
 from utils.logging import get_logger
+from utils.logging_context import log_context
+from utils.metrics import counter
 
 logger = get_logger(__name__)
 
@@ -44,16 +46,17 @@ class Quotes(Resource):
             ), 400
 
         broker_upper = (broker or "").upper()
-        promoted = (
-            get_broker_quote_adapter(broker)
-            if is_enabled(f"API_V2_{broker_upper}")
-            else None
-        )
+        flag_on = is_enabled(f"API_V2_{broker_upper}")
+        promoted = get_broker_quote_adapter(broker) if flag_on else None
         if promoted is not None:
-            return _dispatch_promoted(
-                refs, broker=broker, auth_token=auth_token, adapter=promoted
-            )
-        return _dispatch_legacy(refs, broker=broker, auth_token=auth_token)
+            with log_context(broker_code=broker, legacy_fallback=False):
+                return _dispatch_promoted(
+                    refs, broker=broker, auth_token=auth_token, adapter=promoted
+                )
+        if flag_on:
+            counter("promoted_legacy_fallback_total", {"broker": broker or "unknown"})
+        with log_context(broker_code=broker, legacy_fallback=True):
+            return _dispatch_legacy(refs, broker=broker, auth_token=auth_token)
 
 
 def _dispatch_promoted(refs: list, *, broker: str, auth_token: str, adapter):
