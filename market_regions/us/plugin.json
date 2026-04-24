@@ -1,0 +1,14 @@
+{
+  "region_code": "us",
+  "display_name": "United States",
+  "description": "Default region metadata for U.S. cash-equity brokers and venues.",
+  "timezone_name": "America/New_York",
+  "market_families": ["US_STOCK"],
+  "default_currency": "USD",
+  "default_venue_codes": ["XNYS", "XNAS"],
+  "default_sessions": ["REGULAR", "PRE_MARKET", "POST_MARKET"],
+  "country_codes": ["US"],
+  "metadata": {
+    "notes": "Use broker-specific session overrides for actual tradable windows."
+  }
+}

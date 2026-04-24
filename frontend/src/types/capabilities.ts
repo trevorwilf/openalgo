@@ -91,6 +91,7 @@ export interface BrokerCapabilities {
   broker_code: string
   broker_display_name: string
   market_families: MarketFamily[]
+  supported_regions: string[]
   supported_venue_codes: string[]
   supported_asset_classes: AssetClass[]
   supported_order_types: PlatformOrderType[]

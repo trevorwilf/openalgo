@@ -1,0 +1,14 @@
+{
+  "region_code": "india",
+  "display_name": "India",
+  "description": "Default region metadata for Indian cash, derivatives, and index venues.",
+  "timezone_name": "Asia/Kolkata",
+  "market_families": ["IN_STOCK"],
+  "default_currency": "INR",
+  "default_venue_codes": ["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"],
+  "default_sessions": ["REGULAR"],
+  "country_codes": ["IN"],
+  "metadata": {
+    "notes": "Matches legacy OpenAlgo defaults."
+  }
+}

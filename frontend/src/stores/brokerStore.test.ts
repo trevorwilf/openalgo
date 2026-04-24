@@ -56,6 +56,7 @@ describe('brokerStore.fetchCapabilities', () => {
         broker_code: 'zerodha',
         broker_display_name: 'Zerodha',
         market_families: ['IN_STOCK'],
+    supported_regions: ['india'],
         supported_venue_codes: ['NSE', 'BSE'],
         supported_asset_classes: ['EQUITY'],
         supported_order_types: ['MARKET', 'LIMIT'],
