@@ -39,9 +39,13 @@ window.IntersectionObserver = vi.fn().mockImplementation(() => ({
 // Mock scrollTo
 window.scrollTo = vi.fn()
 
-// Mock clipboard API
-Object.assign(navigator, {
-  clipboard: {
+// Mock clipboard API — happy-dom defines `navigator.clipboard` as a
+// getter-only property, so `Object.assign` cannot overwrite it.
+// Use `defineProperty` with `configurable: true` to replace it
+// cleanly on both jsdom and happy-dom.
+Object.defineProperty(navigator, 'clipboard', {
+  configurable: true,
+  value: {
     writeText: vi.fn().mockImplementation(() => Promise.resolve()),
     readText: vi.fn().mockImplementation(() => Promise.resolve('')),
   },

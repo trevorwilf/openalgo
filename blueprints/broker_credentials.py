@@ -370,3 +370,70 @@ def get_capabilities():
         )
 
     return jsonify({"status": "success", "data": capabilities.model_dump(mode="json")})
+
+
+@broker_credentials_bp.route("/rules", methods=["GET"])
+@check_session_validity
+def get_broker_rules():
+    """Return the UI-shaped broker rule matrix for the active broker.
+
+    Flattens the Phase 5 :class:`BrokerOrderRule` rows into a per-
+    (venue_code, asset_class) dict the order ticket can consume
+    directly. Rows with wildcard qualifiers apply to every
+    (venue, asset_class) combination the broker supports.
+
+    Response shape:
+        {
+          "status": "success",
+          "data": [
+            {
+              "venue_code": "XNAS" | null,
+              "asset_class": "EQUITY" | null,
+              "session": "REGULAR" | null,
+              "side": "BUY" | null,
+              "quantity_unit": "WHOLE" | null,
+              "allowed_order_types": ["MARKET", "LIMIT"],
+              "allowed_time_in_force": ["DAY", "GTC"],
+              "allows_fractional": true,
+              "allows_notional": true,
+              "allows_short": true,
+              "requires_limit_price": false
+            },
+            ...
+          ]
+        }
+    """
+    from flask import session
+
+    from database import broker_rules_repo
+
+    broker = session.get("broker")
+    if not broker:
+        return jsonify({"status": "error", "message": "No broker in session"}), 400
+
+    # Phase 5 tables may not have been created yet on a pre-existing
+    # install — don't 500, just return an empty list.
+    try:
+        broker_rules_repo.init_broker_rules_tables()
+        rows = broker_rules_repo.rules_list_for(broker)
+    except Exception as e:
+        logger.exception(f"Failed to load broker rules: {e}")
+        return jsonify({"status": "success", "data": []})
+
+    payload = [
+        {
+            "venue_code": r.venue_code,
+            "asset_class": r.asset_class,
+            "session": r.session,
+            "side": r.side,
+            "quantity_unit": r.quantity_unit,
+            "allowed_order_types": list(r.allowed_order_types or []),
+            "allowed_time_in_force": list(r.allowed_time_in_force or []),
+            "allows_fractional": bool(r.allows_fractional),
+            "allows_notional": bool(r.allows_notional),
+            "allows_short": bool(r.allows_short),
+            "requires_limit_price": bool(r.requires_limit_price),
+        }
+        for r in rows
+    ]
+    return jsonify({"status": "success", "data": payload})
