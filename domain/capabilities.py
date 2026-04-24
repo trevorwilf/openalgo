@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from domain.currency import Currency
 from domain.enums import (
@@ -25,6 +25,40 @@ from domain.enums import (
     Session,
     TimeInForce,
 )
+
+
+_MARKET_FAMILY_REGION_MAP: dict[MarketFamily, str] = {
+    MarketFamily.IN_STOCK: "india",
+    MarketFamily.US_STOCK: "us",
+    MarketFamily.EU_STOCK: "eu",
+    MarketFamily.UK_STOCK: "uk",
+}
+
+
+def infer_supported_regions_from_market_families(
+    families: list[MarketFamily | str],
+) -> list[str]:
+    """Infer market-region codes from market families.
+
+    This keeps broker plugins backward-compatible: older plugin.json
+    files that only declare ``market_families`` still gain a useful
+    region surface for the new market-region framework.
+
+    Only families with a clear regional mapping are inferred here. More
+    global families (CRYPTO / FX / FUTURES / COMMODITY / OTHER) are
+    intentionally left unmapped and should declare ``supported_regions``
+    explicitly if needed.
+    """
+    regions: list[str] = []
+    for family in families:
+        try:
+            key = family if isinstance(family, MarketFamily) else MarketFamily(str(family))
+        except ValueError:
+            continue
+        region = _MARKET_FAMILY_REGION_MAP.get(key)
+        if region and region not in regions:
+            regions.append(region)
+    return regions
 
 
 class BrokerCapabilities(BaseModel):
@@ -40,6 +74,7 @@ class BrokerCapabilities(BaseModel):
     broker_code: str
     broker_display_name: str
     market_families: list[MarketFamily]
+    supported_regions: list[str] = Field(default_factory=list)
     supported_venue_codes: list[str]
     supported_asset_classes: list[AssetClass]
     supported_order_types: list[OrderType]
@@ -55,6 +90,23 @@ class BrokerCapabilities(BaseModel):
     supports_short_selling: bool = False
     supports_analyzer: bool = False
     features: dict[str, bool] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_supported_regions(cls, data: Any) -> Any:
+        """Backfill supported_regions from market_families when omitted."""
+        if not isinstance(data, dict):
+            return data
+        if data.get("supported_regions"):
+            return data
+        market_families = list(data.get("market_families", []))
+        if not market_families:
+            return data
+        enriched = dict(data)
+        enriched["supported_regions"] = infer_supported_regions_from_market_families(
+            market_families
+        )
+        return enriched
 
     # ---- Legacy-compat computed fields ----------------------------------
     # These appear in `model_dump()` so serialized output always carries
@@ -191,6 +243,7 @@ def _crypto_defaults() -> dict[str, Any]:
 _EXPLICIT_OVERRIDE_KEYS: frozenset[str] = frozenset(
     {
         "market_families",
+        "supported_regions",
         "supported_venue_codes",
         "supported_asset_classes",
         "supported_order_types",
@@ -267,4 +320,8 @@ def infer_capabilities_from_legacy(
     return result
 
 
-__all__ = ["BrokerCapabilities", "infer_capabilities_from_legacy"]
+__all__ = [
+    "BrokerCapabilities",
+    "infer_capabilities_from_legacy",
+    "infer_supported_regions_from_market_families",
+]

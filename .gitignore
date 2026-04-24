@@ -20,6 +20,7 @@ Thumbs.db
 config.ini
 .venvv
 .cloudflared/*.json
+*_claude_code.md
 
 #DB Files, CSV Files and Log/Tmp Files
 
@@ -87,3 +88,4 @@ frontend/dist
 
 # Windows NUL file
 nul
+

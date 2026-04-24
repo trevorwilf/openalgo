@@ -224,13 +224,24 @@ def categorize_endpoint(path):
 
 
 def load_bruno_endpoints(broker_type="IN_stock"):
-    """Load endpoints from Bruno .bru files for the given broker type (IN_stock or crypto)"""
+    """Load Bruno endpoints for the requested broker type.
+
+    Until dedicated non-Indian Bruno collections are added, unknown
+    non-crypto families fall back to the legacy IN_stock collection so
+    the API playground remains usable instead of returning an empty
+    catalog.
+    """
     endpoints = {"account": [], "orders": [], "data": [], "utilities": [], "websocket": []}
 
-    # Load from broker-type-specific subfolder (IN_stock or crypto)
-    collections_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "collections", "openalgo", broker_type
-    )
+    collections_root = os.path.join(os.path.dirname(os.path.dirname(__file__)), "collections", "openalgo")
+    collections_path = os.path.join(collections_root, broker_type)
+    if not os.path.isdir(collections_path) and broker_type not in {"IN_stock", "crypto"}:
+        logger.info(
+            "No Bruno collection for broker_type=%s; falling back to IN_stock collection",
+            broker_type,
+        )
+        collections_path = os.path.join(collections_root, "IN_stock")
+
     bru_files = glob.glob(os.path.join(collections_path, "**", "*.bru"), recursive=True)
 
     parsed_endpoints = []
@@ -338,7 +349,7 @@ def get_endpoints():
 
         broker = session.get("broker", "")
         capabilities = get_broker_capabilities(broker)
-        broker_type = capabilities.get("broker_type", "IN_stock") if capabilities else "IN_stock"
+        broker_type = capabilities.broker_type if capabilities else "IN_stock"
 
         endpoints = load_bruno_endpoints(broker_type=broker_type)
 

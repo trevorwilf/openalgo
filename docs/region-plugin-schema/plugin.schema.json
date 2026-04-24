@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openalgo.in/schemas/market-region-plugin.schema.json",
+  "title": "OpenAlgo market region plugin.json",
+  "description": "Validated at startup by utils/region_loader.py. Invalid files are logged and skipped so the app remains boot-stable.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "region_code",
+    "display_name",
+    "timezone_name",
+    "market_families"
+  ],
+  "properties": {
+    "region_code": {
+      "type": "string",
+      "description": "Stable machine-readable region code, e.g. india, us, eu, uk."
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "description": {
+      "type": ["string", "null"]
+    },
+    "timezone_name": {
+      "type": "string",
+      "description": "Canonical IANA timezone for region-level defaults."
+    },
+    "market_families": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "IN_STOCK",
+          "US_STOCK",
+          "EU_STOCK",
+          "UK_STOCK",
+          "CRYPTO",
+          "FUTURES",
+          "FX",
+          "COMMODITY",
+          "OTHER"
+        ]
+      }
+    },
+    "default_currency": {
+      "type": ["string", "null"],
+      "enum": [
+        "INR",
+        "USD",
+        "EUR",
+        "GBP",
+        "CHF",
+        "SGD",
+        "HKD",
+        "JPY",
+        "AUD",
+        "USDT",
+        "USDC",
+        "BTC",
+        "ETH",
+        null
+      ]
+    },
+    "default_venue_codes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "default_sessions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "PRE_MARKET",
+          "OPENING_AUCTION",
+          "REGULAR",
+          "INTRADAY_AUCTION",
+          "CLOSING_AUCTION",
+          "POST_MARKET",
+          "EXTENDED",
+          "ALL_DAY"
+        ]
+      }
+    },
+    "country_codes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

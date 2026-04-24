@@ -1,0 +1,14 @@
+{
+  "region_code": "eu",
+  "display_name": "Continental Europe",
+  "description": "Starter region metadata for EU cash-equity venues. Country-specific modules can override this with stricter defaults.",
+  "timezone_name": "Europe/Paris",
+  "market_families": ["EU_STOCK"],
+  "default_currency": "EUR",
+  "default_venue_codes": ["XPAR", "XETR"],
+  "default_sessions": ["REGULAR", "OPENING_AUCTION", "CLOSING_AUCTION"],
+  "country_codes": ["FR", "DE"],
+  "metadata": {
+    "notes": "Illustrative regional default only; venue-level calendars remain authoritative."
+  }
+}

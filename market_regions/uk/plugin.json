@@ -1,0 +1,14 @@
+{
+  "region_code": "uk",
+  "display_name": "United Kingdom",
+  "description": "Default region metadata for U.K. cash-equity venues.",
+  "timezone_name": "Europe/London",
+  "market_families": ["UK_STOCK"],
+  "default_currency": "GBP",
+  "default_venue_codes": ["XLON"],
+  "default_sessions": ["REGULAR", "OPENING_AUCTION", "CLOSING_AUCTION"],
+  "country_codes": ["GB"],
+  "metadata": {
+    "notes": "Supports auction-style defaults common to LSE-style equities."
+  }
+}

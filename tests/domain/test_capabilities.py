@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from domain.capabilities import BrokerCapabilities, infer_capabilities_from_legacy
+from domain.capabilities import (
+    BrokerCapabilities,
+    infer_capabilities_from_legacy,
+    infer_supported_regions_from_market_families,
+)
 from domain.currency import Currency
 from domain.enums import (
     AssetClass,
@@ -238,3 +242,23 @@ def test_infer_defaults_to_in_stock_when_broker_type_missing() -> None:
     caps = BrokerCapabilities(**d)
     assert MarketFamily.IN_STOCK in caps.market_families
     assert caps.supports_analyzer is True
+
+
+
+def test_supported_regions_inferred_from_market_families() -> None:
+    caps = _minimal_capabilities(market_families=[MarketFamily.US_STOCK, MarketFamily.EU_STOCK])
+    assert caps.supported_regions == ["us", "eu"]
+
+
+def test_supported_regions_explicit_override_wins() -> None:
+    caps = _minimal_capabilities(
+        market_families=[MarketFamily.US_STOCK],
+        supported_regions=["custom_us_region"],
+    )
+    assert caps.supported_regions == ["custom_us_region"]
+
+
+def test_infer_supported_regions_deduplicates_preserving_order() -> None:
+    assert infer_supported_regions_from_market_families(
+        [MarketFamily.US_STOCK, MarketFamily.US_STOCK, MarketFamily.UK_STOCK]
+    ) == ["us", "uk"]

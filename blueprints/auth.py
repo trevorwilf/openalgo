@@ -932,6 +932,11 @@ def get_profile_data():
             smtp_settings = dict(smtp_settings)
             smtp_settings["smtp_password"] = False
 
+        # Market-region settings are additive and safe for the existing SPA to ignore.
+        from services.market_region_service import get_market_region_catalog
+
+        market_region_settings = get_market_region_catalog(active_broker=session.get("broker"))
+
         # Generate TOTP QR code
         user = User.query.filter_by(username=username).first()
         qr_code = None
@@ -961,6 +966,7 @@ def get_profile_data():
                 "data": {
                     "username": username,
                     "smtp_settings": smtp_settings,
+                    "market_region_settings": market_region_settings,
                     "qr_code": qr_code,
                     "totp_secret": totp_secret,
                 },

@@ -17,6 +17,7 @@ function cap(overrides: Partial<BrokerCapabilities> = {}): BrokerCapabilities {
     broker_code: 'zerodha',
     broker_display_name: 'Zerodha',
     market_families: ['IN_STOCK'],
+    supported_regions: ['india'],
     supported_venue_codes: ['NSE', 'BSE', 'NFO'],
     supported_asset_classes: ['EQUITY', 'FUTURE', 'OPTION', 'INDEX', 'ETF'],
     supported_order_types: ['MARKET', 'LIMIT', 'STOP', 'STOP_LIMIT'],

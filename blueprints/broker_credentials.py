@@ -363,6 +363,7 @@ def get_capabilities():
                     "broker_name": broker,
                     "broker_type": "IN_stock",
                     "supported_exchanges": [],
+                    "supported_regions": [],
                     "leverage_config": False,
                 },
             }

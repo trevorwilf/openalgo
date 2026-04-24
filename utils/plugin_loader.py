@@ -124,8 +124,9 @@ def load_broker_capabilities(
     """Scan broker/*/plugin.json at startup and cache rich capabilities.
 
     Behavior:
-    * Each broker directory that has a plugin.json with a
-      ``supported_exchanges`` field is considered a candidate.
+    * Each broker directory that has a plugin.json with either a
+      legacy ``supported_exchanges`` field or the richer
+      ``supported_venue_codes`` field is considered a candidate.
     * The plugin.json is validated against the Phase 1b JSON Schema.
       If validation fails, the broker is logged and skipped — the app
       must remain boot-stable.
@@ -166,10 +167,13 @@ def load_broker_capabilities(
             skipped.add(broker_name)
             continue
 
-        # Keep the legacy gate: only brokers that declare supported_exchanges
-        # are considered usable. Skipping here (rather than failing) matches
-        # existing behavior.
-        if "supported_exchanges" not in plugin_data:
+        # Keep a light discovery gate: only brokers that declare either the
+        # legacy venue list or the richer supported_venue_codes are considered
+        # usable. Skipping here (rather than failing) matches existing behavior.
+        if (
+            "supported_exchanges" not in plugin_data
+            and "supported_venue_codes" not in plugin_data
+        ):
             continue
 
         errors = _validate_plugin_json(plugin_data)

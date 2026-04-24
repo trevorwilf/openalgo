@@ -2,30 +2,45 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openalgo.in/schemas/plugin.schema.json",
   "title": "OpenAlgo broker plugin.json",
-  "description": "Validated at startup by utils/plugin_loader.py. Invalid files are logged and the broker is skipped — the app remains boot-stable. The three legacy fields (broker_type, supported_exchanges, leverage_config) remain accepted; richer capability fields are additive and optional.",
+  "description": "Validated at startup by utils/plugin_loader.py. Invalid files are logged and the broker is skipped \u2014 the app remains boot-stable. The three legacy fields (broker_type, supported_exchanges, leverage_config) remain accepted; richer capability fields are additive and optional.",
   "type": "object",
   "additionalProperties": true,
   "properties": {
-    "Plugin Name": { "type": "string" },
-    "Plugin URI": { "type": "string" },
-    "Description": { "type": "string" },
-    "Version": { "type": "string" },
-    "Author": { "type": "string" },
-    "Author URI": { "type": "string" },
-
+    "Plugin Name": {
+      "type": "string"
+    },
+    "Plugin URI": {
+      "type": "string"
+    },
+    "Description": {
+      "type": "string"
+    },
+    "Version": {
+      "type": "string"
+    },
+    "Author": {
+      "type": "string"
+    },
+    "Author URI": {
+      "type": "string"
+    },
     "broker_type": {
       "type": "string",
       "description": "Legacy family string. 'IN_stock' or 'crypto' trigger per-family defaults; other values get a minimal skeleton."
     },
     "supported_exchanges": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Legacy venue-code list. Kept as the authoritative source of supported_venue_codes unless an explicit supported_venue_codes is also provided."
     },
-    "leverage_config": { "type": "boolean" },
-
-    "broker_display_name": { "type": "string" },
-
+    "leverage_config": {
+      "type": "boolean"
+    },
+    "broker_display_name": {
+      "type": "string"
+    },
     "market_families": {
       "type": "array",
       "items": {
@@ -43,9 +58,18 @@
         ]
       }
     },
+    "supported_regions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional market-region plugin codes (e.g. india, us, eu, uk). When omitted the backend infers them from market_families where possible."
+    },
     "supported_venue_codes": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "supported_asset_classes": {
       "type": "array",
@@ -88,7 +112,15 @@
       "type": "array",
       "items": {
         "type": "string",
-        "enum": ["DAY", "GTC", "GTD", "IOC", "FOK", "OPG", "ATC"]
+        "enum": [
+          "DAY",
+          "GTC",
+          "GTD",
+          "IOC",
+          "FOK",
+          "OPG",
+          "ATC"
+        ]
       }
     },
     "supported_sessions": {
@@ -111,7 +143,13 @@
       "type": "array",
       "items": {
         "type": "string",
-        "enum": ["WHOLE", "FRACTIONAL", "NOTIONAL", "CONTRACTS", "LOTS"]
+        "enum": [
+          "WHOLE",
+          "FRACTIONAL",
+          "NOTIONAL",
+          "CONTRACTS",
+          "LOTS"
+        ]
       }
     },
     "trading_currencies": {
@@ -136,7 +174,10 @@
       }
     },
     "base_currency": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "enum": [
         "INR",
         "USD",
@@ -154,16 +195,26 @@
         null
       ]
     },
-
-    "supports_fractional": { "type": "boolean" },
-    "supports_notional_orders": { "type": "boolean" },
-    "supports_extended_hours": { "type": "boolean" },
-    "supports_short_selling": { "type": "boolean" },
-    "supports_analyzer": { "type": "boolean" },
-
+    "supports_fractional": {
+      "type": "boolean"
+    },
+    "supports_notional_orders": {
+      "type": "boolean"
+    },
+    "supports_extended_hours": {
+      "type": "boolean"
+    },
+    "supports_short_selling": {
+      "type": "boolean"
+    },
+    "supports_analyzer": {
+      "type": "boolean"
+    },
     "features": {
       "type": "object",
-      "additionalProperties": { "type": "boolean" }
+      "additionalProperties": {
+        "type": "boolean"
+      }
     }
   }
 }
