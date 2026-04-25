@@ -10,5 +10,122 @@
   "country_codes": ["IN"],
   "metadata": {
     "notes": "Matches legacy OpenAlgo defaults."
+  },
+  "venues": [
+    {
+      "venue_code": "NSE",
+      "display_name": "National Stock Exchange of India",
+      "mic_code": "XNSE",
+      "country_code": "IN",
+      "timezone_name": "Asia/Kolkata",
+      "base_currency": "INR",
+      "market_family": "IN_STOCK",
+      "settlement_template": "T+1",
+      "session_model": "REGULAR_ONLY"
+    },
+    {
+      "venue_code": "BSE",
+      "display_name": "Bombay Stock Exchange",
+      "mic_code": "XBOM",
+      "country_code": "IN",
+      "timezone_name": "Asia/Kolkata",
+      "base_currency": "INR",
+      "market_family": "IN_STOCK",
+      "settlement_template": "T+1",
+      "session_model": "REGULAR_ONLY"
+    },
+    {
+      "venue_code": "NFO",
+      "display_name": "NSE Futures and Options",
+      "mic_code": "XNFO",
+      "country_code": "IN",
+      "timezone_name": "Asia/Kolkata",
+      "base_currency": "INR",
+      "market_family": "IN_STOCK",
+      "settlement_template": "T+1",
+      "session_model": "REGULAR_ONLY"
+    },
+    {
+      "venue_code": "BFO",
+      "display_name": "BSE Futures and Options",
+      "mic_code": "XBOM",
+      "country_code": "IN",
+      "timezone_name": "Asia/Kolkata",
+      "base_currency": "INR",
+      "market_family": "IN_STOCK",
+      "settlement_template": "T+1",
+      "session_model": "REGULAR_ONLY"
+    },
+    {
+      "venue_code": "CDS",
+      "display_name": "NSE Currency Derivatives",
+      "mic_code": "XNSE",
+      "country_code": "IN",
+      "timezone_name": "Asia/Kolkata",
+      "base_currency": "INR",
+      "market_family": "FX",
+      "settlement_template": "T+1",
+      "session_model": "REGULAR_ONLY"
+    },
+    {
+      "venue_code": "MCX",
+      "display_name": "Multi Commodity Exchange",
+      "mic_code": "XIMC",
+      "country_code": "IN",
+      "timezone_name": "Asia/Kolkata",
+      "base_currency": "INR",
+      "market_family": "COMMODITY",
+      "settlement_template": "T+1",
+      "session_model": "REGULAR_ONLY"
+    }
+  ],
+  "session_templates": [
+    {
+      "session_code": "REGULAR",
+      "venue_codes": ["NSE", "BSE", "NFO", "BFO"],
+      "local_start_time": "09:15",
+      "local_end_time": "15:30",
+      "days_of_week": [0, 1, 2, 3, 4],
+      "label": "Equity / F&O regular session"
+    },
+    {
+      "session_code": "REGULAR",
+      "venue_codes": ["MCX"],
+      "local_start_time": "09:00",
+      "local_end_time": "23:30",
+      "days_of_week": [0, 1, 2, 3, 4],
+      "label": "Commodity regular session"
+    },
+    {
+      "session_code": "REGULAR",
+      "venue_codes": ["CDS"],
+      "local_start_time": "09:00",
+      "local_end_time": "17:00",
+      "days_of_week": [0, 1, 2, 3, 4],
+      "label": "Currency derivatives regular session"
+    }
+  ],
+  "calendar_exceptions": [],
+  "symbol_display": {
+    "date_format": "DDMMMYY",
+    "option_right_codes": ["CE", "PE"],
+    "futures_grammar": "DDMMMYY-FUT",
+    "example_underlyings": [
+      "NIFTY",
+      "BANKNIFTY",
+      "SENSEX",
+      "BANKEX",
+      "FINNIFTY",
+      "MIDCPNIFTY"
+    ]
+  },
+  "feature_flags": {
+    "option_chain_enabled": true,
+    "iv_chart_enabled": true,
+    "muhurat_session_supported": true,
+    "india_legacy_compatibility": true,
+    "sandbox_enabled": true,
+    "analyzer_enabled": true,
+    "flow_templates_enabled": true
   }
 }

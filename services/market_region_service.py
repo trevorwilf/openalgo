@@ -99,9 +99,56 @@ def update_default_market_region(
     return catalog
 
 
+def get_venue_seed(region_code: str, venue_code: str):
+    """Return a ``VenueSeed`` from a region plugin, or ``None``.
+
+    Schema-v2 accessor introduced in Phase 2. Region plugins that
+    haven't been upgraded to v2 simply have an empty ``venues`` list,
+    so this returns ``None`` for them — callers should treat absence
+    as "fall back to legacy database/market_calendar_db."""
+    region = get_market_region(region_code)
+    if region is None:
+        return None
+    return region.get_venue(venue_code)
+
+
+def get_session_templates(region_code: str, venue_code: str):
+    """List session templates for a venue from the region plugin."""
+    region = get_market_region(region_code)
+    if region is None:
+        return []
+    return list(region.get_sessions_for(venue_code))
+
+
+def get_symbol_display(region_code: str):
+    """Return the region's ``SymbolDisplay`` (always non-None — empty
+    when the plugin has no v2 ``symbol_display`` block)."""
+    region = get_market_region(region_code)
+    if region is None:
+        from domain.regions import SymbolDisplay
+
+        return SymbolDisplay()
+    return region.symbol_display
+
+
+def is_region_feature_enabled(
+    region_code: str, flag: str, default: bool = False
+) -> bool:
+    """Check a region's feature flag. Returns ``default`` for missing
+    region or missing flag."""
+    region = get_market_region(region_code)
+    if region is None:
+        return default
+    return region.is_feature_enabled(flag, default=default)
+
+
 __all__ = [
     "get_default_market_region_details",
     "get_market_region_catalog",
+    "get_session_templates",
+    "get_symbol_display",
+    "get_venue_seed",
+    "is_region_feature_enabled",
     "resolve_default_market_region_code",
     "update_default_market_region",
 ]

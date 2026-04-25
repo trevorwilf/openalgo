@@ -10,5 +10,42 @@
   "country_codes": ["GB"],
   "metadata": {
     "notes": "Supports auction-style defaults common to LSE-style equities."
+  },
+  "venues": [
+    {
+      "venue_code": "XLON",
+      "display_name": "London Stock Exchange",
+      "mic_code": "XLON",
+      "country_code": "GB",
+      "timezone_name": "Europe/London",
+      "base_currency": "GBP",
+      "market_family": "UK_STOCK",
+      "settlement_template": "T+2",
+      "session_model": "AUCTIONS_AND_REGULAR"
+    }
+  ],
+  "session_templates": [
+    {
+      "session_code": "REGULAR",
+      "venue_codes": ["XLON"],
+      "local_start_time": "08:00",
+      "local_end_time": "16:30",
+      "days_of_week": [0, 1, 2, 3, 4],
+      "label": "LSE regular session"
+    }
+  ],
+  "calendar_exceptions": [],
+  "symbol_display": {
+    "date_format": "YYYY-MM-DD",
+    "option_right_codes": ["CALL", "PUT"],
+    "futures_grammar": "{product}{month_letter}{year_digit}",
+    "example_underlyings": ["VOD", "HSBA", "BP", "AZN"]
+  },
+  "feature_flags": {
+    "option_chain_enabled": false,
+    "iv_chart_enabled": false,
+    "sandbox_enabled": false,
+    "analyzer_enabled": false,
+    "flow_templates_enabled": false
   }
 }
