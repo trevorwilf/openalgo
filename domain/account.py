@@ -60,4 +60,28 @@ class NormalizedHolding(BaseModel):
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
-__all__ = ["NormalizedBalance", "NormalizedHolding", "NormalizedPosition"]
+class NormalizedAccountSnapshot(BaseModel):
+    """Combined account view: balance + open positions.
+
+    Promoted from :class:`broker.alpaca.api.account_api.AccountSnapshot`
+    in Phase 7. The compliance harness uses this as the canonical
+    account-context contract every promoted broker plugin must produce.
+    Schwab will populate ``account_hash`` for hash-addressed accounts.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    account_id: str
+    currency: Currency
+    balance: NormalizedBalance
+    positions: list[NormalizedPosition] = Field(default_factory=list)
+    account_hash: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+__all__ = [
+    "NormalizedAccountSnapshot",
+    "NormalizedBalance",
+    "NormalizedHolding",
+    "NormalizedPosition",
+]
