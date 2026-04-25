@@ -20,7 +20,7 @@ from sqlalchemy import desc, func
 
 from database.analyzer_db import AnalyzerLog, db_session
 from utils.api_analyzer import get_analyzer_stats
-from utils.capability_guards import requires_capability
+from utils.capability_guards import india_region_only, requires_capability
 from utils.logging import get_logger
 from utils.session import check_session_validity
 
@@ -180,6 +180,7 @@ def generate_csv(requests):
 
 @analyzer_bp.route("/")
 @check_session_validity
+@india_region_only()
 @requires_capability("supports_analyzer")
 def analyzer():
     """Render the analyzer dashboard"""
