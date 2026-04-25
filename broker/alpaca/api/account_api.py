@@ -10,27 +10,27 @@ domain-level shapes — no legacy imports.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
 import httpx
 
 from broker.alpaca.api.auth_api import AlpacaAuth
-from domain.account import NormalizedBalance, NormalizedPosition
+from domain.account import (
+    NormalizedAccountSnapshot,
+    NormalizedBalance,
+    NormalizedPosition,
+)
 from domain.currency import Currency, CurrencyAmount
 from domain.enums import AssetClass, PositionEffect, QuantityUnit
 from domain.instrument_ref import InstrumentRef
 
 
-@dataclass(frozen=True)
-class AccountSnapshot:
-    """Flat snapshot of balance + positions used by dashboards."""
-
-    balance: NormalizedBalance
-    positions: list[NormalizedPosition]
-    account_id: str
-    currency: Currency
+# Phase 7 — `AccountSnapshot` is now the canonical
+# ``domain.account.NormalizedAccountSnapshot``. The alias is kept so
+# any external imports of the old name continue to work; new code
+# should use the canonical class.
+AccountSnapshot = NormalizedAccountSnapshot
 
 
 def _client_kwargs(auth: AlpacaAuth) -> dict[str, Any]:
@@ -118,11 +118,11 @@ def get_positions(
 
 def get_account_snapshot(
     auth: AlpacaAuth, *, client: httpx.Client | None = None
-) -> AccountSnapshot:
+) -> NormalizedAccountSnapshot:
     """One-shot helper — useful for UI and analyzer."""
     balance = get_account(auth, client=client)
     positions = get_positions(auth, client=client)
-    return AccountSnapshot(
+    return NormalizedAccountSnapshot(
         balance=balance,
         positions=positions,
         account_id=str(balance.extra.get("account_id", "")),
