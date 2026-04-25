@@ -83,10 +83,24 @@ def _validate_plugin_json(plugin_data: dict[str, Any]) -> list[str]:
 def _region_root_path(region_directory: str) -> str:
     if os.path.isabs(region_directory):
         return region_directory
+    # Look in app.root_path first (production), then the current
+    # working directory (parity / standalone tests), then the repo
+    # root inferred from this module's path. The first candidate
+    # whose target directory exists wins so test apps that don't have
+    # the project's market_regions/ folder still see the shipped
+    # plugins.
+    candidates: list[str] = []
     try:
-        return os.path.join(current_app.root_path, region_directory)
+        candidates.append(os.path.join(current_app.root_path, region_directory))
     except RuntimeError:
-        return os.path.join(os.getcwd(), region_directory)
+        pass
+    candidates.append(os.path.join(os.getcwd(), region_directory))
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates.append(os.path.join(repo_root, region_directory))
+    for path in candidates:
+        if os.path.isdir(path):
+            return path
+    return candidates[0]  # let the caller log/skip cleanly
 
 
 def _augment_region_defaults(region_name: str, plugin_data: dict[str, Any]) -> dict[str, Any]:

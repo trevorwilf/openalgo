@@ -9,7 +9,10 @@
   "default_sessions": ["REGULAR"],
   "country_codes": ["IN"],
   "metadata": {
-    "notes": "Matches legacy OpenAlgo defaults."
+    "notes": "Matches legacy OpenAlgo defaults.",
+    "flow_defaults": {
+      "products": ["MIS", "CNC", "NRML"]
+    }
   },
   "venues": [
     {

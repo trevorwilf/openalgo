@@ -122,4 +122,64 @@ describe('useSupportedExchanges', () => {
     expect(result.current.isCrypto).toBe(true)
     expect(result.current.defaultExchange).toBe('CRYPTO')
   })
+
+  // ---- Phase 5 (ADR 0010): non-India brokers never get the legacy
+  // NSE/NFO fallback even with allowLegacyFallback=true. -----------
+
+  it('non-India broker uses its own venue codes, not legacy fallback', () => {
+    setCapabilities({
+      broker_name: 'alpaca',
+      broker_type: 'US_stock',
+      broker_code: 'alpaca',
+      market_families: ['US_STOCK'],
+      supported_regions: ['us'],
+      supported_venue_codes: ['XNAS', 'XNYS'],
+      base_currency: 'USD',
+      trading_currencies: ['USD'],
+    })
+    const { result } = renderHook(() => useSupportedExchanges())
+    expect(result.current.tradingExchanges.map((e) => e.value).sort()).toEqual(['XNAS', 'XNYS'])
+    expect(result.current.defaultExchange).toBe('XNAS')
+  })
+
+  it('non-India broker with no venue codes does NOT fall back to NSE', () => {
+    setCapabilities({
+      broker_name: 'fakeus',
+      broker_type: 'US_stock',
+      broker_code: 'fakeus',
+      market_families: ['US_STOCK'],
+      supported_regions: ['us'],
+      supported_venue_codes: [],
+      supported_exchanges: [],
+      base_currency: 'USD',
+      trading_currencies: ['USD'],
+    })
+    const { result } = renderHook(() => useSupportedExchanges({ allowLegacyFallback: true }))
+    expect(result.current.tradingExchanges).toEqual([])
+    expect(result.current.defaultExchange).toBe('')
+  })
+
+  it('legacy India plugin (no supported_regions field) still falls back to NSE', () => {
+    // capabilities stays null but the loader hasn't yet returned data;
+    // for legacy India installs the prior behavior is preserved.
+    useBrokerStore.setState({ capabilities: null, isLoaded: false })
+    const { result } = renderHook(() => useSupportedExchanges({ allowLegacyFallback: true }))
+    expect(result.current.tradingExchanges.map((e) => e.value)).toContain('NSE')
+  })
+
+  it('explicit india supported_regions falls back to NSE when capabilities lack venue codes', () => {
+    // A capabilities object with supported_regions=['india'] but
+    // supported_venue_codes undefined still gets the legacy fallback
+    // because `fromCap` is undefined → `usingFallback` true → and the
+    // plugin is India-shaped.
+    setCapabilities({
+      supported_regions: ['india'],
+      // @ts-expect-error force undefined venue codes for the test
+      supported_venue_codes: undefined,
+      // @ts-expect-error force undefined exchanges for the test
+      supported_exchanges: undefined,
+    })
+    const { result } = renderHook(() => useSupportedExchanges({ allowLegacyFallback: true }))
+    expect(result.current.tradingExchanges.map((e) => e.value)).toContain('NSE')
+  })
 })

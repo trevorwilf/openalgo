@@ -1,5 +1,7 @@
 import json
+import os
 import sys
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -18,6 +20,85 @@ client = api(api_key=api_key, host=host)
 # Create MCP server
 mcp = FastMCP("openalgo")
 
+
+# ---------------------------------------------------------------------------
+# Phase 5 (ADR 0010) — capability-aware default substitution.
+#
+# MCP tools used to default `exchange="NSE"` / `product="MIS"` for every
+# call. That works for India brokers but silently produces invalid
+# orders for US/EU brokers. The helper below substitutes Indian
+# defaults only when the connected broker is India-shaped; non-India
+# brokers MUST supply the value explicitly, otherwise the tool returns
+# a structured error pointing to /api/v2/capabilities/<broker>.
+# ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=1)
+def _connected_broker_caps() -> dict | None:
+    """Fetch the connected broker's capabilities once per MCP run.
+
+    The MCP process is short-lived and bound to one OpenAlgo instance
+    via the api_key + host args, so caching the capability surface for
+    the process lifetime is correct.
+    """
+    try:
+        # Allow tests / off-line callers to short-circuit via env var.
+        forced_region = os.environ.get("MCP_FORCE_REGION_FOR_TESTS")
+        if forced_region:
+            return {"supported_regions": [forced_region]}
+        # Reuse the SDK's broker-capabilities endpoint.
+        from openalgo import api as _api  # type: ignore[attr-defined]
+
+        if not hasattr(client, "capabilities"):
+            return None
+        resp = client.capabilities()
+        if isinstance(resp, dict):
+            return resp.get("data") or resp
+        return None
+    except Exception:
+        return None
+
+
+def _is_india_broker() -> bool:
+    caps = _connected_broker_caps()
+    if caps is None:
+        return True  # unknown — preserve legacy default for backward compat
+    regions = [str(r).lower() for r in (caps.get("supported_regions") or [])]
+    if not regions:
+        return True  # legacy India plugins have no supported_regions
+    return "india" in regions
+
+
+def _resolve_default(
+    value: str | None, india_default: str, *, field_name: str
+) -> str:
+    """Substitute an Indian default when the broker is India-shaped.
+
+    Non-India brokers MUST supply the value explicitly; otherwise this
+    raises ``ValueError`` so the caller surfaces a structured error.
+    """
+    if value is not None:
+        return value
+    if _is_india_broker():
+        return india_default
+    raise ValueError(
+        f"{field_name!r} is required when the connected broker is non-India. "
+        "Read /api/v2/capabilities/<broker> for the supported values."
+    )
+
+
+def _err(field_name: str, message: str) -> str:
+    """Render a structured JSON error string for an MCP tool."""
+    return json.dumps(
+        {
+            "status": "error",
+            "code": "missing_required_field",
+            "field": field_name,
+            "message": message,
+        }
+    )
+
+
 # ORDER MANAGEMENT TOOLS
 
 
@@ -26,9 +107,9 @@ def place_order(
     symbol: str,
     quantity: int,
     action: str,
-    exchange: str = "NSE",
+    exchange: str | None = None,
     price_type: str = "MARKET",
-    product: str = "MIS",
+    product: str | None = None,
     strategy: str = "Python",
     price: float | None = None,
     trigger_price: float | None = None,
@@ -41,22 +122,31 @@ def place_order(
         symbol: Stock symbol (e.g., 'RELIANCE')
         quantity: Number of shares
         action: 'BUY' or 'SELL'
-        exchange: 'NSE', 'NFO', 'CDS', 'BSE', 'BFO', 'BCD', 'MCX', 'NCDEX'
+        exchange: Venue code. India brokers: 'NSE', 'NFO', 'CDS',
+            'BSE', 'BFO', 'BCD', 'MCX', 'NCDEX'. Non-India brokers
+            (Alpaca, etc.): exchange is REQUIRED — see
+            /api/v2/capabilities/<broker> for valid venue codes.
         price_type: 'MARKET', 'LIMIT', 'SL', 'SL-M'
-        product: 'CNC', 'NRML', 'MIS'
+        product: India brokers: 'CNC', 'NRML', 'MIS' (defaults to
+            'MIS' on India). Non-India brokers: REQUIRED.
         strategy: Strategy name
         price: Limit price (required for LIMIT orders)
         trigger_price: Trigger price (for stop loss orders)
         disclosed_quantity: Disclosed quantity
     """
     try:
+        try:
+            exchange_resolved = _resolve_default(exchange, "NSE", field_name="exchange")
+            product_resolved = _resolve_default(product, "MIS", field_name="product")
+        except ValueError as e:
+            return _err("exchange/product", str(e))
         params = {
             "strategy": strategy,
             "symbol": symbol.upper(),
             "action": action.upper(),
-            "exchange": exchange.upper(),
+            "exchange": exchange_resolved.upper(),
             "price_type": price_type.upper(),
-            "product": product.upper(),
+            "product": product_resolved.upper(),
             "quantity": quantity,
         }
 
@@ -79,9 +169,9 @@ def place_smart_order(
     quantity: int,
     action: str,
     position_size: int,
-    exchange: str = "NSE",
+    exchange: str | None = None,
     price_type: str = "MARKET",
-    product: str = "MIS",
+    product: str | None = None,
     strategy: str = "Python",
     price: float | None = None,
 ) -> str:
@@ -100,13 +190,18 @@ def place_smart_order(
         price: Limit price (optional)
     """
     try:
+        try:
+            exchange_resolved = _resolve_default(exchange, "NSE", field_name="exchange")
+            product_resolved = _resolve_default(product, "MIS", field_name="product")
+        except ValueError as e:
+            return _err("exchange/product", str(e))
         params = {
             "strategy": strategy,
             "symbol": symbol.upper(),
             "action": action.upper(),
-            "exchange": exchange.upper(),
+            "exchange": exchange_resolved.upper(),
             "price_type": price_type.upper(),
-            "product": product.upper(),
+            "product": product_resolved.upper(),
             "quantity": quantity,
             "position_size": position_size,
         }
@@ -578,16 +673,23 @@ def calculate_margin(positions: list[dict[str, Any]]) -> str:
 
 
 @mcp.tool()
-def get_quote(symbol: str, exchange: str = "NSE") -> str:
+def get_quote(symbol: str, exchange: str | None = None) -> str:
     """
     Get current quote for a symbol.
 
     Args:
         symbol: Stock symbol
-        exchange: Exchange name
+        exchange: Venue code (India brokers default to NSE; non-India
+            brokers must supply explicitly).
     """
     try:
-        response = client.quotes(symbol=symbol.upper(), exchange=exchange.upper())
+        try:
+            exchange_resolved = _resolve_default(exchange, "NSE", field_name="exchange")
+        except ValueError as e:
+            return _err("exchange", str(e))
+        response = client.quotes(
+            symbol=symbol.upper(), exchange=exchange_resolved.upper()
+        )
         return json.dumps(response, indent=2)
     except Exception as e:
         return f"Error getting quote: {str(e)}"
