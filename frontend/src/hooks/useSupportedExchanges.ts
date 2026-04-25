@@ -24,23 +24,29 @@ const FNO_CODES = new Set(['NFO', 'BFO', 'MCX', 'CDS', 'CRYPTO'])
 
 /**
  * Last-resort default used ONLY when explicitly opted in via
- * `allowLegacyFallback`. Phase 5: callers should treat
- * `capabilities === null` as "capabilities unavailable" and either show
- * a loading state or an error, not render every exchange. This constant
- * remains for the login screen, which needs *some* list before the
- * user's broker is selected.
+ * `allowLegacyFallback` AND the broker (current OR last-known) is
+ * India-shaped. Phase 5 (ADR 0010): a broker whose `supported_regions`
+ * excludes "india" never falls back to NSE/NFO/MCX — it renders an
+ * "unavailable" state instead, so non-India brokers never show
+ * Indian exchanges by accident.
  */
 const LEGACY_FALLBACK_EXCHANGES = ['NSE', 'BSE', 'NFO', 'BFO', 'CDS', 'MCX', 'CRYPTO']
+
+function _broker_is_india_shaped(cap: { supported_regions?: string[] | null } | null): boolean {
+  if (cap == null) return true // unknown — treat as legacy India for backward compat
+  const regions = (cap.supported_regions ?? []).map((r) => String(r).toLowerCase())
+  if (regions.length === 0) return true
+  return regions.includes('india')
+}
 
 export interface UseSupportedExchangesOptions {
   /**
    * When true, fall back to the hardcoded Indian+CRYPTO exchange list
-   * when capabilities are unavailable. Defaults to **true** for this
-   * phase to preserve every existing caller's behavior; new callers
-   * should pass `false` and render an unavailable state instead.
-   *
-   * A future phase will flip the default to false. Callers that
-   * explicitly opt in today will not break when that happens.
+   * when capabilities are unavailable AND the active (or last-known)
+   * broker is India-shaped. Defaults to **true** for this phase to
+   * preserve every existing caller's behavior; the fallback is now
+   * gated by region so non-India brokers never receive Indian
+   * exchange defaults regardless of opt-in.
    */
   allowLegacyFallback?: boolean
 }
@@ -51,12 +57,15 @@ export function useSupportedExchanges(opts: UseSupportedExchangesOptions = {}) {
   const isError = useBrokerStore((s) => s.isError)
 
   return useMemo(() => {
-    // Phase 5: prefer the rich `supported_venue_codes` when present, fall
-    // back to the legacy alias `supported_exchanges`. Without capabilities
-    // we either return the legacy fallback (opt-in) or an empty list.
+    // Prefer the rich `supported_venue_codes` when present, fall back
+    // to the legacy alias `supported_exchanges`. Without capabilities
+    // and without the India-shape signal we render an unavailable
+    // state instead of the legacy NSE/NFO list.
     const fromCap = capabilities?.supported_venue_codes ?? capabilities?.supported_exchanges
     const usingFallback = fromCap === undefined
-    const supported = fromCap ?? (allowLegacyFallback ? LEGACY_FALLBACK_EXCHANGES : [])
+    const indiaShaped = _broker_is_india_shaped(capabilities)
+    const supported =
+      fromCap ?? (allowLegacyFallback && indiaShaped ? LEGACY_FALLBACK_EXCHANGES : [])
     const isCrypto = capabilities?.broker_type === 'crypto'
 
     // All exchanges from plugin.json
@@ -80,10 +89,15 @@ export function useSupportedExchanges(opts: UseSupportedExchangesOptions = {}) {
       (e) => e.value !== 'MCX' && e.value !== 'CDS'
     )
 
-    // Defaults
-    const defaultExchange = tradingExchanges[0]?.value ?? (isCrypto ? 'CRYPTO' : 'NSE')
-    const defaultFnoExchange = fnoExchanges[0]?.value ?? (isCrypto ? 'CRYPTO' : 'NFO')
-    const defaultToolsFnoExchange = toolsFnoExchanges[0]?.value ?? (isCrypto ? 'CRYPTO' : 'NFO')
+    // Defaults — only fall back to NSE/NFO when the broker is
+    // India-shaped (legacy plugin or supported_regions includes "india").
+    // Non-India brokers without venue codes get an empty default
+    // ('') so the UI shows an unavailable state rather than NSE.
+    const fallbackTrading = isCrypto ? 'CRYPTO' : indiaShaped ? 'NSE' : ''
+    const fallbackFno = isCrypto ? 'CRYPTO' : indiaShaped ? 'NFO' : ''
+    const defaultExchange = tradingExchanges[0]?.value ?? fallbackTrading
+    const defaultFnoExchange = fnoExchanges[0]?.value ?? fallbackFno
+    const defaultToolsFnoExchange = toolsFnoExchanges[0]?.value ?? fallbackFno
 
     // Underlyings filtered to only supported FNO exchanges
     const defaultUnderlyings: Record<string, string[]> = {}

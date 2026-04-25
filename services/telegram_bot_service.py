@@ -88,8 +88,54 @@ class TelegramBotService:
             return None
 
     def _cs(self, telegram_user: dict) -> str:
-        """Return the currency symbol for the user's broker ($ for crypto brokers, ₹ for others)."""
-        return "$" if telegram_user.get("broker") in CRYPTO_BROKERS else "₹"
+        """Return the currency symbol for the user's broker.
+
+        Phase 5 (ADR 0010) — currency comes from broker capabilities,
+        not a broker-name → ₹ inference. Lookup order:
+
+        1. ``BrokerCapabilities.base_currency`` for the user's broker.
+        2. Crypto symbol ($) when the plugin is crypto.
+        3. ₹ as final fallback ONLY for legacy India brokers
+           (``supported_regions`` empty or contains "india").
+        4. $ for everything else (US/EU/UK plugins).
+        """
+        broker = telegram_user.get("broker", "")
+        try:
+            from utils.plugin_loader import get_broker_capabilities
+
+            caps = get_broker_capabilities(broker)
+        except Exception:
+            caps = None
+
+        if caps is not None:
+            base = getattr(caps, "base_currency", None)
+            if base is not None:
+                value = getattr(base, "value", str(base))
+                # Map currency code → symbol where we have one; otherwise
+                # return the currency code itself (e.g. "GBP", "JPY") so
+                # the user still sees something deterministic.
+                symbols = {
+                    "INR": "₹",
+                    "USD": "$",
+                    "EUR": "€",
+                    "GBP": "£",
+                    "JPY": "¥",
+                    "USDT": "$",
+                    "USDC": "$",
+                    "BTC": "₿",
+                }
+                return symbols.get(str(value), str(value))
+
+            broker_type = (getattr(caps, "broker_type", "") or "").strip().lower()
+            if broker_type == "crypto":
+                return "$"
+            regions = {str(r).lower() for r in (caps.supported_regions or [])}
+            if "india" in regions:
+                return "₹"
+            return "$"
+
+        # No capabilities loaded — preserve legacy fallback.
+        return "$" if broker in CRYPTO_BROKERS else "₹"
 
     async def _make_sdk_call(self, telegram_id: int, method: str, **kwargs) -> dict | None:
         """Make an SDK call in async context"""
