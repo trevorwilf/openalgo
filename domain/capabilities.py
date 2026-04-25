@@ -106,6 +106,16 @@ class BrokerCapabilities(BaseModel):
     supports_short_selling: bool = False
     supports_analyzer: bool = False
     features: dict[str, bool] = Field(default_factory=dict)
+    # Phase 4 — broker-declared master-contract refresh policy. Schema:
+    # {
+    #   "timezone": "Asia/Kolkata",   # IANA tz to anchor `cutoff_local`
+    #   "cutoff_local": "08:00",      # daily refresh boundary
+    #   "frequency": "daily",         # "daily" | "never"
+    #   "skip_if_24x7": false
+    # }
+    # When None (legacy India plugins), auth_utils retains the existing
+    # 08:00 IST behavior for backward compat.
+    master_contract_refresh_policy: dict[str, Any] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -275,6 +285,7 @@ _EXPLICIT_OVERRIDE_KEYS: frozenset[str] = frozenset(
         "supports_short_selling",
         "supports_analyzer",
         "features",
+        "master_contract_refresh_policy",
     }
 )
 

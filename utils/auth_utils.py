@@ -27,30 +27,95 @@ from utils.session import get_session_expiry_time, set_session_login_time
 
 logger = get_logger(__name__)
 
-# Timezones
+# Timezones — kept for backward compatibility with legacy India callers.
+# Phase 4 routes new timezone reads through the broker capability
+# `master_contract_refresh_policy` block. Operators that want a
+# non-default tz set the policy in plugin.json or use the per-broker
+# environment knobs.
 IST = pytz.timezone("Asia/Kolkata")
 UTC = pytz.utc
+
+
+_REFRESH_POLICY_NEVER = {"frequency": "never", "skip_if_24x7": True}
+
+
+def _broker_refresh_policy(broker: str) -> dict | None:
+    """Return the per-broker master_contract_refresh_policy dict from the
+    broker's :class:`BrokerCapabilities`, or ``None`` when no policy is
+    declared (legacy India brokers).
+    """
+    try:
+        from utils.plugin_loader import get_broker_capabilities
+
+        caps = get_broker_capabilities(broker)
+    except Exception:  # pragma: no cover - best-effort lookup
+        return None
+    if caps is None:
+        return None
+    policy = getattr(caps, "master_contract_refresh_policy", None)
+    if policy:
+        return dict(policy)
+    # Crypto plugins that don't declare a policy still get the
+    # 24x7-skip default — preserves the historical behavior of
+    # CRYPTO_BROKERS handling.
+    broker_type = (getattr(caps, "broker_type", "") or "").strip().lower()
+    if broker_type == "crypto":
+        return dict(_REFRESH_POLICY_NEVER)
+    return None
 
 
 def get_master_contract_cutoff(broker: str):
     """
     Get master contract cutoff time and reference timezone for the given broker.
 
-    Indian exchange brokers:
-        Reads MASTER_CONTRACT_CUTOFF_TIME (default "08:00").
-        Timezone: IST.  The Indian exchanges publish a complete symbol list once
-        daily before market open; 08:00 IST is a safe cache boundary.
+    Per-broker override (Phase 4):
+        If the broker's plugin.json declares
+        ``master_contract_refresh_policy = {"timezone": "...",
+        "cutoff_local": "HH:MM", "frequency": "daily" | "never",
+        "skip_if_24x7": bool}``, that policy wins. ``frequency=="never"``
+        returns ``None`` so callers know to skip the refresh entirely.
 
-    Crypto brokers (CRYPTO_BROKERS):
-        Reads CRYPTO_MASTER_CONTRACT_CUTOFF_TIME (default "00:00").
-        Timezone: UTC.  Crypto markets run 24/7 on UTC; new expiry series can
-        appear at any time.  The default "00:00" UTC means: cache is valid for
-        the current UTC calendar day — the first login of each UTC day fetches
-        fresh data, subsequent logins reuse it.
+    Indian exchange brokers (legacy default when no policy is present):
+        Reads MASTER_CONTRACT_CUTOFF_TIME (default "08:00") and uses IST.
+
+    Crypto brokers (broker_type == "crypto" or in CRYPTO_BROKERS):
+        Reads CRYPTO_MASTER_CONTRACT_CUTOFF_TIME (default "00:00") in UTC.
 
     Returns:
-        tuple: (hour: int, minute: int, tz: tzinfo)
+        tuple: (hour: int, minute: int, tz: tzinfo) for daily refresh,
+        OR ``(None, None, None)`` when the policy says never.
     """
+    policy = _broker_refresh_policy(broker)
+    if policy is not None:
+        if str(policy.get("frequency", "daily")).lower() == "never":
+            return None, None, None
+        cutoff = str(policy.get("cutoff_local", "08:00"))
+        tz_name = str(policy.get("timezone", "Asia/Kolkata"))
+        try:
+            tz = pytz.timezone(tz_name)
+        except pytz.UnknownTimeZoneError:
+            logger.warning(
+                "broker %r master_contract_refresh_policy.timezone=%r "
+                "is not a recognised IANA tz; falling back to UTC",
+                broker,
+                tz_name,
+            )
+            tz = UTC
+        try:
+            parts = cutoff.split(":")
+            hour = int(parts[0])
+            minute = int(parts[1]) if len(parts) > 1 else 0
+            return hour, minute, tz
+        except (ValueError, IndexError):
+            logger.warning(
+                "broker %r master_contract_refresh_policy.cutoff_local=%r "
+                "could not be parsed; using 08:00 in %s",
+                broker,
+                cutoff,
+                tz_name,
+            )
+            return 8, 0, tz
+
     if broker.lower() in CRYPTO_BROKERS:
         env_val = os.getenv("CRYPTO_MASTER_CONTRACT_CUTOFF_TIME", "00:00")
         default = (0, 0)
@@ -105,6 +170,11 @@ def should_download_master_contract(broker):
 
     # Get cutoff time and reference timezone for this broker
     cutoff_hour, cutoff_minute, tz = get_master_contract_cutoff(broker)
+    if cutoff_hour is None:
+        # Phase 4 — broker plugin declared frequency=never. Always reuse
+        # the cached download (24x7 venues, e.g. crypto with no
+        # daily refresh boundary).
+        return False, "broker plugin master_contract_refresh_policy=never"
     tz_label = "UTC" if tz is UTC else "IST"
 
     # Current calendar date in the broker's reference timezone

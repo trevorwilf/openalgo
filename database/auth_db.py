@@ -81,21 +81,28 @@ def get_session_based_cache_ttl():
         expiry_time = os.getenv("SESSION_EXPIRY_TIME", "03:00")
         hour, minute = map(int, expiry_time.split(":"))
 
-        # Calculate time until next session expiry
-        now_utc = datetime.now(pytz.timezone("UTC"))
-        now_ist = now_utc.astimezone(pytz.timezone("Asia/Kolkata"))
+        # Calculate time until next session expiry. Phase 4 — anchor in
+        # SESSION_EXPIRY_TIMEZONE (default Asia/Kolkata) so US/EU
+        # deployments do not silently use IST.
+        tz_name = os.getenv("SESSION_EXPIRY_TIMEZONE", "Asia/Kolkata")
+        try:
+            tz = pytz.timezone(tz_name)
+        except pytz.UnknownTimeZoneError:
+            tz = pytz.timezone("Asia/Kolkata")
+        now_utc = datetime.now(pytz.utc)
+        now_local = now_utc.astimezone(tz)
 
         # Today's expiry time
-        today_expiry = now_ist.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        today_expiry = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
         # If we've passed today's expiry, use tomorrow's expiry
-        if now_ist >= today_expiry:
+        if now_local >= today_expiry:
             from datetime import timedelta
 
             today_expiry += timedelta(days=1)
 
         # Calculate seconds until expiry
-        time_until_expiry = (today_expiry - now_ist).total_seconds()
+        time_until_expiry = (today_expiry - now_local).total_seconds()
 
         # Use time until session expiry, with reasonable bounds
         # Minimum 5 minutes, maximum 24 hours
@@ -228,10 +235,23 @@ class LoginAttempt(Base):
 
 
 def _now_ist():
-    """Get current time in IST."""
+    """Return the current wall-clock time in the configured session
+    timezone (default Asia/Kolkata for backward compatibility).
+
+    Despite the historical name, this is the timestamp used for login-
+    audit rows. Phase 4 routes it through SESSION_EXPIRY_TIMEZONE so
+    operators on non-Indian deployments can see audit timestamps in
+    their actual venue tz instead of IST.
+    """
     from datetime import datetime
     import pytz
-    return datetime.now(pytz.timezone("Asia/Kolkata"))
+
+    tz_name = os.getenv("SESSION_EXPIRY_TIMEZONE", "Asia/Kolkata")
+    try:
+        tz = pytz.timezone(tz_name)
+    except pytz.UnknownTimeZoneError:
+        tz = pytz.timezone("Asia/Kolkata")
+    return datetime.now(tz)
 
 
 def log_login_attempt(username, ip_address=None, device_info=None, status="failed",
