@@ -92,7 +92,14 @@ def _dispatch_promoted(
         return error("bad_request", f"bad datetime: {e}"), 400
 
     req = NormalizedBarRequest(interval=interval, start=start_dt, end=end_dt)
-    account_ctx: dict[str, Any] = {"broker_code": broker, "auth_token": auth_token}
+    from services.account_context_service import resolve_account_context
+    from utils.plugin_loader import get_broker_capabilities
+
+    account_ctx = resolve_account_context(
+        broker_code=broker,
+        auth_token=auth_token,
+        capabilities=get_broker_capabilities(broker),
+    )
 
     try:
         bars = adapter.get_bars(resolved, req, account_ctx)

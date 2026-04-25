@@ -99,27 +99,25 @@ def test_promoted_flag_on_dispatches_via_fake_translator(
 def test_promoted_flag_on_but_no_translator_registered_returns_503(
     flask_app, monkeypatch
 ):
+    """Phase 3 ADR 0008: flag-on with no translator → 503, never legacy."""
     monkeypatch.setenv("API_V2_ZZNONE", "1")
     _install_fake_auth_resolver(monkeypatch, broker_code="zznone")
 
-    # Legacy must not run either — flag is on.
-    def _forbidden(*args, **kwargs):  # pragma: no cover
+    # Legacy must not run on this path — Phase 3 forbids the fallback.
+    def _forbidden(*args, **kwargs):  # pragma: no cover - raised => bug
         raise AssertionError("legacy path must not be used when flag is on")
 
-    # When no translator is registered, the dispatcher falls through to
-    # the legacy path (promoted = None). That's intentional per spec:
-    # flag-on with no translator still means "stay on legacy". The 503
-    # error only comes from within the promoted path (no send_native);
-    # when the registry lookup misses entirely, legacy is the safe
-    # default.
-    # For this test we only assert that we did not 500.
+    monkeypatch.setattr(
+        "domain.translators.normalized_order_to_legacy_fields", _forbidden
+    )
+
     client = flask_app.test_client()
     resp = client.post("/api/v2/orders", json=_valid_order_body())
-    # Legacy path will try to look up an auth token that doesn't exist
-    # in the test DB and return 500 from place_order_service, OR a 422
-    # (validation) or 502 (broker). We only check we did not 404 (route
-    # not registered) and did not 200 (because there's no real broker).
-    assert resp.status_code != 404
+    assert resp.status_code == 503, resp.get_json()
+    body = resp.get_json()
+    assert body["error"]["code"] == "translator_not_registered"
+    assert body["error"]["details"]["broker_code"] == "zznone"
+    assert body["error"]["details"]["flag"] == "API_V2_ZZNONE"
 
 
 def test_promoted_flag_off_uses_legacy_path(flask_app, monkeypatch):
