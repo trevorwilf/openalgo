@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openalgo.in/schemas/market-region-plugin.v2.schema.json",
+  "title": "OpenAlgo market region plugin.json (v2)",
+  "description": "Schema v2 of the market-region plugin contract. Adds optional venues, session_templates, calendar_exceptions, symbol_display, and feature_flags sections so region plugins own venue facts, schedules, and symbol-display conventions. Schema v1 fields are preserved verbatim — every v1 plugin continues to validate. utils/region_loader.py accepts both versions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "region_code",
+    "display_name",
+    "timezone_name",
+    "market_families"
+  ],
+  "properties": {
+    "region_code": {
+      "type": "string",
+      "description": "Stable machine-readable region code, e.g. india, us, eu, uk."
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "description": {
+      "type": ["string", "null"]
+    },
+    "timezone_name": {
+      "type": "string",
+      "description": "Canonical IANA timezone for region-level defaults."
+    },
+    "market_families": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "IN_STOCK",
+          "US_STOCK",
+          "EU_STOCK",
+          "UK_STOCK",
+          "CRYPTO",
+          "FUTURES",
+          "FX",
+          "COMMODITY",
+          "OTHER"
+        ]
+      }
+    },
+    "default_currency": {
+      "type": ["string", "null"],
+      "enum": [
+        "INR",
+        "USD",
+        "EUR",
+        "GBP",
+        "CHF",
+        "SGD",
+        "HKD",
+        "JPY",
+        "AUD",
+        "USDT",
+        "USDC",
+        "BTC",
+        "ETH",
+        null
+      ]
+    },
+    "default_venue_codes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "default_sessions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "PRE_MARKET",
+          "OPENING_AUCTION",
+          "REGULAR",
+          "INTRADAY_AUCTION",
+          "CLOSING_AUCTION",
+          "POST_MARKET",
+          "EXTENDED",
+          "ALL_DAY"
+        ]
+      }
+    },
+    "country_codes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "venues": {
+      "type": "array",
+      "description": "Venue catalog the region owns. Each entry pins venue-level defaults (tz, currency, settlement, session_model). Replaces the legacy database/market_calendar_db.py venue inventory for the promoted lane.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["venue_code"],
+        "properties": {
+          "venue_code": { "type": "string" },
+          "display_name": { "type": "string" },
+          "mic_code": { "type": ["string", "null"] },
+          "country_code": { "type": "string" },
+          "timezone_name": { "type": "string" },
+          "base_currency": { "type": "string" },
+          "market_family": {
+            "type": "string",
+            "enum": [
+              "IN_STOCK",
+              "US_STOCK",
+              "EU_STOCK",
+              "UK_STOCK",
+              "CRYPTO",
+              "FUTURES",
+              "FX",
+              "COMMODITY",
+              "OTHER"
+            ]
+          },
+          "settlement_template": {
+            "type": "string",
+            "description": "Cash-equity settlement convention, e.g. T+0, T+1, T+2."
+          },
+          "session_model": {
+            "type": "string",
+            "enum": ["REGULAR_ONLY", "PRE_REGULAR_POST", "AUCTIONS_AND_REGULAR", "ALL_DAY"]
+          },
+          "metadata": { "type": "object", "additionalProperties": true }
+        }
+      }
+    },
+    "session_templates": {
+      "type": "array",
+      "description": "Session windows in venue-local time, by day-of-week. effective_from / effective_to are dates (YYYY-MM-DD) or null for open-ended.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["session_code", "local_start_time", "local_end_time", "days_of_week"],
+        "properties": {
+          "session_code": {
+            "type": "string",
+            "enum": [
+              "PRE_MARKET",
+              "OPENING_AUCTION",
+              "REGULAR",
+              "INTRADAY_AUCTION",
+              "CLOSING_AUCTION",
+              "POST_MARKET",
+              "EXTENDED",
+              "ALL_DAY"
+            ]
+          },
+          "venue_code": { "type": "string" },
+          "venue_codes": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "local_start_time": { "type": "string", "pattern": "^[0-9]{2}:[0-9]{2}(:[0-9]{2})?$" },
+          "local_end_time": { "type": "string", "pattern": "^[0-9]{2}:[0-9]{2}(:[0-9]{2})?$" },
+          "days_of_week": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 0, "maximum": 6 }
+          },
+          "effective_from": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "effective_to": { "type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "label": { "type": "string" }
+        }
+      }
+    },
+    "calendar_exceptions": {
+      "type": "array",
+      "description": "Holiday and special-session overrides. Empty in this phase for India — Phase 4 migrates the legacy market_holidays table into venue_calendar_exceptions.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["date", "venue_code", "exception_type"],
+        "properties": {
+          "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "venue_code": { "type": "string" },
+          "exception_type": {
+            "type": "string",
+            "enum": ["CLOSED", "EARLY_CLOSE", "LATE_OPEN", "SPECIAL_SESSION"]
+          },
+          "local_start_time": { "type": ["string", "null"], "pattern": "^[0-9]{2}:[0-9]{2}(:[0-9]{2})?$" },
+          "local_end_time": { "type": ["string", "null"], "pattern": "^[0-9]{2}:[0-9]{2}(:[0-9]{2})?$" },
+          "reason": { "type": ["string", "null"] },
+          "source": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "symbol_display": {
+      "type": "object",
+      "description": "Region-specific symbol grammar conventions used by display and parsing layers.",
+      "additionalProperties": false,
+      "properties": {
+        "date_format": { "type": "string" },
+        "option_right_codes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "futures_grammar": { "type": "string" },
+        "example_underlyings": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "feature_flags": {
+      "type": "object",
+      "description": "Region-scoped feature toggles. Booleans only; default-off semantics. Phase 6 reads these in services/feature_gate_service.py.",
+      "additionalProperties": { "type": "boolean" }
+    }
+  }
+}

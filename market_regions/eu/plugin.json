@@ -10,5 +10,53 @@
   "country_codes": ["FR", "DE"],
   "metadata": {
     "notes": "Illustrative regional default only; venue-level calendars remain authoritative."
+  },
+  "venues": [
+    {
+      "venue_code": "XPAR",
+      "display_name": "Euronext Paris",
+      "mic_code": "XPAR",
+      "country_code": "FR",
+      "timezone_name": "Europe/Paris",
+      "base_currency": "EUR",
+      "market_family": "EU_STOCK",
+      "settlement_template": "T+2",
+      "session_model": "AUCTIONS_AND_REGULAR"
+    },
+    {
+      "venue_code": "XETR",
+      "display_name": "Xetra",
+      "mic_code": "XETR",
+      "country_code": "DE",
+      "timezone_name": "Europe/Berlin",
+      "base_currency": "EUR",
+      "market_family": "EU_STOCK",
+      "settlement_template": "T+2",
+      "session_model": "AUCTIONS_AND_REGULAR"
+    }
+  ],
+  "session_templates": [
+    {
+      "session_code": "REGULAR",
+      "venue_codes": ["XPAR", "XETR"],
+      "local_start_time": "09:00",
+      "local_end_time": "17:30",
+      "days_of_week": [0, 1, 2, 3, 4],
+      "label": "Continental Europe regular session"
+    }
+  ],
+  "calendar_exceptions": [],
+  "symbol_display": {
+    "date_format": "YYYY-MM-DD",
+    "option_right_codes": ["CALL", "PUT"],
+    "futures_grammar": "{product}{month_letter}{year_digit}",
+    "example_underlyings": ["MC.PA", "SAP.DE", "OR.PA", "SIE.DE"]
+  },
+  "feature_flags": {
+    "option_chain_enabled": false,
+    "iv_chart_enabled": false,
+    "sandbox_enabled": false,
+    "analyzer_enabled": false,
+    "flow_templates_enabled": false
   }
 }

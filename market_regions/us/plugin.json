@@ -10,5 +10,103 @@
   "country_codes": ["US"],
   "metadata": {
     "notes": "Use broker-specific session overrides for actual tradable windows."
+  },
+  "venues": [
+    {
+      "venue_code": "XNYS",
+      "display_name": "New York Stock Exchange",
+      "mic_code": "XNYS",
+      "country_code": "US",
+      "timezone_name": "America/New_York",
+      "base_currency": "USD",
+      "market_family": "US_STOCK",
+      "settlement_template": "T+1",
+      "session_model": "PRE_REGULAR_POST"
+    },
+    {
+      "venue_code": "XNAS",
+      "display_name": "Nasdaq",
+      "mic_code": "XNAS",
+      "country_code": "US",
+      "timezone_name": "America/New_York",
+      "base_currency": "USD",
+      "market_family": "US_STOCK",
+      "settlement_template": "T+1",
+      "session_model": "PRE_REGULAR_POST"
+    },
+    {
+      "venue_code": "ARCX",
+      "display_name": "NYSE Arca",
+      "mic_code": "ARCX",
+      "country_code": "US",
+      "timezone_name": "America/New_York",
+      "base_currency": "USD",
+      "market_family": "US_STOCK",
+      "settlement_template": "T+1",
+      "session_model": "PRE_REGULAR_POST"
+    },
+    {
+      "venue_code": "BATS",
+      "display_name": "Cboe BZX",
+      "mic_code": "BATS",
+      "country_code": "US",
+      "timezone_name": "America/New_York",
+      "base_currency": "USD",
+      "market_family": "US_STOCK",
+      "settlement_template": "T+1",
+      "session_model": "PRE_REGULAR_POST"
+    },
+    {
+      "venue_code": "IEXG",
+      "display_name": "Investors Exchange",
+      "mic_code": "IEXG",
+      "country_code": "US",
+      "timezone_name": "America/New_York",
+      "base_currency": "USD",
+      "market_family": "US_STOCK",
+      "settlement_template": "T+1",
+      "session_model": "PRE_REGULAR_POST"
+    }
+  ],
+  "session_templates": [
+    {
+      "session_code": "REGULAR",
+      "venue_codes": ["XNYS", "XNAS", "ARCX", "BATS", "IEXG"],
+      "local_start_time": "09:30",
+      "local_end_time": "16:00",
+      "days_of_week": [0, 1, 2, 3, 4],
+      "label": "U.S. cash-equity regular session"
+    },
+    {
+      "session_code": "PRE_MARKET",
+      "venue_codes": ["XNYS", "XNAS", "ARCX", "BATS", "IEXG"],
+      "local_start_time": "04:00",
+      "local_end_time": "09:30",
+      "days_of_week": [0, 1, 2, 3, 4],
+      "label": "U.S. extended-hours pre-market"
+    },
+    {
+      "session_code": "POST_MARKET",
+      "venue_codes": ["XNYS", "XNAS", "ARCX", "BATS", "IEXG"],
+      "local_start_time": "16:00",
+      "local_end_time": "20:00",
+      "days_of_week": [0, 1, 2, 3, 4],
+      "label": "U.S. extended-hours post-market"
+    }
+  ],
+  "calendar_exceptions": [],
+  "symbol_display": {
+    "date_format": "YYYY-MM-DD",
+    "option_right_codes": ["CALL", "PUT"],
+    "futures_grammar": "{product}{month_letter}{year_digit}",
+    "example_underlyings": ["AAPL", "MSFT", "SPY", "QQQ"]
+  },
+  "feature_flags": {
+    "option_chain_enabled": false,
+    "iv_chart_enabled": false,
+    "muhurat_session_supported": false,
+    "sandbox_enabled": false,
+    "analyzer_enabled": false,
+    "flow_templates_enabled": false
   }
 }

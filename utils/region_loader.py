@@ -25,22 +25,49 @@ _market_regions: dict[str, MarketRegion] = {}
 _skipped_regions: set[str] = set()
 
 
-def _schema_path() -> str:
+def _schema_path(version: str = "v2") -> str:
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(repo_root, "docs", "region-plugin-schema", "plugin.schema.json")
+    fname = "plugin.schema.json" if version == "v1" else "plugin.v2.schema.json"
+    return os.path.join(repo_root, "docs", "region-plugin-schema", fname)
 
 
-@lru_cache(maxsize=1)
-def _load_schema() -> dict[str, Any]:
-    path = _schema_path()
+@lru_cache(maxsize=2)
+def _load_schema(version: str = "v2") -> dict[str, Any]:
+    path = _schema_path(version)
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
+# v2 fields that, if present on a plugin, force v2 validation. v1
+# plugins (none of these keys present) are validated against v1 so the
+# stricter v2 ``additionalProperties: false`` does not reject them when
+# they have legacy fields the v2 schema deliberately renamed.
+_V2_INDICATOR_KEYS: tuple[str, ...] = (
+    "venues",
+    "session_templates",
+    "calendar_exceptions",
+    "symbol_display",
+    "feature_flags",
+)
+
+
+def _detect_schema_version(plugin_data: dict[str, Any]) -> str:
+    return "v2" if any(k in plugin_data for k in _V2_INDICATOR_KEYS) else "v1"
+
+
 def _validate_plugin_json(plugin_data: dict[str, Any]) -> list[str]:
-    """Validate a region plugin.json against the JSON schema."""
+    """Validate a region plugin.json against the appropriate schema.
+
+    v1 plugins (no v2 sections) validate against the original
+    ``plugin.schema.json``. Plugins that include any v2 section
+    (``venues``, ``session_templates``, ``calendar_exceptions``,
+    ``symbol_display``, ``feature_flags``) validate against
+    ``plugin.v2.schema.json``. Both schemas share the v1 required
+    fields, so v1 plugins continue to validate verbatim.
+    """
+    version = _detect_schema_version(plugin_data)
     try:
-        validator = jsonschema.Draft202012Validator(_load_schema())
+        validator = jsonschema.Draft202012Validator(_load_schema(version))
     except (FileNotFoundError, json.JSONDecodeError, jsonschema.SchemaError) as e:
         logger.exception(f"market region schema unusable ({e}); skipping validation")
         return []
@@ -158,6 +185,11 @@ def _reset_cache_for_tests() -> None:
     _market_regions = {}
     _skipped_regions = set()
     _load_schema.cache_clear()
+
+
+def detect_schema_version(plugin_data: dict[str, Any]) -> str:
+    """Public test helper exposing the v1/v2 detection."""
+    return _detect_schema_version(plugin_data)
 
 
 def _skipped_regions_for_tests() -> set[str]:
