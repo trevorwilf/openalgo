@@ -70,6 +70,10 @@ single env-var flip.
   `services/broker_market_data_registry.py` (Phase 4)
 - `domain/broker_rules.py` and
   `services/rule_enforcement.py` (Phase 5)
+- `domain/account_context.py`,
+  `services/account_context_service.py` (Phase 3 of v2)
+- `domain/broker_streaming.py`,
+  `services/broker_streaming_registry.py` (Phase 8 of v2)
 - Future non-Indian broker adapters under `broker/<code>/` that
   declare `supported_regions` without `"india"` in `plugin.json`
 

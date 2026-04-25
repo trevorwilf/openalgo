@@ -120,4 +120,91 @@ class NormalizedOrderRequest(BaseModel):
         return self
 
 
-__all__ = ["NormalizedOrderRequest"]
+class OrderLeg(BaseModel):
+    """One leg of a multi-leg / combo order.
+
+    Phase 8: see ``NormalizedComboOrderRequest``. Each leg is a
+    self-contained instruction; combo-level fields (``time_in_force``,
+    ``session``) live on the parent request.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    instrument_ref: InstrumentRef
+    side: OrderSide
+    quantity: Decimal
+    quantity_unit: QuantityUnit
+    order_type: OrderType
+    price: Decimal | None = None
+    trigger_price: Decimal | None = None
+    position_effect: PositionEffect | None = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "OrderLeg":
+        if self.order_type in _LIMIT_TYPES and self.price is None:
+            raise ValueError(
+                f"OrderLeg order_type={self.order_type.value} requires price"
+            )
+        if self.order_type in _STOP_TYPES and self.trigger_price is None:
+            raise ValueError(
+                f"OrderLeg order_type={self.order_type.value} requires trigger_price"
+            )
+        if self.quantity <= 0:
+            raise ValueError("OrderLeg quantity must be positive")
+        return self
+
+
+class NormalizedComboOrderRequest(BaseModel):
+    """Multi-leg / linked-order request.
+
+    Phase 8 — supports Schwab OrderStrategyType (OTO/OCO/OTOCO/COMBO),
+    Webull combo orders, and US-retail bracket orders. Single-leg
+    orders MAY be expressed here with ``combo_type=SINGLE`` and one
+    leg; the existing ``NormalizedOrderRequest`` remains the canonical
+    single-order shape for backward compatibility.
+
+    Translators opt in to combo support via the new
+    ``BrokerCapabilities.products[*].supports_combo_types`` capability
+    list. No existing translator is forced to handle combos.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    combo_type: "ComboType"
+    time_in_force: TimeInForce
+    session: Session
+    legs: list[OrderLeg] = Field(default_factory=list)
+    link_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate(self) -> "NormalizedComboOrderRequest":
+        if not self.legs:
+            raise ValueError("NormalizedComboOrderRequest requires at least one leg")
+        # SINGLE combo must have exactly one leg.
+        from domain.enums import ComboType as _CT
+
+        if self.combo_type == _CT.SINGLE and len(self.legs) != 1:
+            raise ValueError("combo_type=SINGLE requires exactly one leg")
+        # OCO / OTO / OTOCO must have at least two legs.
+        if self.combo_type in {_CT.OCO, _CT.OTO, _CT.OTOCO} and len(self.legs) < 2:
+            raise ValueError(
+                f"combo_type={self.combo_type.value} requires at least 2 legs"
+            )
+        # BRACKET is parent + take-profit + stop — exactly three legs.
+        if self.combo_type == _CT.BRACKET and len(self.legs) != 3:
+            raise ValueError("combo_type=BRACKET requires exactly 3 legs")
+        return self
+
+
+# Forward-resolve the ComboType reference used in the model field.
+from domain.enums import ComboType  # noqa: E402
+
+NormalizedComboOrderRequest.model_rebuild()
+
+
+__all__ = [
+    "NormalizedComboOrderRequest",
+    "NormalizedOrderRequest",
+    "OrderLeg",
+]

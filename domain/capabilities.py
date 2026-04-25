@@ -19,10 +19,13 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validat
 from domain.currency import Currency
 from domain.enums import (
     AssetClass,
+    AuthMode,
+    ComboType,
     MarketFamily,
     OrderType,
     QuantityUnit,
     Session,
+    StreamTransport,
     TimeInForce,
 )
 from domain.errors import BrokerCapabilityError
@@ -77,6 +80,29 @@ def infer_supported_regions_from_market_families(
     return regions
 
 
+class ProductCapabilities(BaseModel):
+    """Per-product capability surface (Phase 8).
+
+    Webull's docs make explicit that capabilities differ across
+    stocks / options / futures / crypto. This per-product matrix lets
+    a broker plugin declare different supported_order_types,
+    quantity_units, sessions, and combo types for each product.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    asset_class: AssetClass
+    supported_order_types: list[OrderType] = Field(default_factory=list)
+    supported_time_in_force: list[TimeInForce] = Field(default_factory=list)
+    supported_sessions: list[Session] = Field(default_factory=list)
+    supported_quantity_units: list[QuantityUnit] = Field(default_factory=list)
+    supports_fractional: bool = False
+    supports_notional: bool = False
+    supports_short: bool = False
+    supports_combo_types: list[ComboType] = Field(default_factory=list)
+    streaming: dict[str, Any] = Field(default_factory=dict)
+
+
 class BrokerCapabilities(BaseModel):
     """What a single broker adapter can and cannot do.
 
@@ -106,6 +132,13 @@ class BrokerCapabilities(BaseModel):
     supports_short_selling: bool = False
     supports_analyzer: bool = False
     features: dict[str, bool] = Field(default_factory=dict)
+    # Phase 8 — Schwab/Webull readiness fields. All optional; legacy
+    # plugins that don't declare them get sensible defaults.
+    products: list[ProductCapabilities] = Field(default_factory=list)
+    auth_modes: list[AuthMode] = Field(default_factory=list)
+    streaming_transports: list[StreamTransport] = Field(default_factory=list)
+    supports_account_hashes: bool = False
+    supports_subaccounts: bool = False
     # Phase 4 — broker-declared master-contract refresh policy. Schema:
     # {
     #   "timezone": "Asia/Kolkata",   # IANA tz to anchor `cutoff_local`
@@ -286,6 +319,12 @@ _EXPLICIT_OVERRIDE_KEYS: frozenset[str] = frozenset(
         "supports_analyzer",
         "features",
         "master_contract_refresh_policy",
+        # Phase 8 — Schwab/Webull readiness fields
+        "products",
+        "auth_modes",
+        "streaming_transports",
+        "supports_account_hashes",
+        "supports_subaccounts",
     }
 )
 

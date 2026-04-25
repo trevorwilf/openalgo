@@ -147,6 +147,64 @@ class OptionRight(StrEnum):
     PUT = "PUT"
 
 
+class ComboType(StrEnum):
+    """Multi-leg / linked-order families.
+
+    Phase 8 — added to support Schwab OrderStrategyType, Webull combo
+    orders, and bracket / OTO / OCO strategies that single-leg
+    NormalizedOrderRequest cannot express.
+
+    SINGLE   - one leg, identical semantics to NormalizedOrderRequest.
+    OTO      - One Triggers Other (parent fills → trigger child).
+    OCO      - One Cancels Other (siblings; whichever fills cancels the
+               others).
+    OTOCO    - One Triggers OCO (parent fills → activate an OCO group).
+    COMBO    - Spread / strategy combo treated as a single execution
+               unit (Schwab's COMBO).
+    MULTILEG_OPTIONS - explicit multi-leg options spread/butterfly/
+               iron condor.
+    ICEBERG  - Iceberg (display only a slice).
+    BRACKET  - parent + take-profit + stop-loss (US retail style).
+    """
+
+    SINGLE = "SINGLE"
+    OTO = "OTO"
+    OCO = "OCO"
+    OTOCO = "OTOCO"
+    COMBO = "COMBO"
+    MULTILEG_OPTIONS = "MULTILEG_OPTIONS"
+    ICEBERG = "ICEBERG"
+    BRACKET = "BRACKET"
+
+
+class StreamTransport(StrEnum):
+    """Transport flavor a broker streaming adapter uses."""
+
+    WEBSOCKET = "WEBSOCKET"
+    MQTT = "MQTT"
+    GRPC = "GRPC"
+    SSE = "SSE"
+    POLL = "POLL"
+
+
+class AuthMode(StrEnum):
+    """Authentication style declared by a broker plugin.
+
+    SIGNATURE — broker requires per-request HMAC signature
+        (Webull-direct OpenAPI, Binance, etc.).
+    OAUTH    — three-legged OAuth flow (Schwab, Webull Connect, Alpaca
+        OAuth-paper).
+    API_KEY  — static key + secret pair (most legacy India brokers).
+    SESSION_TOKEN — interactive login → session token (legacy India
+        brokers that mint a daily token).
+    """
+
+    SIGNATURE = "SIGNATURE"
+    OAUTH = "OAUTH"
+    API_KEY = "API_KEY"
+    SESSION_TOKEN = "SESSION_TOKEN"
+
+
 class IdentifierType(StrEnum):
     """Categories of alternative identifier that can resolve an instrument."""
 
@@ -164,6 +222,8 @@ class IdentifierType(StrEnum):
 
 __all__ = [
     "AssetClass",
+    "AuthMode",
+    "ComboType",
     "IdentifierType",
     "InstrumentKind",
     "MarketFamily",
@@ -174,5 +234,6 @@ __all__ = [
     "QuantityUnit",
     "Session",
     "SettlementType",
+    "StreamTransport",
     "TimeInForce",
 ]
