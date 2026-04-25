@@ -16,6 +16,7 @@
     "supported_sessions": ["REGULAR"],
     "supported_quantity_units": ["WHOLE", "FRACTIONAL", "NOTIONAL"],
     "trading_currencies": ["USD"],
+    "default_currency": "USD",
     "base_currency": "USD",
     "supports_fractional": true,
     "supports_notional_orders": true,

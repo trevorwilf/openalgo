@@ -1,17 +1,19 @@
-"""Lane isolation — enforce ADR 0005.
+"""Lane isolation — enforce ADR 0005 + ADR 0006.
 
-Promoted-lane code must not import legacy symbols. Enforced via AST so
-docstrings and comments cannot false-positive.
+Promoted-lane code must not import legacy symbols (ADR 0005) and must
+not embed India-specific literals (ADR 0006). Both checks are enforced
+via AST so docstrings and comments cannot false-positive.
 
-The forbidden-symbol list and the promoted-path roots below are the
-contract. A phase-scoped allowlist carries known legacy call-sites
-that later phases remove; every entry must include a TODO tag with
-the phase that removes it.
+The forbidden-symbol list, the literal list, and the promoted-path
+roots below are the contract. A phase-scoped allowlist carries known
+legacy call-sites that later phases remove; every entry must include a
+TODO tag with the phase that removes it.
 """
 
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 from typing import Iterable
 
@@ -46,6 +48,58 @@ PROMOTED_PATH_ROOTS: tuple[Path, ...] = (
 # legacy-fallback branch, inside a function body, where the AST check
 # (module-level only) does not see it.
 ALLOWLIST: dict[tuple[str, str], set[str]] = {}
+
+
+# India-specific string literals that may not appear in promoted-lane
+# Python source (per ADR 0006). The check is performed both at the AST
+# level (string Constants) and via a coarse regex pass to catch any
+# non-AST cases (e.g. raw string-formatting templates).
+INDIA_LITERALS: tuple[str, ...] = (
+    "Asia/Kolkata",
+    "IST",
+    "NSE",
+    "NFO",
+    "BSE",
+    "BFO",
+    "MCX",
+    "CDS",
+    "MIS",
+    "CNC",
+    "NRML",
+    "DDMMMYY",
+    "CE",
+    "PE",
+    "₹",  # ₹
+    "INR",
+)
+
+
+# Phase-scoped literal allowlist. Keys are India literal strings;
+# values are sets of repo-relative POSIX paths exempted. Every entry
+# must include a TODO line in this file naming the phase that removes
+# it. Empty for Phase 1 — Phase 5/6 may add temporary exemptions while
+# wiring feature gates.
+LITERAL_ALLOWLIST: dict[str, set[str]] = {}
+
+
+# Substrings that appear in many false-positive contexts (e.g. base64
+# blobs, identifiers like "MISC"). The literal scanner only counts a
+# whole-word/standalone-token hit, never a substring inside a larger
+# identifier. The regex below is anchored on word-class boundaries.
+_LITERAL_BOUNDARY_PATTERNS: dict[str, re.Pattern[str]] = {}
+
+
+def _literal_pattern(literal: str) -> re.Pattern[str]:
+    """Cache compiled boundary patterns per literal."""
+    pat = _LITERAL_BOUNDARY_PATTERNS.get(literal)
+    if pat is not None:
+        return pat
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", literal):
+        pat = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(literal)}(?![A-Za-z0-9_])")
+    else:
+        pat = re.compile(re.escape(literal))
+    _LITERAL_BOUNDARY_PATTERNS[literal] = pat
+    return pat
 
 
 def _discover_promoted_python_files() -> list[Path]:
@@ -164,6 +218,164 @@ def test_promoted_paths_have_no_forbidden_imports() -> None:
     )
 
 
+def _string_constants_in_module(tree: ast.Module) -> Iterable[tuple[str, int]]:
+    """Yield (string_value, lineno) for every `ast.Constant` whose value
+    is a `str`, *excluding* docstrings and module/class/function-level
+    docstring positions.
+    """
+    docstring_node_ids: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = getattr(node, "body", None)
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
+                docstring_node_ids.add(id(body[0].value))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if id(node) in docstring_node_ids:
+                continue
+            yield node.value, getattr(node, "lineno", 0)
+
+
+def _literal_violations_in_file(
+    path: Path, allowlist: dict[str, set[str]] | None = None
+) -> list[str]:
+    """Return per-line literal violations for one file."""
+    rel = path.relative_to(REPO_ROOT).as_posix()
+    if allowlist is None:
+        allowlist = LITERAL_ALLOWLIST
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return [f"{rel}: could not read: {exc}"]
+
+    try:
+        tree = ast.parse(source, filename=str(path))
+    except SyntaxError as exc:
+        return [f"{rel}: syntax error: {exc}"]
+
+    violations: list[str] = []
+
+    # AST pass — string constants only (no docstrings).
+    for value, lineno in _string_constants_in_module(tree):
+        for literal in INDIA_LITERALS:
+            if rel in allowlist.get(literal, set()):
+                continue
+            if _literal_pattern(literal).search(value):
+                violations.append(
+                    f"{rel}:{lineno}: India-specific literal {literal!r} "
+                    f"in string constant {value!r} — promoted/scanned paths "
+                    "must use venue/region metadata. See ADR 0006."
+                )
+
+    # Regex pass — strip comments line-by-line, then scan the remaining
+    # source for the literals to catch any non-AST cases (f-strings'
+    # joined parts, raw template strings missed by Constant walk, etc.).
+    for line_no, raw in enumerate(source.splitlines(), start=1):
+        line = raw.split("#", 1)[0]
+        if not line.strip():
+            continue
+        for literal in INDIA_LITERALS:
+            if rel in allowlist.get(literal, set()):
+                continue
+            if _literal_pattern(literal).search(line):
+                # de-dupe with AST hits on the same line/literal pair
+                msg_tag = f"{rel}:{line_no}:"
+                literal_repr = repr(literal)
+                already = any(
+                    v.startswith(msg_tag) and literal_repr in v for v in violations
+                )
+                if already:
+                    continue
+                violations.append(
+                    f"{rel}:{line_no}: India-specific literal {literal!r} "
+                    f"in source line — promoted/scanned paths must use "
+                    "venue/region metadata. See ADR 0006."
+                )
+    return violations
+
+
+def test_no_india_specific_literals_in_promoted_paths() -> None:
+    """ADR 0006 — promoted paths must not embed India-specific literals."""
+    files = _discover_promoted_python_files()
+    assert files, "expected at least one promoted .py file"
+    violations: list[str] = []
+    for path in files:
+        violations.extend(_literal_violations_in_file(path))
+    assert not violations, (
+        "Promoted-lane literal contract violated:\n  "
+        + "\n  ".join(violations)
+    )
+
+
+# Files in services/, domain/, utils/ that are pre-existing legacy or
+# Indian-specific surfaces. Excluded from the warning scan in this
+# phase; later phases will narrow the list.
+_WARNING_SCAN_EXCLUDES: frozenset[str] = frozenset(
+    {
+        "services/quotes_service.py",
+        "services/history_service.py",
+        "services/place_order_service.py",
+        "services/expiry_service.py",
+        "services/flow_executor_service.py",
+        "utils/constants.py",
+        "utils/auth_utils.py",
+        "utils/session.py",
+    }
+)
+
+_WARNING_SCAN_GLOB_EXCLUDES: tuple[str, ...] = (
+    "services/option_*.py",
+    "services/options_*.py",
+)
+
+
+def _discover_warning_scan_files() -> list[Path]:
+    """Walk services/, domain/, utils/ and yield files NOT in the
+    pre-existing-legacy exclusion list."""
+    import fnmatch
+
+    roots = ("services", "domain", "utils")
+    files: list[Path] = []
+    for root in roots:
+        d = REPO_ROOT / root
+        if not d.is_dir():
+            continue
+        for p in d.rglob("*.py"):
+            rel = p.relative_to(REPO_ROOT).as_posix()
+            if rel in _WARNING_SCAN_EXCLUDES:
+                continue
+            if any(fnmatch.fnmatch(rel, pat) for pat in _WARNING_SCAN_GLOB_EXCLUDES):
+                continue
+            files.append(p)
+    return files
+
+
+def test_warning_scan_for_india_literals_in_core_modules(
+    request: pytest.FixtureRequest,
+) -> None:
+    """Phase 1 warning-only scan over services/, domain/, utils/.
+
+    This is **not** a hard failure — it prints any literal hits so the
+    operator can see what the later phases will need to fix. Becomes a
+    hard failure on a per-file basis once each owning phase has cleared
+    the file (Phases 4-6 narrow the exclusion list).
+    """
+    files = _discover_warning_scan_files()
+    findings: list[str] = []
+    for path in files:
+        findings.extend(_literal_violations_in_file(path, allowlist={}))
+    if findings:
+        # Print for visibility but do not fail.
+        print("\n[lane-isolation warning] India-literal hits in core modules:")
+        for line in findings[:50]:
+            print(f"  {line}")
+        if len(findings) > 50:
+            print(f"  ... and {len(findings) - 50} more")
+        request.config.cache.set(
+            "lane_isolation/warning_count", len(findings)
+        )
+
+
 def test_allowlist_entries_reference_existing_files() -> None:
     """Catch stale allowlist entries."""
     for key, paths in ALLOWLIST.items():
@@ -172,6 +384,17 @@ def test_allowlist_entries_reference_existing_files() -> None:
             assert abs_path.is_file(), (
                 f"allowlist entry {key} -> {rel!r} points to a file "
                 "that no longer exists; remove the entry."
+            )
+
+
+def test_literal_allowlist_entries_reference_existing_files() -> None:
+    """Same hygiene check for the LITERAL_ALLOWLIST."""
+    for literal, paths in LITERAL_ALLOWLIST.items():
+        for rel in paths:
+            abs_path = REPO_ROOT / rel
+            assert abs_path.is_file(), (
+                f"LITERAL_ALLOWLIST entry {literal!r} -> {rel!r} points "
+                "to a file that no longer exists; remove the entry."
             )
 
 

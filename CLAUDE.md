@@ -94,6 +94,36 @@ registered `BrokerQuoteAdapter` / `BrokerBarAdapter`.
 A phase-scoped allowlist in the test covers the small set of
 legacy call-sites that Phases 3 and 4 remove.
 
+### Literal-scanner invariant for promoted paths (ADR 0006)
+
+In addition to the import scanner, promoted-lane Python source must
+not embed India-specific literals. The list lives in
+`tests/contracts/test_lane_isolation.py:INDIA_LITERALS` and includes
+`Asia/Kolkata`, `IST`, `NSE`/`NFO`/`BSE`/`BFO`/`MCX`/`CDS`,
+`MIS`/`CNC`/`NRML`, `DDMMMYY`, `CE`/`PE`, `₹`, `INR`. Detection runs
+at the AST level on `ast.Constant` strings (docstrings exempt) plus a
+regex pass over each source line (comments stripped, word-boundary
+anchored). A phase-scoped `LITERAL_ALLOWLIST` mirrors the import
+allowlist; entries must include a TODO referencing the phase that
+removes them.
+
+Use venue/region metadata (Phase 2 region plugin schema, venue session
+service) instead of literal exchange/timezone strings. New non-India
+broker plugins that declare `supported_regions` excluding `india` get
+the literal scan automatically (the contract auto-discovers them via
+the `PROMOTED` sentinel or the plugin's `supported_regions`).
+
+### Capability fail-closed inference (ADR 0006)
+
+`domain/capabilities.infer_capabilities_from_legacy` fails closed for
+any plugin whose `supported_regions` excludes `india`. Such plugins
+must declare `broker_type`, `market_families`, `default_currency`, and
+`base_currency` explicitly; missing any of them raises
+`domain.errors.BrokerCapabilityError`. Legacy India plugins (no
+`supported_regions`, or `supported_regions=["india"]`) keep the
+existing inference verbatim. Set `STRICT_CAPABILITY_INFERENCE=0` to
+downgrade the raise to a logged warning (rollback escape hatch).
+
 ## Security and Deployment Model
 
 - **Single user per deployment** — no multi-user, no privilege escalation. One user, one broker session per instance.

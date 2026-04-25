@@ -77,6 +77,10 @@ def test_supported_regions_explicit_override_round_trips(
                 "supported_sessions": ["REGULAR"],
                 "supported_quantity_units": ["WHOLE"],
                 "trading_currencies": ["USD"],
+                # default_currency is required by Phase 1 fail-closed
+                # inference for any plugin whose supported_regions
+                # excludes "india" (ADR 0006).
+                "default_currency": "USD",
                 "base_currency": "USD",
             }
         }
