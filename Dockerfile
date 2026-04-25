@@ -24,10 +24,16 @@ RUN cd frontend && npm run build
 # --------------------------------------------------------------------------- #
 # ------------------------------ Production Stage --------------------------- #
 FROM python:3.12-slim-bullseye AS production
-# 0 – set timezone to IST (Asia/Kolkata) & install runtime dependencies
-#     chromium + fonts-liberation are required by Kaleido 1.x (plotly static
-#     image export) which drives a real headless Chromium via choreographer.
-#     Without these, /chart in the Telegram bot silently fails inside Docker.
+# 0 – install runtime dependencies. The container TZ is deliberately
+#     UTC. Per-venue and per-region local times come from
+#     market_regions/<region>/plugin.json venues and from
+#     database/venue_schedule_repo.py. Operators who want a different
+#     container TZ should set the TZ env var below explicitly (e.g.
+#     -e TZ=Asia/Kolkata for legacy Indian deployments). chromium +
+#     fonts-liberation are required by Kaleido 1.x (plotly static image
+#     export) which drives a real headless Chromium via choreographer.
+#     Without these, /chart in the Telegram bot silently fails inside
+#     Docker.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tzdata \
     curl \
@@ -36,8 +42,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgfortran5 \
     chromium \
     fonts-liberation && \
-    ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
-    dpkg-reconfigure -f noninteractive tzdata && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 # 1 – user & workdir
 RUN useradd --create-home appuser
@@ -63,7 +67,7 @@ RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    TZ=Asia/Kolkata \
+    TZ=UTC \
     APP_MODE=standalone \
     TMPDIR=/app/tmp \
     NUMBA_CACHE_DIR=/app/tmp/numba_cache \

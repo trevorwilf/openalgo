@@ -10,6 +10,24 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+# Phase 4 — Session expiry runs in this timezone, configurable per
+# deployment. Defaults to Asia/Kolkata so existing Indian deployments
+# are a no-op upgrade. Operators on US/EU venues set
+# SESSION_EXPIRY_TIMEZONE explicitly. The expiry *time of day*
+# continues to come from SESSION_EXPIRY_TIME (HH:MM, default 03:00).
+def _session_tz() -> pytz.BaseTzInfo:
+    name = os.getenv("SESSION_EXPIRY_TIMEZONE", "Asia/Kolkata")
+    try:
+        return pytz.timezone(name)
+    except pytz.UnknownTimeZoneError:
+        logger.warning(
+            "SESSION_EXPIRY_TIMEZONE=%r is not a recognised IANA tz; "
+            "falling back to Asia/Kolkata",
+            name,
+        )
+        return pytz.timezone("Asia/Kolkata")
+
+
 def is_session_expiry_disabled():
     """Check if session expiry is disabled (e.g., for crypto brokers with 24/7 markets).
 
@@ -22,74 +40,77 @@ def is_session_expiry_disabled():
 
 
 def get_session_expiry_time():
-    """Get session expiry time set to 3 AM IST next day"""
-    # Skip expiry for crypto brokers (24/7 markets)
+    """Get session expiry time at SESSION_EXPIRY_TIME in SESSION_EXPIRY_TIMEZONE.
+
+    The default tz is Asia/Kolkata so existing Indian deployments are
+    unchanged. Set SESSION_EXPIRY_TIMEZONE=America/New_York (etc.)
+    when running against a US-broker instance.
+    """
     if is_session_expiry_disabled():
         logger.debug("Session expiry disabled (crypto broker / 24/7 market)")
         return timedelta(days=365)
 
-    now_utc = datetime.now(pytz.timezone("UTC"))
-    now_ist = now_utc.astimezone(pytz.timezone("Asia/Kolkata"))
+    tz = _session_tz()
+    now_local = datetime.now(pytz.utc).astimezone(tz)
 
-    # Get configured expiry time or default to 3 AM
     expiry_time = os.getenv("SESSION_EXPIRY_TIME", "03:00")
     hour, minute = map(int, expiry_time.split(":"))
 
-    target_time_ist = now_ist.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    target = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if now_local > target:
+        target += timedelta(days=1)
 
-    # If current time is past target time, set expiry to next day
-    if now_ist > target_time_ist:
-        target_time_ist += timedelta(days=1)
-
-    remaining_time = target_time_ist - now_ist
-    logger.debug(f"Session expiry time set to: {target_time_ist}")
-    return remaining_time
+    remaining = target - now_local
+    logger.debug("Session expiry time set to: %s (%s)", target, tz.zone)
+    return remaining
 
 
 def set_session_login_time():
-    """Set the session login time in IST"""
-    now_utc = datetime.now(pytz.timezone("UTC"))
-    now_ist = now_utc.astimezone(pytz.timezone("Asia/Kolkata"))
-    session["login_time"] = now_ist.isoformat()
-    logger.info(f"Session login time set to: {now_ist}")
+    """Set the session login time in the configured session-expiry tz."""
+    tz = _session_tz()
+    now_local = datetime.now(pytz.utc).astimezone(tz)
+    session["login_time"] = now_local.isoformat()
+    logger.info("Session login time set to: %s (%s)", now_local, tz.zone)
 
 
 def is_session_valid():
-    """Check if the current session is valid"""
+    """Check if the current session is valid.
+
+    Validity = `session.logged_in` true AND `login_time` present AND
+    we haven't crossed the daily SESSION_EXPIRY_TIME boundary in the
+    configured SESSION_EXPIRY_TIMEZONE since login.
+    """
     if not session.get("logged_in"):
         logger.debug("Session invalid: 'logged_in' flag not set")
         return False
 
-    # If no login time is set, consider session invalid
     if "login_time" not in session:
         logger.debug("Session invalid: 'login_time' not in session")
         return False
 
-    # Skip expiry check for crypto brokers (24/7 markets)
     if is_session_expiry_disabled():
         logger.debug("Session expiry disabled (crypto broker / 24/7 market)")
         return True
 
-    now_utc = datetime.now(pytz.timezone("UTC"))
-    now_ist = now_utc.astimezone(pytz.timezone("Asia/Kolkata"))
+    tz = _session_tz()
+    now_local = datetime.now(pytz.utc).astimezone(tz)
 
-    # Parse login time
     login_time = datetime.fromisoformat(session["login_time"])
 
-    # Get configured expiry time
     expiry_time = os.getenv("SESSION_EXPIRY_TIME", "03:00")
     hour, minute = map(int, expiry_time.split(":"))
 
-    # Get today's expiry time
-    daily_expiry = now_ist.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    daily_expiry = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
-    # If current time is past expiry time and login was before expiry time
-    if now_ist > daily_expiry and login_time < daily_expiry:
-        logger.info(f"Session expired at {daily_expiry} IST")
+    if now_local > daily_expiry and login_time < daily_expiry:
+        logger.info("Session expired at %s (%s)", daily_expiry, tz.zone)
         return False
 
     logger.debug(
-        f"Session valid. Current time: {now_ist}, Login time: {login_time}, Daily expiry: {daily_expiry}"
+        "Session valid. Current time: %s, Login time: %s, Daily expiry: %s",
+        now_local,
+        login_time,
+        daily_expiry,
     )
     return True
 

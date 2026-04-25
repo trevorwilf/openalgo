@@ -90,6 +90,9 @@ PHASE_ALLOWED: set[Path] = {
     REPO_ROOT / "restx_api" / "v2" / "bars.py",
     # Phase 6b — Alpaca promoted-lane adapter sync.
     REPO_ROOT / "broker" / "alpaca" / "sync" / "instrument_sync.py",
+    # Phase 4 of market-agnostic v2 — /api/v2/venues reads the venue
+    # catalog from instruments_repo (`venues_get`, `venues_list`).
+    REPO_ROOT / "restx_api" / "v2" / "venues.py",
 }
 
 
