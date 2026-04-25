@@ -125,4 +125,43 @@ def requires_capability(
     return decorator
 
 
-__all__ = ["requires_capability"]
+def india_region_only(
+    *, status: int = 404
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Phase 6 — gate a Flask route to India-region installs only.
+
+    Failure payload (JSON):
+
+        {
+          "status": "error",
+          "code": "analyzer_india_region_only",
+          "message": "<message>"
+        }
+    """
+    def decorator(view: Callable[..., Any]) -> Callable[..., Any]:
+        @wraps(view)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            from domain.errors import ErrorCode
+            from services.feature_gate_service import (
+                active_region_code,
+                is_india_region_active,
+            )
+
+            if not is_india_region_active():
+                payload = {
+                    "status": "error",
+                    "code": ErrorCode.ANALYZER_INDIA_REGION_ONLY,
+                    "message": (
+                        f"This feature is only available in the india "
+                        f"region (active region: {active_region_code()!r})."
+                    ),
+                }
+                return jsonify(payload), status
+            return view(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+__all__ = ["india_region_only", "requires_capability"]

@@ -552,6 +552,32 @@ def get_option_symbol(
     Returns:
         Tuple of (success, response_data, status_code)
     """
+    # Phase 6 (ADR 0011) — region gate. India keeps current behavior;
+    # non-India regions where option_chain_enabled is False return a
+    # structured error.
+    from services.feature_gate_service import (
+        active_region_code,
+        is_feature_enabled_for_active_region,
+    )
+    from domain.errors import ErrorCode
+
+    if not is_feature_enabled_for_active_region(
+        "option_chain_enabled", default=False
+    ):
+        return (
+            False,
+            {
+                "status": "error",
+                "code": ErrorCode.OPTION_CHAIN_DISABLED,
+                "message": (
+                    "option chain is not available for active region "
+                    f"{active_region_code()!r}; enable "
+                    "feature_flags.option_chain_enabled in the region "
+                    "plugin to opt in."
+                ),
+            },
+            422,
+        )
     try:
         # Step 1: Parse underlying to extract base symbol and expiry
         base_symbol, embedded_expiry = parse_underlying_symbol(underlying)

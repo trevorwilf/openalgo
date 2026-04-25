@@ -142,6 +142,26 @@ class FeatureNotAvailableInRegion(DomainError):
         )
 
 
+class SandboxNotAvailableInRegion(FeatureNotAvailableInRegion):
+    """Specialization for sandbox/analyzer paths that fail the region gate."""
+
+    def __init__(
+        self,
+        active_region: str | None,
+        message: str | None = None,
+    ) -> None:
+        super().__init__(
+            active_region=active_region,
+            code=ErrorCode.SANDBOX_REGION_UNSUPPORTED,
+            message=(
+                message
+                or "sandbox is not available in region "
+                f"{active_region!r}; sandbox semantics are India-only "
+                "until policy seeds for other regions are added."
+            ),
+        )
+
+
 __all__ = [
     "BrokerCapabilityError",
     "CapabilityMismatch",
@@ -149,6 +169,7 @@ __all__ = [
     "ErrorCode",
     "FeatureNotAvailableInRegion",
     "InstrumentNotResolvable",
+    "SandboxNotAvailableInRegion",
     "UnsupportedCapability",
     "ValidationError",
 ]

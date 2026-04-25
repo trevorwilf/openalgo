@@ -32,10 +32,27 @@ from utils.symbol_utils import is_future, is_option
 logger = get_logger(__name__)
 
 
+def _enforce_india_region_for_sandbox() -> None:
+    """Phase 6 (ADR 0011) — sandbox semantics are India-only.
+
+    Raises ``SandboxNotAvailableInRegion`` when the active region is
+    not India. India-region installs (the default) are unaffected.
+    """
+    from services.feature_gate_service import (
+        active_region_code,
+        is_india_region_active,
+    )
+    from domain.errors import SandboxNotAvailableInRegion
+
+    if not is_india_region_active():
+        raise SandboxNotAvailableInRegion(active_region_code())
+
+
 class OrderManager:
     """Manages virtual orders for sandbox mode"""
 
     def __init__(self, user_id):
+        _enforce_india_region_for_sandbox()
         self.user_id = user_id
         self.fund_manager = FundManager(user_id)
 
