@@ -28,24 +28,16 @@ class" dependency and makes testing with fakes trivial.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+# Re-export the structured AccountContext model from domain/account_context
+# so existing translator code that does `from domain.broker_translator
+# import AccountContext` continues to work. Phase 3 upgraded this from a
+# TypedDict to a pydantic frozen model — see ADR 0008.
+from domain.account_context import AccountContext  # noqa: F401
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from domain.orders import NormalizedOrderRequest
-
-
-class AccountContext(TypedDict, total=False):
-    """Minimal account context passed to the translator.
-
-    Intentionally permissive — broker adapters may carry extra fields
-    in ``extra``; new keys may be added without breaking existing
-    translators.
-    """
-
-    broker_code: str
-    base_currency: str
-    account_id: str
-    extra: dict[str, Any]
 
 
 @runtime_checkable
@@ -133,4 +125,4 @@ class BrokerOrderTranslator(Protocol):
         """
 
 
-__all__ = ["BrokerOrderTranslator", "AccountContext"]
+__all__ = ["AccountContext", "BrokerOrderTranslator"]

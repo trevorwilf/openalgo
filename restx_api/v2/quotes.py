@@ -66,7 +66,14 @@ def _dispatch_promoted(refs: list, *, broker: str, auth_token: str, adapter):
     from services.instrument_resolution import resolve_instrument
     from pydantic import ValidationError as PydValidationError
 
-    account_ctx: dict[str, Any] = {"broker_code": broker, "auth_token": auth_token}
+    from services.account_context_service import resolve_account_context
+    from utils.plugin_loader import get_broker_capabilities
+
+    account_ctx = resolve_account_context(
+        broker_code=broker,
+        auth_token=auth_token,
+        capabilities=get_broker_capabilities(broker),
+    )
     out: list[dict[str, Any]] = []
     for raw in refs:
         try:

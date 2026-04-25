@@ -123,17 +123,27 @@ def test_disallowed_order_type_bumps_rule_rejections_counter(flask_app, monkeypa
     ) == 1.0
 
 
-def test_flag_on_but_no_translator_records_legacy_fallback(flask_app, monkeypatch):
+def test_flag_on_but_no_translator_returns_503_and_records_failclosed(
+    flask_app, monkeypatch
+):
+    """Phase 3 ADR 0008: flag-on with no translator returns 503 and
+    bumps ``promoted_failclosed_total{code=translator_not_registered}``.
+    The legacy fallback counter must NOT increment — the legacy path
+    is never taken on this branch.
+    """
     monkeypatch.setenv("API_V2_FAKE_US", "1")
     _install_fake_auth_resolver(monkeypatch, "fake_us")
-    # Do NOT register a translator — the dispatcher must fall back
-    # and the fallback counter must increment.
-    # Legacy path will 500/422 because there's no real broker — we
-    # only care about the counter.
-    flask_app.test_client().post("/api/v2/orders", json=_valid_order_body())
+    # Do NOT register a translator.
+    resp = flask_app.test_client().post("/api/v2/orders", json=_valid_order_body())
+    assert resp.status_code == 503
+    assert metrics.get_counter_value(
+        "promoted_failclosed_total",
+        {"broker": "fake_us", "code": "translator_not_registered"},
+    ) >= 1.0
+    # Fallback must remain flat — Phase 3 fail-closed forbids it.
     assert metrics.get_counter_value(
         "promoted_legacy_fallback_total", {"broker": "fake_us"}
-    ) >= 1.0
+    ) == 0.0
 
 
 def test_flag_off_does_not_bump_fallback_counter(flask_app, monkeypatch):

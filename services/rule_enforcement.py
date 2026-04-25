@@ -147,6 +147,7 @@ def check_order(
     asset_class: Optional[str],
     now_tz_aware: datetime,
     allows_fractional: Optional[bool] = None,
+    account_ctx: Any | None = None,
 ) -> None:
     """Validate ``order`` against the declarative rule matrix.
 
@@ -154,8 +155,15 @@ def check_order(
     provided (Phase 4's :class:`ResolvedInstrument` carries this). If
     not provided, rule-level ``allows_fractional`` is the authority.
 
+    ``account_ctx`` is an optional :class:`domain.account_context.AccountContext`.
+    Phase 8 will use it for entitlement-aware rejects (e.g.
+    "real-time market data not entitled"). Phase 3 accepts it but
+    does not yet read entitlements — the parameter exists so callers
+    can converge on the new signature now.
+
     Raises :class:`OrderRuleViolation` on the first failure.
     """
+    del account_ctx  # reserved for Phase 8 entitlement checks
     if now_tz_aware.tzinfo is None:
         raise ValueError("now_tz_aware must be timezone-aware")
 

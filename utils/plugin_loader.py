@@ -32,9 +32,56 @@ import jsonschema
 from flask import current_app
 
 from domain.capabilities import BrokerCapabilities, infer_capabilities_from_legacy
+from domain.errors import BrokerCapabilityError
+from utils.feature_flags import is_enabled
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+# Phase 3 capability completeness fields (ADR 0008). When a plugin's
+# `supported_regions` excludes "india", these MUST be present in
+# plugin.json. Phase 1's narrower check on the four currency/family
+# basics is a subset; this list extends it to the order-shape primitives
+# the promoted lane reads at dispatch time.
+_REQUIRED_NON_INDIA_PLUGIN_FIELDS: tuple[str, ...] = (
+    "broker_type",
+    "market_families",
+    "default_currency",
+    "base_currency",
+    "supported_regions",
+    "supported_order_types",
+    "supported_time_in_force",
+    "supported_quantity_units",
+    "supported_sessions",
+)
+
+
+def _is_legacy_india_plugin(plugin_data: dict[str, Any]) -> bool:
+    if "supported_regions" not in plugin_data:
+        return True
+    regions = plugin_data.get("supported_regions") or []
+    if not isinstance(regions, list):
+        return True
+    normalized = {str(r).strip().lower() for r in regions}
+    return not normalized or normalized == {"india"}
+
+
+def _check_plugin_completeness(
+    broker_name: str, plugin_data: dict[str, Any]
+) -> list[str]:
+    """Return the list of required-but-missing fields for non-India plugins.
+
+    Returns ``[]`` for legacy India plugins (no completeness check) and
+    for non-India plugins that have all required fields.
+    """
+    if _is_legacy_india_plugin(plugin_data):
+        return []
+    return [
+        f
+        for f in _REQUIRED_NON_INDIA_PLUGIN_FIELDS
+        if f not in plugin_data or plugin_data.get(f) in (None, "", [], {})
+    ]
 
 # In-memory cache for broker capabilities (populated once at startup)
 _broker_capabilities: dict[str, BrokerCapabilities] = {}
@@ -185,7 +232,33 @@ def load_broker_capabilities(
             skipped.add(broker_name)
             continue
 
-        caps = _build_capabilities(broker_name, plugin_data)
+        # Phase 3 completeness gate. Non-India plugins must declare the
+        # full required-fields set or be skipped (or warned-only when
+        # STRICT_CAPABILITY_INFERENCE is off).
+        missing = _check_plugin_completeness(broker_name, plugin_data)
+        if missing:
+            if is_enabled("STRICT_CAPABILITY_INFERENCE", default=True):
+                logger.error(
+                    "plugin.json for %s is incomplete (non-India plugin "
+                    "missing required fields: %s); skipping. See ADR 0008.",
+                    broker_name,
+                    ", ".join(missing),
+                )
+                skipped.add(broker_name)
+                continue
+            logger.warning(
+                "plugin.json for %s is incomplete (missing %s) but "
+                "STRICT_CAPABILITY_INFERENCE is off; loading anyway.",
+                broker_name,
+                ", ".join(missing),
+            )
+
+        try:
+            caps = _build_capabilities(broker_name, plugin_data)
+        except BrokerCapabilityError as e:
+            logger.error("plugin.json for %s rejected by capability check: %s", broker_name, e)
+            skipped.add(broker_name)
+            continue
         if caps is None:
             skipped.add(broker_name)
             continue
