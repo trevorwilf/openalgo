@@ -215,6 +215,47 @@ class BrokerComplianceMixin:
             return
         self._record_pass(contract)
 
+    # ---- E2 / E3. Quote + Bar adapter protocol compliance (Phase 2 v3) ----
+    #
+    # Verify that any registered BrokerQuoteAdapter / BrokerBarAdapter for
+    # this broker exposes the protocol methods. These are explicit
+    # assertion helpers callable from broker-specific test classes — they
+    # do not auto-discover, since the registry state is per-test.
+
+    def assert_quote_adapter_compliance(self, adapter) -> None:
+        """ADR 0018 — a registered quote adapter must expose the
+        ``BrokerQuoteAdapter`` protocol surface and carry a
+        ``broker_code`` attribute matching this broker.
+        """
+        contract = "quote_adapter_protocol"
+        if not hasattr(adapter, "broker_code") or adapter.broker_code != self.BROKER_CODE:
+            self._record_fail(
+                contract,
+                f"adapter.broker_code != {self.BROKER_CODE!r}",
+            )
+            pytest.fail(f"adapter.broker_code mismatch for {self.BROKER_CODE}")
+        if not callable(getattr(adapter, "get_quote", None)):
+            self._record_fail(contract, "adapter.get_quote not callable")
+            pytest.fail(f"{self.BROKER_CODE} quote adapter missing get_quote")
+        self._record_pass(contract)
+
+    def assert_bar_adapter_compliance(self, adapter) -> None:
+        """ADR 0018 — a registered bar adapter must expose the
+        ``BrokerBarAdapter`` protocol surface and carry a
+        ``broker_code`` attribute matching this broker.
+        """
+        contract = "bar_adapter_protocol"
+        if not hasattr(adapter, "broker_code") or adapter.broker_code != self.BROKER_CODE:
+            self._record_fail(
+                contract,
+                f"adapter.broker_code != {self.BROKER_CODE!r}",
+            )
+            pytest.fail(f"adapter.broker_code mismatch for {self.BROKER_CODE}")
+        if not callable(getattr(adapter, "get_bars", None)):
+            self._record_fail(contract, "adapter.get_bars not callable")
+            pytest.fail(f"{self.BROKER_CODE} bar adapter missing get_bars")
+        self._record_pass(contract)
+
     # ---- F. Instrument sync contract ----------------------------------
 
     def test_f_instrument_sync_optional(self):

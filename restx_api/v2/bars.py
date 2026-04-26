@@ -1,8 +1,10 @@
-"""POST /api/v2/bars — promoted-lane dispatch with legacy fallback.
+"""POST /api/v2/bars — promoted-lane dispatch with fail-closed semantics.
 
-Promoted path (``API_V2_<BROKER>=1`` + registered bar adapter):
-dispatches via :class:`~domain.broker_market_data.BrokerBarAdapter`.
-The legacy ``services.history_service`` is never loaded on this path.
+Mirror of :mod:`restx_api.v2.quotes`. Phase 2 v3 fail-closed
+contract: a non-India non-crypto broker without a registered
+``BrokerBarAdapter`` returns HTTP 503
+``promoted_capability_unavailable`` / ``bar_adapter_not_registered``
+instead of falling back to ``services.history_service``.
 """
 
 from __future__ import annotations
@@ -22,6 +24,83 @@ from utils.logging_context import log_context
 from utils.metrics import counter
 
 logger = get_logger(__name__)
+
+
+def _broker_lane_check(broker: str, *, route: str) -> tuple[Any | None, int | None]:
+    from utils.plugin_loader import get_broker_capabilities
+
+    caps = get_broker_capabilities(broker) if broker else None
+    if caps is None:
+        return None, None
+    regions = {str(r).strip().lower() for r in (caps.supported_regions or [])}
+    is_india = "india" in regions or not regions
+    broker_type = (getattr(caps, "broker_type", "") or "").strip().lower()
+    is_crypto = broker_type == "crypto"
+    if is_india or is_crypto:
+        return None, None
+    counter(
+        "promoted_failclosed_total",
+        {
+            "broker": broker or "unknown",
+            "code": "promoted_lane_required_for_non_india_broker",
+            "route": route,
+        },
+    )
+    return error(
+        "promoted_lane_required_for_non_india_broker",
+        f"broker {broker!r} cannot use the legacy lane (supported_regions "
+        f"excludes 'india'). Set API_V2_{(broker or '').upper()}=1 and "
+        "register a BrokerBarAdapter for this broker.",
+        details={
+            "broker_code": broker,
+            "supported_regions": sorted(regions),
+            "broker_type": broker_type,
+        },
+    ), 503
+
+
+def _adapter_required_for_promoted_broker(broker: str) -> tuple[Any | None, int | None]:
+    from utils.plugin_loader import get_broker_capabilities
+
+    caps = get_broker_capabilities(broker) if broker else None
+    if caps is None:
+        return None, None
+    regions = {str(r).strip().lower() for r in (caps.supported_regions or [])}
+    is_india = "india" in regions or not regions
+    broker_type = (getattr(caps, "broker_type", "") or "").strip().lower()
+    is_crypto = broker_type == "crypto"
+    if is_india or is_crypto:
+        return None, None
+    counter(
+        "broker_adapter_missing_total",
+        {
+            "broker": broker or "unknown",
+            "region": next(iter(sorted(regions))) if regions else "unknown",
+            "route": "/api/v2/bars",
+            "adapter_kind": "bar",
+        },
+    )
+    counter(
+        "promoted_failclosed_total",
+        {
+            "broker": broker or "unknown",
+            "code": "bar_adapter_not_registered",
+            "route": "/api/v2/bars",
+        },
+    )
+    return error(
+        "promoted_capability_unavailable",
+        f"broker {broker!r} is promoted but has no BrokerBarAdapter "
+        "registered. Register a bar adapter via "
+        "services.broker_market_data_registry.register_broker_bar_adapter.",
+        details={
+            "broker_code": broker,
+            "sub_code": "bar_adapter_not_registered",
+            "supported_regions": sorted(regions),
+            "broker_type": broker_type,
+        },
+    ), 503
+
 
 api = Namespace("bars", description="Normalized OHLCV history")
 
@@ -55,7 +134,14 @@ class Bars(Resource):
                     broker=broker, auth_token=auth_token, adapter=promoted,
                 )
         if flag_on:
+            adapter_err, adapter_status = _adapter_required_for_promoted_broker(broker)
+            if adapter_err is not None:
+                return adapter_err, adapter_status
             counter("promoted_legacy_fallback_total", {"broker": broker or "unknown"})
+        else:
+            lane_err, lane_status = _broker_lane_check(broker, route="/api/v2/bars")
+            if lane_err is not None:
+                return lane_err, lane_status
         with log_context(broker_code=broker, legacy_fallback=True):
             return _dispatch_legacy(
                 ref, interval=interval, start=start, end=end,
@@ -73,17 +159,45 @@ def _dispatch_promoted(
     from services.instrument_resolution import resolve_instrument
     from pydantic import ValidationError as PydValidationError
 
+    from services.account_context_service import resolve_account_context
+    from utils.plugin_loader import get_broker_capabilities
+
+    capabilities = get_broker_capabilities(broker)
+    region_label = (
+        next(iter(sorted({str(r).strip().lower() for r in (capabilities.supported_regions or [])})), "unknown")
+        if capabilities is not None and capabilities.supported_regions
+        else "unknown"
+    )
+
     try:
         ref = _coerce_to_ref(raw_ref)
     except (PydValidationError, ValueError) as e:
+        counter(
+            "instrument_resolution_failed_total",
+            {
+                "broker": broker or "unknown",
+                "region": region_label,
+                "ref_kind": "invalid",
+                "identifier_type": "n/a",
+            },
+        )
         return error("bad_request", f"invalid instrument ref: {e}"), 400
 
     resolved = resolve_instrument(ref, broker_code=broker)
     if resolved is None:
+        counter(
+            "instrument_resolution_failed_total",
+            {
+                "broker": broker or "unknown",
+                "region": region_label,
+                "ref_kind": getattr(ref, "kind", "unknown"),
+                "identifier_type": getattr(ref, "identifier_type", None) or "n/a",
+            },
+        )
         return error(
             "instrument_not_resolvable",
             "ref not found in instrument universe",
-        ), 404
+        ), 422
 
     try:
         start_dt = _parse_dt(start)
@@ -92,18 +206,25 @@ def _dispatch_promoted(
         return error("bad_request", f"bad datetime: {e}"), 400
 
     req = NormalizedBarRequest(interval=interval, start=start_dt, end=end_dt)
-    from services.account_context_service import resolve_account_context
-    from utils.plugin_loader import get_broker_capabilities
-
     account_ctx = resolve_account_context(
         broker_code=broker,
         auth_token=auth_token,
-        capabilities=get_broker_capabilities(broker),
+        capabilities=capabilities,
     )
 
     try:
         bars = adapter.get_bars(resolved, req, account_ctx)
     except UnsupportedCapability as e:
+        counter(
+            "unsupported_capability_total",
+            {
+                "broker": broker or "unknown",
+                "region": region_label,
+                "venue": resolved.venue_code or "unknown",
+                "asset_class": getattr(resolved, "asset_class", None) or "unknown",
+                "capability_name": getattr(e, "capability_name", "unknown"),
+            },
+        )
         return error("unsupported_capability", str(e), details={
             "broker_code": e.broker_code,
             "capability_name": e.capability_name,

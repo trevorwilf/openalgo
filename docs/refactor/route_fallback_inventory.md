@@ -58,11 +58,11 @@ Lane semantics:
 | `/api/v1/tradebook` | POST | legacy | n/a | tradebook_service | no | none | none |
 | `/api/v2/admin/broker_compliance` | GET | promoted | n/a | — | no | none | none |
 | `/api/v2/balances` | GET | dual | no | funds_service | no | none | phase 2 |
-| `/api/v2/bars` | POST | dual | no | history_service | no | canonical | phase 2 |
+| `/api/v2/bars` | POST | dual | yes | history_service | yes | canonical | none |
 | `/api/v2/capabilities` | GET | promoted | n/a | — | no | none | none |
 | `/api/v2/instruments` | GET | promoted | n/a | — | no | canonical | none |
 | `/api/v2/orders` | POST | dual | yes | place_order_service | yes | canonical | none |
-| `/api/v2/quotes` | POST | dual | no | quotes_service | no | canonical | phase 2 |
+| `/api/v2/quotes` | POST | dual | yes | quotes_service | yes | canonical | none |
 | `/api/v2/regions` | GET | promoted | n/a | — | no | none | none |
 | `/api/v2/venues` | GET | promoted | n/a | — | no | canonical | none |
 

@@ -73,3 +73,19 @@ def flask_app_flag_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag_off
 @pytest.fixture
 def client(flask_app):
     return flask_app.test_client()
+
+
+@pytest.fixture
+def register_fake_us_adapters():
+    """Phase 2 v3 — register/deregister the FakeUS quote+bar adapters
+    cleanly per test. Tests that need a registered adapter for the
+    promoted quote/bar dispatch use this fixture."""
+    from services.broker_market_data_registry import (
+        clear_market_data_registries_for_tests,
+    )
+    from tests.fakes.fake_us_market_data import install_fake_us_market_data
+
+    clear_market_data_registries_for_tests()
+    quote, bar = install_fake_us_market_data()
+    yield quote, bar
+    clear_market_data_registries_for_tests()

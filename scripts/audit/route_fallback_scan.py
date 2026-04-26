@@ -284,9 +284,12 @@ def _scan_module(path: Path, ns_path: str, version: str) -> RouteEntry:
     else:
         entry.lane = "legacy"
 
-    # Owning phase mapping (v3 phases that close known leaks)
+    # Owning phase mapping (v3 phases that close known leaks). When
+    # fail_closed_non_india=yes the route is already safe for non-India
+    # brokers; the legacy fallback is reserved for India/crypto and is
+    # the expected design, not an open leak.
     if version == "v2":
-        if entry.fail_closed_for_non_india in {"yes", "n/a"} and not entry.legacy_calls:
+        if entry.fail_closed_for_non_india in {"yes", "n/a"}:
             entry.owning_phase = "none"
         elif "quotes_service" in entry.legacy_calls:
             entry.owning_phase = "phase 2"

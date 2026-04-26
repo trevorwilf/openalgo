@@ -1,12 +1,26 @@
-"""POST /api/v2/quotes — promoted-lane dispatch with legacy fallback.
+"""POST /api/v2/quotes — promoted-lane dispatch with fail-closed semantics.
 
 Promoted path (``API_V2_<BROKER>=1`` + registered quote adapter):
 dispatches each instrument through
 :class:`~domain.broker_market_data.BrokerQuoteAdapter`. The legacy
 ``services.quotes_service`` is never loaded on this path.
 
-Legacy path (default): reuses the pre-existing flow, which is the
-bit-identical v1 behavior.
+Fail-closed semantics (Phase 2 v3, ADR 0018):
+
+* Per-broker flag ON, no adapter, broker is non-India non-crypto →
+  HTTP 503 ``promoted_capability_unavailable`` /
+  ``quote_adapter_not_registered``. No legacy fallback.
+* Per-broker flag ON, no adapter, broker is India or crypto →
+  legacy fallback (preserves parity).
+* Per-broker flag ON, adapter registered, instrument resolves →
+  normalized quote.
+* Per-broker flag ON, adapter registered, instrument fails to
+  resolve → HTTP 422 ``instrument_not_resolvable`` (no legacy
+  token DB lookup).
+* Per-broker flag OFF, broker is India / crypto → legacy fallback
+  (parity).
+* Per-broker flag OFF, broker is non-India non-crypto → HTTP 503
+  ``promoted_lane_required_for_non_india_broker`` (mirrors orders).
 """
 
 from __future__ import annotations
@@ -26,6 +40,94 @@ from utils.logging_context import log_context
 from utils.metrics import counter
 
 logger = get_logger(__name__)
+
+
+def _broker_lane_check(broker: str, *, route: str) -> tuple[Any | None, int | None]:
+    """Mirror of ``restx_api.v2.orders._broker_lane_check`` for the
+    market-data routes. Returns ``(error_payload, status)`` to
+    short-circuit when a non-India non-crypto broker tries to use
+    the legacy fallback.
+    """
+    from utils.plugin_loader import get_broker_capabilities
+
+    caps = get_broker_capabilities(broker) if broker else None
+    if caps is None:
+        return None, None
+    regions = {str(r).strip().lower() for r in (caps.supported_regions or [])}
+    is_india = "india" in regions or not regions
+    broker_type = (getattr(caps, "broker_type", "") or "").strip().lower()
+    is_crypto = broker_type == "crypto"
+    if is_india or is_crypto:
+        return None, None
+    counter(
+        "promoted_failclosed_total",
+        {
+            "broker": broker or "unknown",
+            "code": "promoted_lane_required_for_non_india_broker",
+            "route": route,
+        },
+    )
+    return error(
+        "promoted_lane_required_for_non_india_broker",
+        f"broker {broker!r} cannot use the legacy lane (supported_regions "
+        f"excludes 'india'). Set API_V2_{(broker or '').upper()}=1 and "
+        "register a BrokerQuoteAdapter for this broker.",
+        details={
+            "broker_code": broker,
+            "supported_regions": sorted(regions),
+            "broker_type": broker_type,
+        },
+    ), 503
+
+
+def _adapter_required_for_promoted_broker(broker: str) -> tuple[Any | None, int | None]:
+    """When the per-broker flag is ON, the broker must have an adapter
+    registered. India/crypto brokers may keep the legacy fallback for
+    parity; non-India non-crypto brokers must have an adapter.
+    """
+    from utils.plugin_loader import get_broker_capabilities
+
+    caps = get_broker_capabilities(broker) if broker else None
+    if caps is None:
+        # Unknown broker — fall through to the legacy fallback so the
+        # existing error envelope renders.
+        return None, None
+    regions = {str(r).strip().lower() for r in (caps.supported_regions or [])}
+    is_india = "india" in regions or not regions
+    broker_type = (getattr(caps, "broker_type", "") or "").strip().lower()
+    is_crypto = broker_type == "crypto"
+    if is_india or is_crypto:
+        return None, None
+    counter(
+        "broker_adapter_missing_total",
+        {
+            "broker": broker or "unknown",
+            "region": next(iter(sorted(regions))) if regions else "unknown",
+            "route": "/api/v2/quotes",
+            "adapter_kind": "quote",
+        },
+    )
+    counter(
+        "promoted_failclosed_total",
+        {
+            "broker": broker or "unknown",
+            "code": "quote_adapter_not_registered",
+            "route": "/api/v2/quotes",
+        },
+    )
+    return error(
+        "promoted_capability_unavailable",
+        f"broker {broker!r} is promoted but has no BrokerQuoteAdapter "
+        "registered. Register a quote adapter via "
+        "services.broker_market_data_registry.register_broker_quote_adapter.",
+        details={
+            "broker_code": broker,
+            "sub_code": "quote_adapter_not_registered",
+            "supported_regions": sorted(regions),
+            "broker_type": broker_type,
+        },
+    ), 503
+
 
 api = Namespace("quotes", description="Normalized quote fetch")
 
@@ -53,8 +155,17 @@ class Quotes(Resource):
                 return _dispatch_promoted(
                     refs, broker=broker, auth_token=auth_token, adapter=promoted
                 )
+        # Flag ON but no adapter — non-India non-crypto brokers fail closed.
         if flag_on:
+            adapter_err, adapter_status = _adapter_required_for_promoted_broker(broker)
+            if adapter_err is not None:
+                return adapter_err, adapter_status
             counter("promoted_legacy_fallback_total", {"broker": broker or "unknown"})
+        # Flag OFF — non-India non-crypto brokers fail closed too.
+        else:
+            lane_err, lane_status = _broker_lane_check(broker, route="/api/v2/quotes")
+            if lane_err is not None:
+                return lane_err, lane_status
         with log_context(broker_code=broker, legacy_fallback=True):
             return _dispatch_legacy(refs, broker=broker, auth_token=auth_token)
 
@@ -62,23 +173,37 @@ class Quotes(Resource):
 def _dispatch_promoted(refs: list, *, broker: str, auth_token: str, adapter):
     """Promoted dispatch — never touches quotes_service or get_token."""
     from domain.errors import UnsupportedCapability
-    from domain.instrument_ref import InstrumentRef
     from services.instrument_resolution import resolve_instrument
     from pydantic import ValidationError as PydValidationError
 
     from services.account_context_service import resolve_account_context
     from utils.plugin_loader import get_broker_capabilities
 
+    capabilities = get_broker_capabilities(broker)
     account_ctx = resolve_account_context(
         broker_code=broker,
         auth_token=auth_token,
-        capabilities=get_broker_capabilities(broker),
+        capabilities=capabilities,
     )
     out: list[dict[str, Any]] = []
+    region_label = (
+        next(iter(sorted({str(r).strip().lower() for r in (capabilities.supported_regions or [])})), "unknown")
+        if capabilities is not None and capabilities.supported_regions
+        else "unknown"
+    )
     for raw in refs:
         try:
             ref = _coerce_to_ref(raw)
         except (PydValidationError, ValueError) as e:
+            counter(
+                "instrument_resolution_failed_total",
+                {
+                    "broker": broker or "unknown",
+                    "region": region_label,
+                    "ref_kind": "invalid",
+                    "identifier_type": "n/a",
+                },
+            )
             out.append({
                 "instrument": raw,
                 "error": {"code": "instrument_not_resolvable", "message": str(e)},
@@ -87,6 +212,15 @@ def _dispatch_promoted(refs: list, *, broker: str, auth_token: str, adapter):
 
         resolved = resolve_instrument(ref, broker_code=broker)
         if resolved is None:
+            counter(
+                "instrument_resolution_failed_total",
+                {
+                    "broker": broker or "unknown",
+                    "region": region_label,
+                    "ref_kind": getattr(ref, "kind", "unknown"),
+                    "identifier_type": getattr(ref, "identifier_type", None) or "n/a",
+                },
+            )
             out.append({
                 "instrument": raw,
                 "error": {
@@ -99,6 +233,16 @@ def _dispatch_promoted(refs: list, *, broker: str, auth_token: str, adapter):
         try:
             quote = adapter.get_quote(resolved, account_ctx)
         except UnsupportedCapability as e:
+            counter(
+                "unsupported_capability_total",
+                {
+                    "broker": broker or "unknown",
+                    "region": region_label,
+                    "venue": resolved.venue_code or "unknown",
+                    "asset_class": getattr(resolved, "asset_class", None) or "unknown",
+                    "capability_name": getattr(e, "capability_name", "unknown"),
+                },
+            )
             out.append({
                 "instrument": {
                     "instrument_id": str(resolved.instrument_id),
@@ -161,7 +305,8 @@ def _coerce_to_ref(raw: Any):
 
 def _dispatch_legacy(refs: list, *, broker: str, auth_token: str):
     """Legacy dispatch — imports quotes_service locally. Bit-identical
-    with prior behavior.
+    with prior behavior. Only reachable when the broker is India/crypto
+    OR the per-broker promoted flag is off and the broker is India/crypto.
     """
     from services.quotes_service import get_quotes_with_auth
 
