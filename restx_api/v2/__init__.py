@@ -63,6 +63,7 @@ def _build() -> tuple[Blueprint, Api]:
     from restx_api.v2.capabilities import api as capabilities_ns
     from restx_api.v2.instruments import api as instruments_ns
     from restx_api.v2.orders import api as orders_ns
+    from restx_api.v2.orders_combo import api as orders_combo_ns
     from restx_api.v2.quotes import api as quotes_ns
     from restx_api.v2.regions import api as regions_ns
     from restx_api.v2.venues import api as venues_ns
@@ -72,6 +73,7 @@ def _build() -> tuple[Blueprint, Api]:
     api.add_namespace(quotes_ns, path="/quotes")
     api.add_namespace(bars_ns, path="/bars")
     api.add_namespace(orders_ns, path="/orders")
+    api.add_namespace(orders_combo_ns, path="/orders/combo")
     api.add_namespace(positions_api, path="/positions")
     api.add_namespace(balances_api, path="/balances")
     api.add_namespace(venues_ns, path="/venues")

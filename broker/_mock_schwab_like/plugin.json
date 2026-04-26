@@ -1,0 +1,44 @@
+{
+  "Plugin Name": "_mock_schwab_like",
+  "Plugin URI": "https://openalgo.in",
+  "Description": "MOCK Schwab-LIKE plugin for framework readiness validation. Not a real Schwab integration.",
+  "Version": "1.0",
+  "Author": "OpenAlgo",
+  "Author URI": "https://openalgo.in",
+  "broker_type": "US_stock",
+  "broker_display_name": "Mock Schwab-Like",
+  "broker_code": "_mock_schwab_like",
+  "supported_regions": ["us"],
+  "market_families": ["US_STOCK"],
+  "supported_venue_codes": ["XNYS", "XNAS", "ARCX", "BATS", "IEXG"],
+  "supported_asset_classes": ["EQUITY", "ETF", "OPTION"],
+  "supported_order_types": [
+    "MARKET", "LIMIT", "STOP", "STOP_LIMIT", "TRAILING_STOP"
+  ],
+  "supported_time_in_force": ["DAY", "GTC", "GTD", "FOK", "IOC"],
+  "supported_sessions": ["REGULAR", "PRE_MARKET", "POST_MARKET"],
+  "supported_quantity_units": ["WHOLE", "FRACTIONAL", "NOTIONAL"],
+  "trading_currencies": ["USD"],
+  "default_currency": "USD",
+  "base_currency": "USD",
+  "supports_fractional": true,
+  "supports_notional_orders": true,
+  "supports_extended_hours": true,
+  "supports_short_selling": true,
+  "supports_analyzer": false,
+  "auth_modes": ["OAUTH"],
+  "account_context_supports": ["account_hash", "entitlements"],
+  "supports_combo_types": [
+    "SINGLE", "OTO", "OCO", "OTOCO", "COMBO", "MULTILEG_OPTIONS"
+  ],
+  "streaming": {
+    "order_events": {"transport": "websocket"},
+    "market_data": {"transport": "websocket"}
+  },
+  "master_contract_refresh_policy": {
+    "timezone": "America/New_York",
+    "cutoff_local": "08:00",
+    "frequency": "daily",
+    "skip_if_24x7": false
+  }
+}

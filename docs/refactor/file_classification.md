@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **791**.
+Total classified files: **812**.
 
 Classification semantics:
 
@@ -18,7 +18,7 @@ Classification semantics:
 | `BROKER_PLUGIN` | Under `broker/*` — broker facts only. |
 | `COMPATIBILITY_SHIM` | Explicit bridge between lanes (e.g. `domain/translators.py`). |
 
-## PROMOTED_CORE (57 files)
+## PROMOTED_CORE (58 files)
 
 - `__init__.py`
 - `conftest.py`
@@ -52,6 +52,7 @@ Classification semantics:
 - `restx_api/v2/capabilities.py`
 - `restx_api/v2/instruments.py`
 - `restx_api/v2/orders.py`
+- `restx_api/v2/orders_combo.py`
 - `restx_api/v2/quotes.py`
 - `restx_api/v2/regions.py`
 - `restx_api/v2/venues.py`
@@ -304,9 +305,29 @@ Classification semantics:
 
 (none)
 
-## BROKER_PLUGIN (511 files)
+## BROKER_PLUGIN (531 files)
 
 - `broker/__init__.py`
+- `broker/_mock_schwab_like/__init__.py`
+- `broker/_mock_schwab_like/api/__init__.py`
+- `broker/_mock_schwab_like/api/account_api.py`
+- `broker/_mock_schwab_like/api/auth_api.py`
+- `broker/_mock_schwab_like/api/bar_api.py`
+- `broker/_mock_schwab_like/api/order_api.py`
+- `broker/_mock_schwab_like/api/quote_api.py`
+- `broker/_mock_schwab_like/api/stream_api.py`
+- `broker/_mock_schwab_like/sync/__init__.py`
+- `broker/_mock_schwab_like/sync/instrument_sync.py`
+- `broker/_mock_webull_like/__init__.py`
+- `broker/_mock_webull_like/api/__init__.py`
+- `broker/_mock_webull_like/api/account_api.py`
+- `broker/_mock_webull_like/api/auth_api.py`
+- `broker/_mock_webull_like/api/bar_api.py`
+- `broker/_mock_webull_like/api/order_api.py`
+- `broker/_mock_webull_like/api/quote_api.py`
+- `broker/_mock_webull_like/api/stream_api.py`
+- `broker/_mock_webull_like/sync/__init__.py`
+- `broker/_mock_webull_like/sync/instrument_sync.py`
 - `broker/aliceblue/api/__init__.py`
 - `broker/aliceblue/api/alicebluewebsocket.py`
 - `broker/aliceblue/api/auth_api.py`
