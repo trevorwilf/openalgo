@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **823**.
+Total classified files: **831**.
 
 Classification semantics:
 
@@ -18,7 +18,7 @@ Classification semantics:
 | `BROKER_PLUGIN` | Under `broker/*` — broker facts only. |
 | `COMPATIBILITY_SHIM` | Explicit bridge between lanes (e.g. `domain/translators.py`). |
 
-## PROMOTED_CORE (63 files)
+## PROMOTED_CORE (69 files)
 
 - `__init__.py`
 - `conftest.py`
@@ -40,6 +40,8 @@ Classification semantics:
 - `domain/errors.py`
 - `domain/instrument_ref.py`
 - `domain/market_data.py`
+- `domain/options.py`
+- `domain/options_math.py`
 - `domain/orders.py`
 - `domain/regions.py`
 - `extensions.py`
@@ -66,6 +68,10 @@ Classification semantics:
 - `services/instrument_sync_adapters/__init__.py`
 - `services/instrument_sync_service.py`
 - `services/market_region_service.py`
+- `services/options/__init__.py`
+- `services/options/dispatcher.py`
+- `services/options/providers/__init__.py`
+- `services/options/providers/base.py`
 - `services/rule_enforcement.py`
 - `services/sandbox/__init__.py`
 - `services/sandbox/dispatcher.py`
@@ -306,8 +312,10 @@ Classification semantics:
 - `websocket_proxy/port_check.py`
 - `websocket_proxy/server.py`
 
-## REGION_PLUGIN (2 files)
+## REGION_PLUGIN (4 files)
 
+- `services/options/providers/india/__init__.py`
+- `services/options/providers/us/__init__.py`
 - `services/sandbox/providers/india/__init__.py`
 - `services/sandbox/providers/us/__init__.py`
 
