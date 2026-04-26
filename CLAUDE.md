@@ -96,6 +96,18 @@ explicitly includes `database.symbol` and `database.token_db_enhanced`
 for non-India promoted code; the runtime import lock
 (`tests/contracts/test_promoted_imports_runtime.py`) covers both.
 
+ADR 0020 (Phase 4 v3 — partial) gates 9 India-shaped service entry
+points behind `services.feature_gate_service.is_india_region_active()`:
+expiry, iv_chart, gex, option_greeks, options_multiorder,
+synthetic_future, straddle_chart, vol_surface, flow_executor. Each
+returns a structured 422 with a stable
+`*_disabled_in_region` `ErrorCode` for non-India regions. The
+`require_region_feature(flag, error_code)` helper is the canonical
+gate. Deferred to a future Phase 4-bis: `database/historify_db.py`
+venue-aware bucketing (DST), end-to-end currency propagation, and
+the frontend currency-formatter refactor (see ADR 0020 §
+"Deferred").
+
 ### Legacy lane (frozen)
 
 Do not add features here; bug fixes and compliance only. The lane is

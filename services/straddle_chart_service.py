@@ -127,7 +127,29 @@ def get_straddle_chart_data(
 
     Returns:
         Tuple of (success, response_dict, status_code)
+
+    Phase 4 v3 (ADR 0020): straddle chart uses India options grammar
+    and IST trading-day boundaries; gated to India region.
     """
+    from domain.errors import ErrorCode
+    from services.feature_gate_service import (
+        active_region_code,
+        is_india_region_active,
+    )
+
+    if not is_india_region_active():
+        return (
+            False,
+            {
+                "status": "error",
+                "code": ErrorCode.STRADDLE_CHART_DISABLED_IN_REGION,
+                "message": (
+                    "straddle chart uses India options-grammar; active "
+                    f"region {active_region_code()!r} is not supported."
+                ),
+            },
+            422,
+        )
     try:
         ist = pytz.timezone("Asia/Kolkata")
         today = datetime.now(ist).date()

@@ -35,7 +35,26 @@ def get_gex_data(
 
     Returns:
         Tuple of (success, response_data, status_code)
+
+    Phase 4 v3 (ADR 0020): GEX uses India NFO/BFO option-chain shape;
+    gated to India region.
     """
+    from domain.errors import ErrorCode
+    from services.feature_gate_service import active_region_code, is_india_region_active
+
+    if not is_india_region_active():
+        return (
+            False,
+            {
+                "status": "error",
+                "code": ErrorCode.GEX_DISABLED_IN_REGION,
+                "message": (
+                    "GEX uses India options-grammar; active region "
+                    f"{active_region_code()!r} is not supported."
+                ),
+            },
+            422,
+        )
     try:
         # Fetch option chain (45 strikes around ATM)
         success, chain_response, status_code = get_option_chain(

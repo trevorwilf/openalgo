@@ -23,7 +23,34 @@ def get_expiry_dates(
 
     Returns:
         Tuple of (success, response_data, status_code)
+
+    Phase 4 v3 (ADR 0020): the DDMMMYY expiry grammar is India-specific.
+    Non-India regions get a structured ``expiry_grammar_not_supported_in_region``
+    error before the SymToken lookup runs.
     """
+    # Region gate — fail fast for non-India regions whose symbol grammar
+    # is not DDMMMYY. The active region resolution falls back to "india"
+    # so legacy installs keep their behavior bit-identically.
+    from domain.errors import ErrorCode, FeatureNotAvailableInRegion
+    from services.feature_gate_service import (
+        active_region_code,
+        is_india_region_active,
+    )
+
+    if not is_india_region_active():
+        return (
+            False,
+            {
+                "status": "error",
+                "code": ErrorCode.EXPIRY_GRAMMAR_NOT_SUPPORTED_IN_REGION,
+                "message": (
+                    "expiry-date listing uses the DDMMMYY grammar, which "
+                    f"is India-specific; active region {active_region_code()!r} "
+                    "uses a different grammar."
+                ),
+            },
+            422,
+        )
     try:
         # Validate API key if provided
         if api_key:
