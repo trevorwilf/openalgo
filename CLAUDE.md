@@ -129,6 +129,57 @@ helpers. The mock plugins are the canonical examples of
 Schwab/Webull integration and are gated behind the underscore
 prefix so they're never enabled in production.
 
+ADRs 0023–0028 (v4 of the refactor) close the 17 v3 baseline gaps
+and generalize Sandbox / Options / Screener into provider-pluggable
+contracts. See `docs/refactor/v4-overview.md` for the full evidence
+package.
+
+* **ADR 0023** — v4 scope + advanced-feature provider contracts.
+* **ADR 0024** — calendar precedence (non-India never reads
+  `database.market_calendar_db`).
+* **ADR 0025** — strict-mode schema for promoted broker plugins
+  (`additionalProperties: false` equivalent + 17 required fields).
+* **ADR 0026** — Sandbox provider contract + India + US providers.
+* **ADR 0027** — Options provider contract + India + US providers.
+* **ADR 0028** — Screener provider contract + India (Chartink); US
+  screener stub only.
+
+v4 invariants (additive to the v3 invariants below):
+
+1. No silent India fallback in promoted code.
+   `services.feature_gate_service.active_region_code()` raises
+   `RegionResolutionError` when nothing resolves and the caller has
+   not opted into the legacy India compatibility path.
+2. No new `Asia/Kolkata` literal in `PROMOTED_CORE` or non-India
+   broker plugins.
+3. No new India-shaped literal (NSE/NFO/MIS/CNC/NRML/CE/PE/INR/₹/
+   lakh/crore/DDMMMYY/NIFTY/BANKNIFTY/SENSEX) in `PROMOTED_CORE`
+   or non-India broker plugins.
+4. (v3 carryover) No new code may import `VALID_EXCHANGES` /
+   `VALID_PRODUCT_TYPES` / `VALID_PRICE_TYPES` from
+   `utils/constants.py`.
+5. Non-India brokers MUST NOT route through the legacy India
+   services. Enforced at static AST + runtime + request-time
+   (v1 hard-block).
+6. Promoted plugin schema is strict (ADR 0025).
+7. Sandbox / Options / Screener are provider-pluggable
+   (ADRs 0026–0028).
+8. Real Schwab and Webull broker code is out of v4 scope.
+9. Additive migrations only.
+10. Indian broker behavior is preserved bit-identically. Parity
+    harness has 8 harnesses now (added `parity_historify_offset`
+    in v4 Phase 7).
+11. Capability-driven, not heuristic. No `if broker == "..."` or
+    `if region == "india"` outside
+    `services.feature_gate_service.is_india_region_active()`.
+12. `SymToken` is read-only and India-only — zero PROMOTED_LEAK rows
+    in `docs/refactor/symtoken_callers.md`.
+
+The v4 closing invariant gate is
+`tests/contracts/test_v4_closing_invariants.py` — runs every
+invariant in one place. It must pass before promoting non-India
+brokers.
+
 ### Legacy lane (frozen)
 
 Do not add features here; bug fixes and compliance only. The lane is

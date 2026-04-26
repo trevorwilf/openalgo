@@ -42,33 +42,59 @@ These are non-negotiable. Each is enforced by a contract test in
 
 | Phase | Goal | Closes v3 gaps | Status |
 |---|---|---|---|
-| 1 | Baseline refresh, classification re-run, v4 governance | sets up enforcement | in progress |
-| 2 | Boundary enforcement + v1 hard-block for non-India | 7, 14, 15 (partial) | pending |
-| 3 | Region/venue/calendar/instrument data promotion | 11, 16 | pending |
-| 4 | Broker plugin strict-mode + capability hardening | invariant 6 | pending |
-| 5 | v2 quotes/bars/positions/balances fail-closed completion | 1, 2, 10 | pending |
-| 6 | Frontend capability-driven UI cleanup (66 files) | 3, 8, 9, 15 (full) | pending |
-| 7 | Historify + Strategy scheduler venue-tz aware | 6, 13 (strategy portion) | pending |
-| 8 | Sandbox provider-pluggable redesign + India + US providers | invariant 7 (sandbox) | pending |
-| 9 | Options provider-pluggable redesign + India + US providers | 4, 5 (provider) | pending |
-| 10 | Screener provider abstraction (Chartink as India provider) | 13 (chartink portion) | pending |
-| 11 | Mock Schwab/Webull end-to-end framework readiness | 12 | pending |
-| 12 | Final verification, doc consolidation, v4 closing audit | doc alignment | pending |
+| 1 | Baseline refresh, classification re-run, v4 governance | sets up enforcement | ✅ complete |
+| 2 | Boundary enforcement + v1 hard-block for non-India | 7, 14, 15 (partial) | ✅ complete |
+| 3 | Region/venue/calendar/instrument data promotion | 11, 16 | ✅ complete |
+| 4 | Broker plugin strict-mode + capability hardening | invariant 6 | ✅ complete |
+| 5 | v2 quotes/bars/positions/balances fail-closed completion | 1, 2, 10 | ✅ complete |
+| 6 | Frontend capability-driven UI cleanup (66 files) | 3, 8, 9, 15 (full) | ✅ partial — 6-bis deferred |
+| 7 | Historify + Strategy scheduler venue-tz aware | 6, 13 (strategy portion) | ✅ partial — 7-bis deferred |
+| 8 | Sandbox provider-pluggable redesign + India + US providers | invariant 7 (sandbox) | ✅ partial — 8-bis deferred |
+| 9 | Options provider-pluggable redesign + India + US providers | 4, 5 (provider) | ✅ partial — 9-bis deferred |
+| 10 | Screener provider abstraction (Chartink as India provider) | 13 (chartink portion) | ✅ partial — 10-bis deferred |
+| 11 | Mock Schwab/Webull end-to-end framework readiness | 12 | ✅ complete |
+| 12 | Final verification, doc consolidation, v4 closing audit | doc alignment | ✅ complete |
 
 Each phase has its own completion document at `docs/refactor/v4-phase-<N>-complete.md`
-written at merge time.
+written at merge time. The "partial" phases ship the load-bearing
+contracts + scaffolding; the per-component / per-callsite refactor
+work is documented as the corresponding "phase-N-bis" follow-up
+(non-blocking — India behavior is parity-protected throughout).
 
 ---
 
 ## What v5 should consider
 
-(Filled in by Phase 12 once v4 closes.)
-
+* **Phase 6-bis** — frontend per-component capability rewrites
+  (types/trading.ts unions, types/flow.ts defaults, full removal of
+  `INDIA_LEGACY_FALLBACK_EXCHANGES`, `useOptionChainLive` /
+  `useLiveQuote` capability gating, `lib/utils.ts:makeFormatCurrency`
+  removal, per-component currency / timezone display rewrites,
+  Telegram template currency cleanup). Foundation in place; ship
+  per-PR.
+* **Phase 7-bis** — `blueprints/strategy.py` and
+  `blueprints/python_strategy.py` venue-aware scheduler. Frontend
+  Historify pages venue-tz axes.
+* **Phase 8-bis** — wire `blueprints/sandbox.py` to dispatch
+  through `services/sandbox/dispatcher`. Add `region_code` +
+  `currency` columns to sandbox DB (additive). Add
+  `parity_sandbox_india` parity harness.
+  `BrokerCapabilities.supports_sandbox`. Sandbox UI region-aware.
+* **Phase 9-bis** — refactor 9 option services into thin shims
+  dispatching through the OptionsProvider. Add `parity_options_india`
+  parity harness. `BrokerCapabilities.supports_options` capability.
+  Frontend OSI rendering.
+* **Phase 10-bis** — refactor `blueprints/chartink.py` to dispatch
+  through `services/screeners/dispatcher`. Add `provider_code` +
+  `region_code` columns to chartink DB (additive). Add
+  `parity_chartink_india` parity harness.
+  `BrokerCapabilities.supports_screener_providers`. Frontend
+  Chartink UI gating.
 * Real Schwab plugin work (blocked on official API validation).
 * Real Webull plugin work (blocked on official API validation).
 * EU / UK pilot real-broker plugin.
-* Deprecation of legacy India services after one full release of held parity
-  (see `deprecation-schedule.md`).
+* Deprecation of legacy India services after one full release of
+  held parity (see `deprecation-schedule.md`).
 
 ---
 

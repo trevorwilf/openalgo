@@ -123,3 +123,26 @@ deployment for its named window, verified against that deployment's
 logs. This document is **not** a cleanup work order — it is a record
 of the gating conditions so that when a future operator says "can I
 delete `get_token` now?" the answer is objectively yes or no.
+
+## v4 additions (2026-04-26)
+
+* `services.feature_gate_service._FALLBACK_REGION` and
+  `services.market_region_service.FALLBACK_REGION_CODE` — already
+  REMOVED by v4 Phase 2 (no waiting period; the new structured
+  error path replaces them).
+* `services.feature_gate_service._legacy_india_region_for_compat()` —
+  the explicit, named legacy India fallback used by
+  `is_india_region_active()` etc. Eligible for removal once Phase
+  9-bis (options provider dispatch) and Phase 8-bis (sandbox
+  dispatcher wiring) replace every caller. Estimated v6 timeline.
+* `frontend/src/lib/india_legacy/legacy_fallback_exchanges.ts` —
+  v2 deprecated alias `LEGACY_FALLBACK_EXCHANGES`. Removable once
+  Phase 6-bis completes (one production release after every
+  capability-driven hook is in place).
+* `utils.number_formatter.format_indian_number` /
+  `format_indian_currency` — kept indefinitely for the legacy
+  India lane (LEGACY_INDIA classification). No removal planned.
+* `services.positions_service` — reference to a non-existent
+  module from the v3-era `restx_api/v2/accounts.py` skeleton. v4
+  Phase 5 swapped the import to the actual `positionbook_service`.
+  The bogus import has been removed; no further action.
