@@ -175,7 +175,7 @@ def should_download_master_contract(broker):
         # the cached download (24x7 venues, e.g. crypto with no
         # daily refresh boundary).
         return False, "broker plugin master_contract_refresh_policy=never"
-    tz_label = "UTC" if tz is UTC else "IST"
+    tz_label = getattr(tz, "zone", None) or str(tz)
 
     # Current calendar date in the broker's reference timezone
     now_tz = datetime.now(tz)

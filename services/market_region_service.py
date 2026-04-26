@@ -13,14 +13,41 @@ from database.settings_db import get_default_market_region, set_default_market_r
 from utils.plugin_loader import get_broker_capabilities
 from utils.region_loader import get_market_region, load_market_regions
 
-FALLBACK_REGION_CODE = "india"
+
+def _legacy_india_region_for_compat() -> str:
+    """Return ``"india"`` for the explicit legacy India compatibility path.
+
+    Phase 2 v4 (ADR 0023, invariant 1) replaced the silent
+    ``FALLBACK_REGION_CODE = "india"`` constant with this single,
+    named, deprecated wrapper. It is used only by
+    :func:`_fallback_region_code` to decide which region to surface
+    when settings are unconfigured AND the multi-region catalog
+    happens to include India. Promoted code that resolves the active
+    region calls
+    :func:`services.feature_gate_service.active_region_code` (with
+    ``legacy_india_fallback=False``) and gets a structured
+    :class:`domain.errors.RegionResolutionError` instead.
+    """
+    return "india"
 
 
 def _fallback_region_code(regions: dict[str, Any]) -> str | None:
+    """Pick a deterministic region from the catalog when the operator
+    has not configured one.
+
+    Prefers India (legacy default) when present in the catalog; falls
+    through to the first installed region otherwise. This helper is
+    invoked only by :func:`resolve_default_market_region_code`, which
+    is itself the *settings* lookup — not the per-request region
+    resolver. Promoted per-request code uses
+    :func:`services.feature_gate_service.active_region_code` and gets
+    a structured error when nothing resolves.
+    """
     if not regions:
         return None
-    if FALLBACK_REGION_CODE in regions:
-        return FALLBACK_REGION_CODE
+    legacy_india = _legacy_india_region_for_compat()
+    if legacy_india in regions:
+        return legacy_india
     return next(iter(regions.keys()))
 
 

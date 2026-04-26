@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useBrokerStore } from '@/stores/brokerStore'
-import { LEGACY_FALLBACK_EXCHANGES } from '@/lib/india_legacy/legacy_fallback_exchanges'
+import { INDIA_LEGACY_FALLBACK_EXCHANGES } from '@/lib/india_legacy/legacy_fallback_exchanges'
 
 /** Exchange option for dropdowns */
 export interface ExchangeOption {
@@ -30,13 +30,14 @@ const INDEX_EXCHANGES = new Set(['NSE_INDEX', 'BSE_INDEX', 'MCX_INDEX', 'CDS_IND
 const FNO_CODES = new Set(['NFO', 'BFO', 'MCX', 'CDS', 'CRYPTO'])
 
 /*
- * LEGACY_FALLBACK_EXCHANGES is imported from
+ * INDIA_LEGACY_FALLBACK_EXCHANGES is imported from
  * `@/lib/india_legacy/legacy_fallback_exchanges` so the literal list
- * does not live in this hook. The fallback is only used when the
- * broker (current OR last-known) is India-shaped AND
- * `allowLegacyFallback` is true. Phase 5 (ADR 0010) gate stays in
- * effect: a broker whose `supported_regions` excludes "india" never
- * falls back to NSE/NFO/MCX.
+ * does not live in this hook. Phase 2 v4 (ADR 0023) renamed the
+ * constant; Phase 6 of v4 removes this fallback entirely when the
+ * hook becomes purely capability-driven. Until then the fallback is
+ * only used when the broker (current OR last-known) is India-shaped
+ * AND `allowLegacyFallback` is true; non-India brokers without venue
+ * codes get an empty list and the UI renders an unsupported state.
  */
 
 function _broker_is_india_shaped(cap: { supported_regions?: string[] | null } | null): boolean {
@@ -72,7 +73,7 @@ export function useSupportedExchanges(opts: UseSupportedExchangesOptions = {}) {
     const usingFallback = fromCap === undefined
     const indiaShaped = _broker_is_india_shaped(capabilities)
     const supported =
-      fromCap ?? (allowLegacyFallback && indiaShaped ? LEGACY_FALLBACK_EXCHANGES : [])
+      fromCap ?? (allowLegacyFallback && indiaShaped ? INDIA_LEGACY_FALLBACK_EXCHANGES : [])
     const isCrypto = capabilities?.broker_type === 'crypto'
 
     // All exchanges from plugin.json

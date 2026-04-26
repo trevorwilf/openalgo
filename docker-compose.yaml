@@ -23,7 +23,14 @@ services:
     environment:
       - FLASK_ENV=${FLASK_ENV:-production}
       - FLASK_DEBUG=${FLASK_DEBUG:-0}
-      - TZ=Asia/Kolkata
+      # Container TZ — defaults to UTC. Operators set OPENALGO_DEPLOY_TZ
+      # in .env to a region-appropriate IANA timezone:
+      #   India:  OPENALGO_DEPLOY_TZ=Asia/Kolkata
+      #   US:     OPENALGO_DEPLOY_TZ=America/New_York
+      #   EU:     OPENALGO_DEPLOY_TZ=Europe/Berlin
+      #   UK:     OPENALGO_DEPLOY_TZ=Europe/London
+      # Phase 2 v4 (ADR 0023, invariant 1) — no silent India default.
+      - TZ=${OPENALGO_DEPLOY_TZ:-UTC}
       # Limit OpenBLAS/NumPy threads to prevent RLIMIT_NPROC exhaustion
       # See: https://github.com/marketcalls/openalgo/issues/822
       - OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-2}

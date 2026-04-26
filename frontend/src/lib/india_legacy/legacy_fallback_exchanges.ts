@@ -12,7 +12,12 @@
 //   frontend/scripts/literal_scan_allowlist.json
 //   { "path": "src/lib/india_legacy/legacy_fallback_exchanges.ts" }
 
-export const LEGACY_FALLBACK_EXCHANGES: ReadonlyArray<string> = [
+// Phase 2 v4 (ADR 0023, invariant 1) — renamed from
+// `LEGACY_FALLBACK_EXCHANGES` to `INDIA_LEGACY_FALLBACK_EXCHANGES` so
+// the call-site is unambiguous about the India scope. The old name
+// is re-exported below for one release as a deprecated alias to keep
+// the existing test file working without churn.
+export const INDIA_LEGACY_FALLBACK_EXCHANGES: ReadonlyArray<string> = [
   'NSE',
   'BSE',
   'NFO',
@@ -21,3 +26,10 @@ export const LEGACY_FALLBACK_EXCHANGES: ReadonlyArray<string> = [
   'MCX',
   'CRYPTO',
 ] as const
+
+/**
+ * @deprecated Use `INDIA_LEGACY_FALLBACK_EXCHANGES`. Phase 6 of v4
+ * removes this alias when `useSupportedExchanges` is fully replaced
+ * by capability-driven hooks.
+ */
+export const LEGACY_FALLBACK_EXCHANGES = INDIA_LEGACY_FALLBACK_EXCHANGES

@@ -214,16 +214,24 @@ def get_smart_download_status():
         # Get full status with smart download fields
         status_data = get_status(broker)
 
-        # Add smart download recommendation
+        # Add smart download recommendation. Phase 2 v4: surface the
+        # actual configured tz string from the broker's
+        # master_contract_refresh_policy (or "UTC" when there is no
+        # policy / no cutoff), not the binary UTC/IST label that
+        # forced foreign-broker labels through an India-shaped lens.
         should_download, reason = should_download_master_contract(broker)
         cutoff_hour, cutoff_minute, tz = get_master_contract_cutoff(broker)
-        import pytz
-        tz_label = "UTC" if tz is pytz.utc else "IST"
+        if cutoff_hour is None:
+            cutoff_time_str = None
+            cutoff_timezone = None
+        else:
+            cutoff_time_str = f"{cutoff_hour:02d}:{cutoff_minute:02d}"
+            cutoff_timezone = getattr(tz, "zone", None) or str(tz)
         status_data["smart_download"] = {
             "should_download": should_download,
             "reason": reason,
-            "cutoff_time": f"{cutoff_hour:02d}:{cutoff_minute:02d}",
-            "cutoff_timezone": tz_label
+            "cutoff_time": cutoff_time_str,
+            "cutoff_timezone": cutoff_timezone,
         }
 
         return jsonify(status_data), 200

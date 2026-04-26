@@ -45,23 +45,28 @@ check_status() {
     fi
 }
 
-# Function to check current timezone
+# Function to check current timezone.
+# Phase 2 v4 (ADR 0023, invariant 1) — make the prompt explicit and
+# region-agnostic. India installations remain a single keystroke
+# (timezone is offered but not the default); operators in other
+# regions are not silently nudged into Asia/Kolkata.
 check_timezone() {
     current_tz=$(timedatectl | grep "Time zone" | awk '{print $3}')
     log_message "Current timezone: $current_tz" "$BLUE"
-    
-    if [[ "$current_tz" == "Asia/Kolkata" ]]; then
-        log_message "Server is already set to IST timezone." "$GREEN"
-        return 0
-    fi
-    
-    log_message "Server is not set to IST timezone." "$YELLOW"
-    read -p "Would you like to change the timezone to IST? (y/n): " change_tz
-    if [[ $change_tz =~ ^[Yy]$ ]]; then
-        log_message "Changing timezone to IST..." "$BLUE"
-        sudo timedatectl set-timezone Asia/Kolkata
+
+    log_message "OpenAlgo runs against a single broker per instance." "$BLUE"
+    log_message "Set the system timezone to match the broker's region:" "$BLUE"
+    log_message "  India:  Asia/Kolkata" "$BLUE"
+    log_message "  US:     America/New_York" "$BLUE"
+    log_message "  EU:     Europe/Berlin" "$BLUE"
+    log_message "  UK:     Europe/London" "$BLUE"
+
+    read -p "Enter IANA timezone to set (or press Enter to keep $current_tz): " new_tz
+    if [[ -n "$new_tz" && "$new_tz" != "$current_tz" ]]; then
+        log_message "Changing timezone to $new_tz..." "$BLUE"
+        sudo timedatectl set-timezone "$new_tz"
         check_status "Failed to change timezone"
-        log_message "Timezone successfully changed to IST" "$GREEN"
+        log_message "Timezone successfully changed to $new_tz" "$GREEN"
     else
         log_message "Keeping current timezone: $current_tz" "$YELLOW"
     fi

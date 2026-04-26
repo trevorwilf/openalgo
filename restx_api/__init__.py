@@ -10,6 +10,18 @@ api = Api(
     doc=False,
 )
 
+
+# Phase 2 v4 (ADR 0023, invariant 5) — v1 hard-block for non-India brokers.
+# Every /api/v1/* request runs through this guard. India brokers
+# proceed unchanged; non-India brokers receive a structured 410 Gone
+# with code v1_unavailable_for_non_india_broker.
+from ._v1_lane_guard import enforce_india_only as _v1_enforce_india_only
+
+
+@api_v1_bp.before_request
+def _v1_block_non_india_brokers():
+    return _v1_enforce_india_only()
+
 # Import namespaces
 from .analyzer import api as analyzer_ns
 from .basket_order import api as basket_order_ns
