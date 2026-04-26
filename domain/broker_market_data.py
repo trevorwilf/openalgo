@@ -109,11 +109,74 @@ class BrokerBarAdapter(Protocol):
         """
 
 
+# Phase 5 v4 (ADR 0023, invariant 5) — promoted-lane account-state
+# adapter Protocols. Mirror the BrokerQuoteAdapter / BrokerBarAdapter
+# pattern. Mock plugins register stub implementations; real broker
+# plugins replace them.
+
+@dataclass(frozen=True)
+class NormalizedPosition:
+    """Broker-agnostic open position snapshot."""
+
+    instrument_id: Any
+    venue_code: str
+    canonical_symbol: str
+    quantity: Decimal
+    average_price: Decimal | None = None
+    market_value: Decimal | None = None
+    realized_pnl: Decimal | None = None
+    unrealized_pnl: Decimal | None = None
+    currency: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class NormalizedBalance:
+    """Broker-agnostic account balance snapshot."""
+
+    cash: Decimal
+    equity: Decimal | None = None
+    buying_power: Decimal | None = None
+    margin_used: Decimal | None = None
+    currency: str = "USD"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@runtime_checkable
+class BrokerPositionAdapter(Protocol):
+    """Per-broker open-positions contract for the promoted lane."""
+
+    broker_code: str
+
+    def get_positions(
+        self,
+        account_ctx: AccountContext,
+    ) -> list[NormalizedPosition]:
+        """Return all open positions for the account."""
+
+
+@runtime_checkable
+class BrokerBalanceAdapter(Protocol):
+    """Per-broker account-balance contract for the promoted lane."""
+
+    broker_code: str
+
+    def get_balance(
+        self,
+        account_ctx: AccountContext,
+    ) -> NormalizedBalance:
+        """Return the account's balance snapshot."""
+
+
 __all__ = [
     "AccountContext",
+    "BrokerBalanceAdapter",
     "BrokerBarAdapter",
+    "BrokerPositionAdapter",
     "BrokerQuoteAdapter",
+    "NormalizedBalance",
     "NormalizedBar",
     "NormalizedBarRequest",
+    "NormalizedPosition",
     "NormalizedQuote",
 ]

@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **814**.
+Total classified files: **816**.
 
 Classification semantics:
 
@@ -306,7 +306,7 @@ Classification semantics:
 
 (none)
 
-## BROKER_PLUGIN (531 files)
+## BROKER_PLUGIN (533 files)
 
 - `broker/__init__.py`
 - `broker/_mock_schwab_like/__init__.py`
@@ -315,6 +315,7 @@ Classification semantics:
 - `broker/_mock_schwab_like/api/auth_api.py`
 - `broker/_mock_schwab_like/api/bar_api.py`
 - `broker/_mock_schwab_like/api/order_api.py`
+- `broker/_mock_schwab_like/api/position_balance_adapters.py`
 - `broker/_mock_schwab_like/api/quote_api.py`
 - `broker/_mock_schwab_like/api/stream_api.py`
 - `broker/_mock_schwab_like/sync/__init__.py`
@@ -325,6 +326,7 @@ Classification semantics:
 - `broker/_mock_webull_like/api/auth_api.py`
 - `broker/_mock_webull_like/api/bar_api.py`
 - `broker/_mock_webull_like/api/order_api.py`
+- `broker/_mock_webull_like/api/position_balance_adapters.py`
 - `broker/_mock_webull_like/api/quote_api.py`
 - `broker/_mock_webull_like/api/stream_api.py`
 - `broker/_mock_webull_like/sync/__init__.py`
