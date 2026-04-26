@@ -50,10 +50,6 @@ def test_sandbox_provider_contract_exists_with_india_and_us_providers() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="v4 Phase 9 ships the Options provider contract.",
-    strict=False,
-)
 def test_options_provider_contract_exists_with_india_and_us_providers() -> None:
     assert OPTIONS_BASE_PATH.is_file(), (
         f"missing {OPTIONS_BASE_PATH.relative_to(REPO_ROOT).as_posix()} — "
