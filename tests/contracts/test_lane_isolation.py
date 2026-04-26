@@ -107,13 +107,18 @@ def _literal_pattern(literal: str) -> re.Pattern[str]:
     Identifier-like literals (alphanum + underscore) get a strict
     word-boundary regex that also excludes a leading ``.``, so attribute
     access like ``Currency.INR`` or ``Venue.NSE`` does not trip the
-    scanner. India-specific literals are detected only when they appear
-    as standalone tokens in the source.
+    scanner. The rupee abbreviations ``L`` and ``Cr`` are even
+    narrower: they only match when immediately preceded by a digit
+    (the ``₹1.5L`` pattern), so ``P&L`` and identifiers like
+    ``Crash`` / ``Local`` do not trip.
     """
     pat = _LITERAL_BOUNDARY_PATTERNS.get(literal)
     if pat is not None:
         return pat
-    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", literal):
+    if literal in {"L", "Cr"}:
+        # Rupee abbreviation pattern — must follow a digit.
+        pat = re.compile(rf"\d{re.escape(literal)}(?![A-Za-z0-9_])")
+    elif re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", literal):
         # Exclude `.NAME` (attribute access) and `NAME` preceded by an
         # alphanumeric or underscore; trailing word boundary as before.
         pat = re.compile(rf"(?<![A-Za-z0-9_.]){re.escape(literal)}(?![A-Za-z0-9_])")

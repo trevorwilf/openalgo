@@ -44,6 +44,13 @@ logger = get_logger(__name__)
 # plugin.json. Phase 1's narrower check on the four currency/family
 # basics is a subset; this list extends it to the order-shape primitives
 # the promoted lane reads at dispatch time.
+#
+# Phase 1 of v3 (ADR 0017) extends the list with
+# ``master_contract_refresh_policy`` and ``auth_modes`` so promoted
+# brokers must declare both up front. The first lets the UI render a
+# correct refresh time without inferring "08:00 IST"; the second
+# tells the operator at a glance whether the plugin needs HMAC
+# signing or OAuth.
 _REQUIRED_NON_INDIA_PLUGIN_FIELDS: tuple[str, ...] = (
     "broker_type",
     "market_families",
@@ -54,6 +61,8 @@ _REQUIRED_NON_INDIA_PLUGIN_FIELDS: tuple[str, ...] = (
     "supported_time_in_force",
     "supported_quantity_units",
     "supported_sessions",
+    "master_contract_refresh_policy",
+    "auth_modes",
 )
 
 

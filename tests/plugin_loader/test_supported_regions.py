@@ -82,6 +82,14 @@ def test_supported_regions_explicit_override_round_trips(
                 # excludes "india" (ADR 0006).
                 "default_currency": "USD",
                 "base_currency": "USD",
+                # Phase 1 v3 (ADR 0017) — required for non-India plugins.
+                "auth_modes": ["OAUTH"],
+                "master_contract_refresh_policy": {
+                    "timezone": "America/New_York",
+                    "cutoff_local": "08:00",
+                    "frequency": "daily",
+                    "skip_if_24x7": False,
+                },
             }
         }
     )

@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useBrokerStore } from '@/stores/brokerStore'
+import { LEGACY_FALLBACK_EXCHANGES } from '@/lib/india_legacy/legacy_fallback_exchanges'
 
 /** Exchange option for dropdowns */
 export interface ExchangeOption {
@@ -7,7 +8,13 @@ export interface ExchangeOption {
   label: string
 }
 
-/** Default underlyings per F&O exchange */
+// LEGACY INDIA COMPATIBILITY — default underlyings per F&O exchange.
+// India-specific. The values are sourced from
+// `frontend/src/lib/india_legacy/legacy_fallback_exchanges.ts` for
+// the exchange list itself; this object enumerates the
+// underlyings only because the v1 surface depends on them. New
+// non-India consumers must read underlyings from broker capabilities,
+// not from this constant.
 const UNDERLYINGS: Record<string, string[]> = {
   NFO: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'],
   BFO: ['SENSEX', 'BANKEX'],
@@ -22,15 +29,15 @@ const INDEX_EXCHANGES = new Set(['NSE_INDEX', 'BSE_INDEX', 'MCX_INDEX', 'CDS_IND
 /** F&O exchange codes (includes MCX/CDS which also have options) */
 const FNO_CODES = new Set(['NFO', 'BFO', 'MCX', 'CDS', 'CRYPTO'])
 
-/**
- * Last-resort default used ONLY when explicitly opted in via
- * `allowLegacyFallback` AND the broker (current OR last-known) is
- * India-shaped. Phase 5 (ADR 0010): a broker whose `supported_regions`
- * excludes "india" never falls back to NSE/NFO/MCX — it renders an
- * "unavailable" state instead, so non-India brokers never show
- * Indian exchanges by accident.
+/*
+ * LEGACY_FALLBACK_EXCHANGES is imported from
+ * `@/lib/india_legacy/legacy_fallback_exchanges` so the literal list
+ * does not live in this hook. The fallback is only used when the
+ * broker (current OR last-known) is India-shaped AND
+ * `allowLegacyFallback` is true. Phase 5 (ADR 0010) gate stays in
+ * effect: a broker whose `supported_regions` excludes "india" never
+ * falls back to NSE/NFO/MCX.
  */
-const LEGACY_FALLBACK_EXCHANGES = ['NSE', 'BSE', 'NFO', 'BFO', 'CDS', 'MCX', 'CRYPTO']
 
 function _broker_is_india_shaped(cap: { supported_regions?: string[] | null } | null): boolean {
   if (cap == null) return true // unknown — treat as legacy India for backward compat

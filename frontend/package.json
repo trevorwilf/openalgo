@@ -10,6 +10,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "biome lint ./src",
+    "lint:literals": "node scripts/literal_scan.mjs",
     "format": "biome format --write ./src",
     "check": "biome check --write ./src",
     "preview": "vite preview",

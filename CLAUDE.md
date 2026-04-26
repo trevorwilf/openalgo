@@ -58,6 +58,16 @@ HTTP route sits live under `docs/refactor/`:
 - [`v3_baseline_audit.md`](docs/refactor/v3_baseline_audit.md) — the
   v3 starting state: confirmed gaps and the phase that closes each.
 
+ADR 0017 (Phase 1 v3) adds a runtime import lock for PROMOTED_CORE
+files (`tests/contracts/test_promoted_imports_runtime.py`), stamps the
+v1 schema modules and `utils/constants.py` as
+`LEGACY_INDIA_COMPATIBILITY = True`, and adds a frontend literal
+scanner at `frontend/scripts/literal_scan.mjs` (wired to
+`npm run lint:literals`) with an allowlist at
+`frontend/scripts/literal_scan_allowlist.json`. Non-India broker
+plugins must declare `auth_modes` and `master_contract_refresh_policy`
+or the loader skips them at startup.
+
 ### Legacy lane (frozen)
 
 Do not add features here; bug fixes and compliance only. The lane is

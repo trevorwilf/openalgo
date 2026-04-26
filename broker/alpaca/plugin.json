@@ -22,5 +22,12 @@
     "supports_notional_orders": true,
     "supports_extended_hours": false,
     "supports_short_selling": true,
-    "supports_analyzer": true
+    "supports_analyzer": true,
+    "auth_modes": ["OAUTH"],
+    "master_contract_refresh_policy": {
+        "timezone": "America/New_York",
+        "cutoff_local": "08:00",
+        "frequency": "daily",
+        "skip_if_24x7": false
+    }
 }
