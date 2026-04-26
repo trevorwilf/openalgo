@@ -5,8 +5,36 @@
 > requires authenticated docs review, credentials, UAT/paper validation,
 > and human approval.**
 
-Status: framework-only (Phase 8 v2 + Phase 6 v3). Plugin implementation
-deliberately out of scope per the v2/v3 prompts.
+Status: framework-only (Phase 8 v2 + Phase 6 v3 + Phase 11 v4).
+Plugin implementation deliberately out of scope per the v2/v3/v4
+prompts.
+
+## v4 framework-readiness extension (Phase 11, ADR 0023)
+
+v4 adds the following surfaces beyond what v3 already proved. Each
+maps to a contract test in `tests/contracts/` or
+`tests/<surface>/test_*.py`:
+
+| Surface | Status | Test |
+|---|---|---|
+| Strict promoted plugin schema (ADR 0025) | ✅ pass | `tests/plugin_loader/test_strict_promoted_schema.py::test_mock_schwab_passes_strict_mode` |
+| BrokerPositionAdapter | ✅ scaffolded | `broker/_mock_schwab_like/api/position_balance_adapters.py:MockSchwabLikePositionAdapter` |
+| BrokerBalanceAdapter | ✅ scaffolded | `broker/_mock_schwab_like/api/position_balance_adapters.py:MockSchwabLikeBalanceAdapter` |
+| `/api/v2/positions` adapter dispatch | ✅ pass | `tests/api_v2/test_positions_failclosed_non_india.py::test_non_india_with_adapter_returns_normalized_positions` |
+| `/api/v2/balances` adapter dispatch | ✅ pass | `tests/api_v2/test_balances_failclosed_non_india.py::test_non_india_with_adapter_returns_normalized_balance` |
+| Sandbox provider (US, mock data) | ✅ in framework | `tests/sandbox/test_provider_contract.py::test_us_provider_t2_equity_settlement` |
+| Options provider (US, OCC OSI) | ✅ in framework | `tests/options/test_provider_contract.py::test_us_parse_aapl_call` |
+| Screener provider | ✅ India only (US out of v4) | `tests/screeners/test_provider_contract.py::test_chartink_implements_contract` |
+| Plugin diagnostics endpoint | ✅ pass | `tests/plugin_loader/test_diagnostics_endpoint.py` |
+| v1 hard-block for non-India | ✅ pass | `tests/contracts/test_v1_lane_blocks_non_india.py` |
+| Framework readiness gate | ✅ pass | `tests/contracts/test_framework_ready_for_real_brokers.py` |
+
+The mock plugin now demonstrates the complete promoted lane: strict
+plugin schema, order translator, position + balance adapters,
+quote / bar adapter contracts, market-data + order-event streaming,
+account context (account_hash), instrument sync, combo orders,
+fail-closed v1 hard-block. **Real Schwab plugin implementation
+remains the next-step work blocked on official API validation.**
 
 ## Framework readiness verification (Phase 6 v3, ADR 0022)
 
