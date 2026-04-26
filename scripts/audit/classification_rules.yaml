@@ -1,0 +1,157 @@
+# File classification rules for the market-agnostic v3 refactor.
+#
+# Used by scripts/audit/classify_files.py to assign every Python source
+# file to exactly one of:
+#
+#   PROMOTED_CORE        — must be region/broker neutral
+#   LEGACY_INDIA         — India-only, frozen, allowlisted India literals OK
+#   REGION_PLUGIN        — under market_regions/* — region facts only
+#   BROKER_PLUGIN        — under broker/* — broker facts only
+#   COMPATIBILITY_SHIM   — explicit bridges (e.g., domain/translators.py)
+#
+# Rules are processed in order; first match wins. `path` is an exact
+# repo-relative POSIX path. `path_prefix` matches any file under that
+# directory.
+#
+# When a file's actual classification drifts from the rules, the
+# classifier exits non-zero and prints the drift. Operator either
+# updates this file or the file's location.
+
+# Default classification when no rule matches. LEGACY_INDIA is the
+# conservative default: anything not explicitly promoted stays bound
+# to the legacy lane and is exempt from the strict literal scanner.
+default: LEGACY_INDIA
+
+# Compatibility shims — explicit bridges. Use a dedicated list so
+# additions are deliberate.
+compatibility_shims:
+  - domain/translators.py
+  - services/instrument_resolver.py
+  - services/venue_session_service.py
+  - services/order_router_service.py
+
+# Rules processed in order. First match wins.
+rules:
+  # ---------------- COMPATIBILITY_SHIM ----------------
+  - path: domain/translators.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/instrument_resolver.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/venue_session_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/order_router_service.py
+    classification: COMPATIBILITY_SHIM
+
+  # ---------------- REGION_PLUGIN ----------------
+  - path_prefix: market_regions/
+    classification: REGION_PLUGIN
+
+  # ---------------- BROKER_PLUGIN ----------------
+  - path_prefix: broker/
+    classification: BROKER_PLUGIN
+
+  # ---------------- PROMOTED_CORE — top-level scaffolding ----------------
+  - path: __init__.py
+    classification: PROMOTED_CORE
+  - path: conftest.py
+    classification: PROMOTED_CORE
+  - path: cors.py
+    classification: PROMOTED_CORE
+  - path: csp.py
+    classification: PROMOTED_CORE
+  - path: extensions.py
+    classification: PROMOTED_CORE
+  - path: limiter.py
+    classification: PROMOTED_CORE
+
+  # ---------------- PROMOTED_CORE — domain ----------------
+  - path_prefix: domain/
+    classification: PROMOTED_CORE
+
+  # ---------------- PROMOTED_CORE — restx_api/v2 ----------------
+  - path_prefix: restx_api/v2/
+    classification: PROMOTED_CORE
+
+  # ---------------- PROMOTED_CORE — services explicitly clean ----------------
+  - path: services/account_context_service.py
+    classification: PROMOTED_CORE
+  - path: services/broker_market_data_registry.py
+    classification: PROMOTED_CORE
+  - path: services/broker_streaming_registry.py
+    classification: PROMOTED_CORE
+  - path: services/broker_translator_registry.py
+    classification: PROMOTED_CORE
+  - path: services/feature_gate_service.py
+    classification: PROMOTED_CORE
+  - path: services/instrument_resolution.py
+    classification: PROMOTED_CORE
+  - path: services/instrument_sync_service.py
+    classification: PROMOTED_CORE
+  - path: services/market_region_service.py
+    classification: PROMOTED_CORE
+  - path: services/rule_enforcement.py
+    classification: PROMOTED_CORE
+  - path: services/instrument_sync_adapters/__init__.py
+    classification: PROMOTED_CORE
+
+  # ---------------- PROMOTED_CORE — utils explicitly clean ----------------
+  - path: utils/__init__.py
+    classification: PROMOTED_CORE
+  - path: utils/feature_flags.py
+    classification: PROMOTED_CORE
+  - path: utils/plugin_loader.py
+    classification: PROMOTED_CORE
+  - path: utils/region_loader.py
+    classification: PROMOTED_CORE
+  - path: utils/capability_guards.py
+    classification: PROMOTED_CORE
+  - path: utils/broker_context.py
+    classification: PROMOTED_CORE
+  - path: utils/metrics.py
+    classification: PROMOTED_CORE
+  - path: utils/logging.py
+    classification: PROMOTED_CORE
+  - path: utils/logging_context.py
+    classification: PROMOTED_CORE
+  - path: utils/httpx_client.py
+    classification: PROMOTED_CORE
+  - path: utils/version.py
+    classification: PROMOTED_CORE
+  - path: utils/config.py
+    classification: PROMOTED_CORE
+
+  # ---------------- PROMOTED_CORE — database canonical repos ----------------
+  - path: database/instruments_repo.py
+    classification: PROMOTED_CORE
+  - path: database/venue_schedule_repo.py
+    classification: PROMOTED_CORE
+  - path: database/broker_rules_repo.py
+    classification: PROMOTED_CORE
+
+# Excluded path prefixes: classifier ignores these entirely.
+excluded:
+  - .venv/
+  - .git/
+  - .pytest_cache/
+  - .mypy_cache/
+  - node_modules/
+  - frontend/
+  - tests/
+  - test/
+  - docs/
+  - examples/
+  - collections/
+  - install/
+  - upgrade/
+  - audit/
+  - data/
+  - db/
+  - download/
+  - keys/
+  - log/
+  - tmp/
+  - openalgoUI.egg-info/
+  - events/
+  - subscribers/
+  - strategies/
+  - scripts/

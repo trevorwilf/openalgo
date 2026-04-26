@@ -54,6 +54,11 @@ ALLOWLIST: dict[tuple[str, str], set[str]] = {}
 # Python source (per ADR 0006). The check is performed both at the AST
 # level (string Constants) and via a coarse regex pass to catch any
 # non-AST cases (e.g. raw string-formatting templates).
+#
+# Phase 0 of v3 widens the set with BCD, NSE_INDEX, BSE_INDEX, lakh,
+# crore, Cr, L (rupee abbreviations). The "Cr" / "L" entries use the
+# same word-boundary regex as the alphanumerics so identifiers like
+# "Crash" or "Local" do not trip the scanner.
 INDIA_LITERALS: tuple[str, ...] = (
     "Asia/Kolkata",
     "IST",
@@ -63,6 +68,7 @@ INDIA_LITERALS: tuple[str, ...] = (
     "BFO",
     "MCX",
     "CDS",
+    "BCD",
     "MIS",
     "CNC",
     "NRML",
@@ -71,6 +77,12 @@ INDIA_LITERALS: tuple[str, ...] = (
     "PE",
     "₹",  # ₹
     "INR",
+    "NSE_INDEX",
+    "BSE_INDEX",
+    "lakh",
+    "crore",
+    "Cr",
+    "L",
 )
 
 
@@ -90,12 +102,21 @@ _LITERAL_BOUNDARY_PATTERNS: dict[str, re.Pattern[str]] = {}
 
 
 def _literal_pattern(literal: str) -> re.Pattern[str]:
-    """Cache compiled boundary patterns per literal."""
+    """Cache compiled boundary patterns per literal.
+
+    Identifier-like literals (alphanum + underscore) get a strict
+    word-boundary regex that also excludes a leading ``.``, so attribute
+    access like ``Currency.INR`` or ``Venue.NSE`` does not trip the
+    scanner. India-specific literals are detected only when they appear
+    as standalone tokens in the source.
+    """
     pat = _LITERAL_BOUNDARY_PATTERNS.get(literal)
     if pat is not None:
         return pat
     if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", literal):
-        pat = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(literal)}(?![A-Za-z0-9_])")
+        # Exclude `.NAME` (attribute access) and `NAME` preceded by an
+        # alphanumeric or underscore; trailing word boundary as before.
+        pat = re.compile(rf"(?<![A-Za-z0-9_.]){re.escape(literal)}(?![A-Za-z0-9_])")
     else:
         pat = re.compile(re.escape(literal))
     _LITERAL_BOUNDARY_PATTERNS[literal] = pat
@@ -218,22 +239,167 @@ def test_promoted_paths_have_no_forbidden_imports() -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Phase 0 v3 — classified-promoted import lock (HARD fail).
+# Reads docs/refactor/file_classification.md and forbids any
+# PROMOTED_CORE file from importing from a wider blocklist than the
+# original LEGACY_ONLY_SYMBOLS list. The named compatibility shims are
+# the only sanctioned bridges.
+# ---------------------------------------------------------------------------
+
+CLASSIFIED_FORBIDDEN_MODULES: set[str] = {
+    "utils.constants",
+    "database.token_db",
+    "database.token_db_enhanced",
+    "database.symbol",
+    "database.market_calendar_db",
+    "services.quotes_service",
+    "services.history_service",
+    "services.place_order_service",
+    "services.basket_order_service",
+    "services.split_order_service",
+    "domain.translators",
+}
+
+
+def _check_classified_promoted_imports(path: Path) -> list[str]:
+    """Return module-level violations for a single PROMOTED_CORE file.
+
+    Any import from a CLASSIFIED_FORBIDDEN_MODULES module is a HARD
+    failure — there is no allowlist for this scan. Imports that live
+    inside function bodies (lazy imports) are not seen by this AST
+    walk, by design: the promoted dispatcher's legacy fallback uses
+    function-local imports so the module never depends on the legacy
+    surface at load time.
+    """
+    rel = path.relative_to(REPO_ROOT).as_posix()
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return [f"{rel}: could not read: {exc}"]
+    try:
+        tree = ast.parse(source, filename=str(path))
+    except SyntaxError as exc:
+        return [f"{rel}: syntax error: {exc}"]
+    violations: list[str] = []
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                mod = alias.name
+                if any(
+                    mod == bad or mod.startswith(bad + ".")
+                    for bad in CLASSIFIED_FORBIDDEN_MODULES
+                ):
+                    violations.append(
+                        f"{rel}:{node.lineno}: forbidden `import {mod}` — "
+                        "PROMOTED_CORE files must not depend on legacy "
+                        "Indian primitives. See ADR 0016."
+                    )
+        elif isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            if any(
+                mod == bad or mod.startswith(bad + ".")
+                for bad in CLASSIFIED_FORBIDDEN_MODULES
+            ):
+                violations.append(
+                    f"{rel}:{node.lineno}: forbidden `from {mod} import …` "
+                    "— PROMOTED_CORE files must not depend on legacy "
+                    "Indian primitives. See ADR 0016."
+                )
+    return violations
+
+
+def test_classified_promoted_files_have_no_forbidden_imports() -> None:
+    """ADR 0016 — classified PROMOTED_CORE files cannot import legacy
+    Indian primitives at module-load time. The named compatibility
+    shims (e.g. ``domain/translators.py``) live in COMPATIBILITY_SHIM
+    and are exempt by classification.
+    """
+    files = _read_classified_promoted_core()
+    assert files, (
+        "PROMOTED_CORE list missing — run "
+        "`uv run python scripts/audit/classify_files.py`."
+    )
+    violations: list[str] = []
+    for path in files:
+        if not path.is_file():
+            continue
+        violations.extend(_check_classified_promoted_imports(path))
+    assert not violations, (
+        "PROMOTED_CORE import contract violated:\n  "
+        + "\n  ".join(violations)
+    )
+
+
 def _string_constants_in_module(tree: ast.Module) -> Iterable[tuple[str, int]]:
     """Yield (string_value, lineno) for every `ast.Constant` whose value
-    is a `str`, *excluding* docstrings and module/class/function-level
-    docstring positions.
+    is a ``str``, *excluding* docstrings, module/class/function-level
+    docstring positions, and enum-value assignments where the target
+    name equals the string value (the ``INR = "INR"`` pattern).
     """
-    docstring_node_ids: set[int] = set()
+    skipped_ids: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             body = getattr(node, "body", None)
             if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
-                docstring_node_ids.add(id(body[0].value))
+                skipped_ids.add(id(body[0].value))
+        # Enum-value pattern: `NAME = "NAME"` inside any class body.
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            if (
+                len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == node.value.value
+            ):
+                skipped_ids.add(id(node.value))
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if id(node) in docstring_node_ids:
+            if id(node) in skipped_ids:
                 continue
             yield node.value, getattr(node, "lineno", 0)
+
+
+def _docstring_line_numbers(tree: ast.Module) -> set[int]:
+    """Return the set of line numbers occupied by module/class/function
+    docstrings — used by the regex pass to skip them.
+    """
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = getattr(node, "body", None)
+            if not body:
+                continue
+            first = body[0]
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
+                start = first.lineno
+                end = getattr(first, "end_lineno", start) or start
+                for ln in range(start, end + 1):
+                    lines.add(ln)
+    return lines
+
+
+def _enum_self_assign_lines(tree: ast.Module) -> set[int]:
+    """Return line numbers of ``NAME = "NAME"`` assignments — the
+    enum-member self-assignment pattern. Skipped by the regex pass.
+    """
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+            and node.targets[0].id == node.value.value
+        ):
+            start = node.lineno
+            end = getattr(node, "end_lineno", start) or start
+            for ln in range(start, end + 1):
+                lines.add(ln)
+    return lines
 
 
 def _literal_violations_in_file(
@@ -255,7 +421,8 @@ def _literal_violations_in_file(
 
     violations: list[str] = []
 
-    # AST pass — string constants only (no docstrings).
+    # AST pass — string constants only (no docstrings, no enum-value
+    # ``NAME = "NAME"`` self-assignments).
     for value, lineno in _string_constants_in_module(tree):
         for literal in INDIA_LITERALS:
             if rel in allowlist.get(literal, set()):
@@ -267,10 +434,15 @@ def _literal_violations_in_file(
                     "must use venue/region metadata. See ADR 0006."
                 )
 
-    # Regex pass — strip comments line-by-line, then scan the remaining
-    # source for the literals to catch any non-AST cases (f-strings'
-    # joined parts, raw template strings missed by Constant walk, etc.).
+    # Regex pass — strip comments line-by-line, skip docstring spans,
+    # then scan the remaining source for the literals to catch any
+    # non-AST cases (f-strings' joined parts, raw template strings
+    # missed by Constant walk, etc.).
+    docstring_lines = _docstring_line_numbers(tree)
+    enum_self_lines = _enum_self_assign_lines(tree)
     for line_no, raw in enumerate(source.splitlines(), start=1):
+        if line_no in docstring_lines or line_no in enum_self_lines:
+            continue
         line = raw.split("#", 1)[0]
         if not line.strip():
             continue
@@ -303,6 +475,51 @@ def test_no_india_specific_literals_in_promoted_paths() -> None:
         violations.extend(_literal_violations_in_file(path))
     assert not violations, (
         "Promoted-lane literal contract violated:\n  "
+        + "\n  ".join(violations)
+    )
+
+
+def _read_classified_promoted_core() -> list[Path]:
+    """Read PROMOTED_CORE entries from the file-classification report."""
+    report = REPO_ROOT / "docs" / "refactor" / "file_classification.md"
+    if not report.is_file():
+        return []
+    text = report.read_text(encoding="utf-8")
+    files: list[Path] = []
+    in_section = False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            head = line[3:].strip()
+            in_section = head.startswith("PROMOTED_CORE")
+            continue
+        if in_section and line.startswith("- `") and line.endswith("`"):
+            rel = line[3:-1]
+            files.append(REPO_ROOT / rel)
+    return files
+
+
+def test_no_india_literals_in_classified_promoted_files() -> None:
+    """ADR 0016 — every file the classifier marks PROMOTED_CORE must
+    pass the India-literal scan.
+
+    The classification (Phase 0) is the contract; this test is the
+    runtime gate. If a PROMOTED_CORE file picks up an India literal,
+    either the file changes home (rules YAML) or the literal goes.
+    """
+    files = _read_classified_promoted_core()
+    assert files, (
+        "PROMOTED_CORE list missing or empty — run "
+        "`uv run python scripts/audit/classify_files.py` to regenerate "
+        "docs/refactor/file_classification.md."
+    )
+    violations: list[str] = []
+    for path in files:
+        if not path.is_file():
+            violations.append(f"{path.relative_to(REPO_ROOT).as_posix()}: classified PROMOTED_CORE but not on disk")
+            continue
+        violations.extend(_literal_violations_in_file(path))
+    assert not violations, (
+        "Classified-PROMOTED_CORE literal contract violated:\n  "
         + "\n  ".join(violations)
     )
 
