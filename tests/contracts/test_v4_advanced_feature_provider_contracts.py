@@ -2,19 +2,19 @@
 provider-pluggable. Each has a generic contract and at least one
 registered concrete provider.
 
-Phase 8 ships the Sandbox provider contract + India + US providers.
-Phase 9 ships the Options provider contract + India + US providers.
-Phase 10 ships the Screener provider contract + India (Chartink) provider.
+* Phase 8 of v4 shipped the Sandbox provider contract + India + US.
+* Phase 9 of v4 shipped the Options provider contract + India + US.
+* Phase 10 of v4 shipped the Screener provider contract + India
+  (Chartink). US screener provider is out of v4 scope (stub
+  directory exists for future expansion).
 
-Until those phases land, this test is xfail.
+All three sub-tests now pass; this is the regression net.
 """
 
 from __future__ import annotations
 
 from importlib import import_module
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -69,10 +69,6 @@ def test_options_provider_contract_exists_with_india_and_us_providers() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="v4 Phase 10 ships the Screener provider contract.",
-    strict=False,
-)
 def test_screener_provider_contract_exists_with_india_provider() -> None:
     assert SCREENER_BASE_PATH.is_file(), (
         f"missing {SCREENER_BASE_PATH.relative_to(REPO_ROOT).as_posix()} — "
