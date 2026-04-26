@@ -78,6 +78,24 @@ dispatch resolves every InstrumentRef via the canonical
 `broker_adapter_missing_total`, `instrument_resolution_failed_total`,
 `unsupported_capability_total`.
 
+ADR 0019 (Phase 3 v3) ships the SymToken caller audit
+(`scripts/audit/symtoken_callers.py` →
+`docs/refactor/symtoken_callers.md`) which enforces zero
+PROMOTED_LEAK rows via
+`tests/audit/test_symtoken_callers_zero_leaks.py`; adds a typed
+`IdentifierKind` enum and `identifier_resolve_one_instrument`
+helper in `database.instruments_repo` for ISIN/CUSIP/SEDOL/FIGI/
+RIC/VENUE_SYMBOL/BROKER_SYMBOL/BROKER_TOKEN/CANONICAL_SYMBOL
+lookup; and ships `scripts/audit/canonical_vs_legacy_parity.py`
+which writes
+`docs/refactor/canonical_legacy_parity_report.md` — the parity
+yardstick for the future India migration.
+
+The promoted-lane import blocklist (CLAUDE.md "Promoted lane")
+explicitly includes `database.symbol` and `database.token_db_enhanced`
+for non-India promoted code; the runtime import lock
+(`tests/contracts/test_promoted_imports_runtime.py`) covers both.
+
 ### Legacy lane (frozen)
 
 Do not add features here; bug fixes and compliance only. The lane is
