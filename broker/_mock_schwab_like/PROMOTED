@@ -1,0 +1,14 @@
+MOCK_FRAMEWORK_TEST_ONLY
+
+This directory is a Schwab-LIKE mock plugin. It implements every
+broker plugin contract (auth, account, order, quote, bar, stream,
+sync) using deterministic in-memory fixtures so the broker compliance
+harness and end-to-end tests can prove OpenAlgo's framework is ready
+for a real Schwab plugin.
+
+It is NOT real Schwab integration. It does NOT make real network
+calls or perform real OAuth. The underscore prefix in the directory
+name marks it as framework-test-only — never to be enabled in
+production.
+
+See ADR 0022 (mock broker plugins for framework readiness).

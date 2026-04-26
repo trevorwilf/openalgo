@@ -93,6 +93,14 @@ PHASE_ALLOWED: set[Path] = {
     # Phase 4 of market-agnostic v2 — /api/v2/venues reads the venue
     # catalog from instruments_repo (`venues_get`, `venues_list`).
     REPO_ROOT / "restx_api" / "v2" / "venues.py",
+    # Phase 6 v3 (ADR 0022) — mock Schwab/Webull plugins. Their sync
+    # modules seed instruments + broker_instrument_map for the
+    # framework-readiness end-to-end tests.
+    REPO_ROOT / "broker" / "_mock_schwab_like" / "sync" / "instrument_sync.py",
+    REPO_ROOT / "broker" / "_mock_webull_like" / "sync" / "instrument_sync.py",
+    # Phase 6 v3 (ADR 0022) — /api/v2/orders/combo dispatcher resolves
+    # each leg's instrument ref via the canonical resolver.
+    REPO_ROOT / "restx_api" / "v2" / "orders_combo.py",
 }
 
 

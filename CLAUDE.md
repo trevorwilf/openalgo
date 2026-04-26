@@ -117,6 +117,18 @@ flow-driven strategies; standalone Python-strategy / Chartink
 scheduler venue_code schema migration and the frontend chart/admin
 TZ refactor are deferred to Phase 5-bis (see ADR 0021 § Deferred).
 
+ADR 0022 (Phase 6 v3) ships two mock broker plugins —
+`broker/_mock_schwab_like/` and `broker/_mock_webull_like/` — that
+exercise every promoted-lane contract end-to-end (auth, account,
+order, quote, bar, stream, instrument sync) using deterministic
+in-memory fixtures. New endpoint `POST /api/v2/orders/combo` accepts
+`NormalizedComboOrderRequest`. Compliance harness gains
+`assert_quote_adapter_compliance` and `assert_bar_adapter_compliance`
+helpers. The mock plugins are the canonical examples of
+"how a non-India broker plugin is structured" — they are NOT real
+Schwab/Webull integration and are gated behind the underscore
+prefix so they're never enabled in production.
+
 ### Legacy lane (frozen)
 
 Do not add features here; bug fixes and compliance only. The lane is

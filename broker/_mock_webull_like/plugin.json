@@ -1,0 +1,40 @@
+{
+  "Plugin Name": "_mock_webull_like",
+  "Plugin URI": "https://openalgo.in",
+  "Description": "MOCK Webull-LIKE plugin for framework readiness validation. Not a real Webull integration.",
+  "Version": "1.0",
+  "Author": "OpenAlgo",
+  "Author URI": "https://openalgo.in",
+  "broker_type": "US_stock",
+  "broker_display_name": "Mock Webull-Like",
+  "broker_code": "_mock_webull_like",
+  "supported_regions": ["us"],
+  "market_families": ["US_STOCK"],
+  "supported_venue_codes": ["XNYS", "XNAS"],
+  "supported_asset_classes": ["EQUITY", "OPTION", "SPOT"],
+  "supported_order_types": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
+  "supported_time_in_force": ["DAY", "GTC", "IOC", "FOK"],
+  "supported_sessions": ["REGULAR", "PRE_MARKET", "POST_MARKET"],
+  "supported_quantity_units": ["WHOLE", "FRACTIONAL", "NOTIONAL"],
+  "trading_currencies": ["USD"],
+  "default_currency": "USD",
+  "base_currency": "USD",
+  "supports_fractional": true,
+  "supports_notional_orders": true,
+  "supports_extended_hours": true,
+  "supports_short_selling": false,
+  "supports_analyzer": false,
+  "auth_modes": ["SIGNATURE", "OAUTH"],
+  "account_context_supports": ["subaccount_id", "entitlements"],
+  "supports_combo_types": ["SINGLE", "OCO", "OTO", "OTOCO"],
+  "streaming": {
+    "order_events": {"transport": "grpc"},
+    "market_data": {"transport": "mqtt"}
+  },
+  "master_contract_refresh_policy": {
+    "timezone": "America/New_York",
+    "cutoff_local": "07:00",
+    "frequency": "daily",
+    "skip_if_24x7": false
+  }
+}

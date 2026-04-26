@@ -1,7 +1,42 @@
 # Webull Readiness Package
 
-Status: framework-only (Phase 8). Plugin implementation deliberately
-out of scope per the v2 prompt.
+> **The mock plugin proves OpenAlgo's framework is ready. It does NOT
+> prove API compatibility with real Webull. Real plugin implementation
+> requires authenticated docs review, credentials, UAT/paper validation,
+> and human approval.**
+
+Status: framework-only (Phase 8 v2 + Phase 6 v3). Plugin implementation
+deliberately out of scope per the v2/v3 prompts.
+
+## Framework readiness verification (Phase 6 v3, ADR 0022)
+
+A fully-mocked Webull-LIKE plugin under
+`broker/_mock_webull_like/` exercises every promoted-lane contract
+end-to-end with deterministic in-memory fixtures including the
+Webull-specific surfaces (SIGNATURE auth alongside OAUTH,
+sub-account semantics, MQTT market-data + gRPC order-event streams).
+
+| Contract | Test |
+|---|---|
+| A. Metadata (plugin.json schema) | `tests/compliance/test_mock_webull_like_compliance.py::test_a_metadata_plugin_json_validates` |
+| B. Auth — `authenticate()` returns `AccountContext` with `subaccount_id` | `test_b_auth_module_exposes_authenticate` |
+| C. Account snapshot uses `NormalizedAccountSnapshot` shape | `test_c_account_snapshot_uses_normalized_shape` |
+| D. Translator implements `validate` / `to_native` / `from_native_order_response` | `test_d_translator_module_exists` |
+| E. Quote + bar adapters | `test_e_market_data_adapters_optional` |
+| F. Instrument sync seeds `instruments` + `broker_instrument_map` | `test_f_instrument_sync_optional` |
+| G. Rule matrix optional | `test_g_rule_matrix_optional` |
+| H. Lane isolation (no India literals, no legacy imports) | `test_h_lane_isolation_imports_and_literals` |
+| I. Fail-closed capability metadata | `test_i_fail_closed_capability_metadata` |
+| J. NEW Combo orders — OCO dispatch with native `combo_type` + `entrust_type` | `tests/api_v2/test_orders_combo.py::test_combo_oco_dispatch_to_webull_like` |
+| K. NEW Streaming subscribe → 3 events → unsubscribe lifecycle (MQTT market data + gRPC order events) | `tests/e2e/test_mock_webull_like_e2e.py::test_e2e_mock_webull_streaming_handle_lifecycle` |
+| L. NEW End-to-end LIMIT order through `/api/v2/orders` with `subaccount_id` populated and no legacy fallback | `tests/e2e/test_mock_webull_like_e2e.py::test_e2e_mock_webull_single_equity_order` |
+| M. NEW Account context carries `subaccount_id` + `entitlements` from authenticate() | covered by E2E above + `test_b_auth_module_exposes_authenticate` |
+
+All tests pass; the framework is provably ready for a real Webull
+plugin implementation. The next operator step is authenticated review
+of the real Webull API surface against this readiness package, then
+approval to scope the real plugin.
+
 
 ## Architecture mapping
 

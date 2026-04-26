@@ -1,7 +1,39 @@
 # Schwab Readiness Package
 
-Status: framework-only (Phase 8). Plugin implementation deliberately
-out of scope per the v2 prompt.
+> **The mock plugin proves OpenAlgo's framework is ready. It does NOT
+> prove API compatibility with real Schwab. Real plugin implementation
+> requires authenticated docs review, credentials, UAT/paper validation,
+> and human approval.**
+
+Status: framework-only (Phase 8 v2 + Phase 6 v3). Plugin implementation
+deliberately out of scope per the v2/v3 prompts.
+
+## Framework readiness verification (Phase 6 v3, ADR 0022)
+
+A fully-mocked Schwab-LIKE plugin under
+`broker/_mock_schwab_like/` exercises every promoted-lane contract
+end-to-end with deterministic in-memory fixtures. Verified contracts:
+
+| Contract | Test |
+|---|---|
+| A. Metadata (plugin.json schema) | `tests/compliance/test_mock_schwab_like_compliance.py::test_a_metadata_plugin_json_validates` |
+| B. Auth — `authenticate()` returns `AccountContext` with `account_hash` | `test_b_auth_module_exposes_authenticate` |
+| C. Account snapshot uses `NormalizedAccountSnapshot` shape | `test_c_account_snapshot_uses_normalized_shape` |
+| D. Translator implements `validate` / `to_native` / `from_native_order_response` | `test_d_translator_module_exists` |
+| E. Quote + bar adapters | `test_e_market_data_adapters_optional` |
+| F. Instrument sync seeds `instruments` + `broker_instrument_map` | `test_f_instrument_sync_optional` |
+| G. Rule matrix optional | `test_g_rule_matrix_optional` |
+| H. Lane isolation (no India literals, no legacy imports) | `test_h_lane_isolation_imports_and_literals` |
+| I. Fail-closed capability metadata | `test_i_fail_closed_capability_metadata` |
+| J. NEW Combo orders — OTOCO / MULTILEG_OPTIONS dispatch | `tests/api_v2/test_orders_combo.py::test_combo_otoco_dispatch_to_schwab_like` |
+| K. NEW Streaming subscribe → 3 events → unsubscribe lifecycle | `tests/e2e/test_mock_webull_like_e2e.py::test_e2e_mock_webull_streaming_handle_lifecycle` (Schwab uses identical handle/lifecycle shape) |
+| L. NEW End-to-end equity order through `/api/v2/orders` with no legacy fallback | `tests/e2e/test_mock_schwab_like_e2e.py::test_e2e_mock_schwab_single_equity_order` |
+| M. NEW End-to-end OTOCO combo order through `/api/v2/orders/combo` | `tests/e2e/test_mock_schwab_like_e2e.py::test_e2e_mock_schwab_otoco_combo_order` |
+
+All tests pass; the framework is provably ready for a real Schwab
+plugin implementation. The next operator step is authenticated review
+of the real Schwab API surface against this readiness package, then
+approval to scope the real plugin.
 
 ## Architecture mapping
 

@@ -7,12 +7,20 @@ records the per-broker outcome of each contract in
 | Broker | Metadata | Auth | Account | Translator | Market Data | Instrument Sync | Rules | Lane Isolation | Fail Closed |
 |---|---|---|---|---|---|---|---|---|---|
 | alpaca | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | skip | ✅ | ✅ |
+| _mock_schwab_like | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | skip | ✅ | ✅ |
+| _mock_webull_like | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | skip | ✅ | ✅ |
 | zerodha | ✅ | ✅ | skip | skip | skip | skip | skip | skip | skip |
 | dhan | ✅ | ✅ | skip | skip | skip | skip | skip | skip | skip |
 | deltaexchange | ✅ | ✅ | skip | skip | skip | skip | skip | skip | skip |
 
 Notes:
-* alpaca is the reference promoted-lane broker (US region).
+* alpaca is the reference real-broker promoted-lane plugin (US region).
+* `_mock_schwab_like` and `_mock_webull_like` (Phase 6 v3, ADR 0022)
+  are framework-test-only mock plugins. They prove every promoted-
+  lane contract end-to-end with deterministic in-memory fixtures plus
+  the new combo-order endpoint and the streaming subscribe/unsubscribe
+  lifecycle. They are NOT real Schwab/Webull integration. The
+  underscore prefix marks them as never-promote-to-production.
 * zerodha and dhan are legacy India brokers — most surfaces are
   recorded as `skip` because the legacy lane does not implement the
   new translator/account/sync surfaces.
