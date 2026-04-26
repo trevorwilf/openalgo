@@ -108,6 +108,15 @@ venue-aware bucketing (DST), end-to-end currency propagation, and
 the frontend currency-formatter refactor (see ADR 0020 §
 "Deferred").
 
+ADR 0021 (Phase 5 v3 — partial) pins the
+`/api/v2/regions/<code>` and `/api/v2/regions/<code>/flow_defaults`
+response shapes via
+`tests/api_v2/test_regions_endpoint_complete.py`. The
+flow_executor's Phase 4 gate covers the strategy execute path for
+flow-driven strategies; standalone Python-strategy / Chartink
+scheduler venue_code schema migration and the frontend chart/admin
+TZ refactor are deferred to Phase 5-bis (see ADR 0021 § Deferred).
+
 ### Legacy lane (frozen)
 
 Do not add features here; bug fixes and compliance only. The lane is
