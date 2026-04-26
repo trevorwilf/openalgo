@@ -128,6 +128,67 @@ rules:
   - path: database/broker_rules_repo.py
     classification: PROMOTED_CORE
 
+  # ---------------- v4 advanced-feature provider contracts ----------------
+  # ADR 0023, ADR 0026 (Sandbox), ADR 0027 (Options), ADR 0028 (Screener).
+  # Per-region provider subtrees are REGION_PLUGIN so India literals
+  # in the india/* implementations are scoped (allowed) and US/EU
+  # implementations are PROMOTED-scanned (any India literal fails).
+  # The base contract + dispatcher modules are PROMOTED_CORE.
+
+  # Sandbox (Phase 8 of v4) — provider directories pre-allowlisted.
+  # owner: phase-8 — pre-creation allowlist; populated by Phase 8.
+  - path_prefix: services/sandbox/providers/india/
+    classification: REGION_PLUGIN
+  - path_prefix: services/sandbox/providers/us/
+    classification: REGION_PLUGIN
+  - path_prefix: services/sandbox/providers/eu/
+    classification: REGION_PLUGIN
+  - path_prefix: services/sandbox/providers/uk/
+    classification: REGION_PLUGIN
+  - path_prefix: services/sandbox/providers/
+    classification: PROMOTED_CORE
+  - path: services/sandbox/__init__.py
+    classification: PROMOTED_CORE
+  - path: services/sandbox/dispatcher.py
+    classification: PROMOTED_CORE
+
+  # Options (Phase 9 of v4) — provider directories pre-allowlisted.
+  # owner: phase-9 — pre-creation allowlist; populated by Phase 9.
+  - path_prefix: services/options/providers/india/
+    classification: REGION_PLUGIN
+  - path_prefix: services/options/providers/us/
+    classification: REGION_PLUGIN
+  - path_prefix: services/options/providers/eu/
+    classification: REGION_PLUGIN
+  - path_prefix: services/options/providers/uk/
+    classification: REGION_PLUGIN
+  - path_prefix: services/options/providers/
+    classification: PROMOTED_CORE
+  - path: services/options/__init__.py
+    classification: PROMOTED_CORE
+  - path: services/options/dispatcher.py
+    classification: PROMOTED_CORE
+
+  # Screeners (Phase 10 of v4) — provider directories pre-allowlisted.
+  # owner: phase-10 — pre-creation allowlist; populated by Phase 10.
+  - path_prefix: services/screeners/providers/india/
+    classification: REGION_PLUGIN
+  - path_prefix: services/screeners/providers/us/
+    classification: REGION_PLUGIN
+  - path_prefix: services/screeners/providers/
+    classification: PROMOTED_CORE
+  - path: services/screeners/__init__.py
+    classification: PROMOTED_CORE
+  - path: services/screeners/dispatcher.py
+    classification: PROMOTED_CORE
+
+  # Strategy scheduling (Phase 7 of v4) — venue-aware scheduler.
+  # owner: phase-7 — pre-creation allowlist; populated by Phase 7.
+  - path_prefix: services/strategy/scheduling/
+    classification: PROMOTED_CORE
+  - path: services/strategy/__init__.py
+    classification: PROMOTED_CORE
+
 # Excluded path prefixes: classifier ignores these entirely.
 excluded:
   - .venv/
