@@ -100,6 +100,141 @@ _broker_capabilities: dict[str, BrokerCapabilities] = {}
 _skipped_brokers: set[str] = set()
 
 
+# Phase 4 v4 (ADR 0025) — strict-mode validator for promoted plugins.
+# A "promoted" plugin is one whose ``supported_regions`` excludes
+# ``"india"`` OR whose plugin.json sets ``promoted: true`` explicitly.
+# For these plugins, ALL keys must appear in the known set below
+# (declared union of v4 required fields, JSON Schema properties, and
+# explicit operational metadata). Unknown keys are validation errors.
+#
+# Legacy India plugins (``supported_regions`` includes ``"india"`` or
+# absent) keep the existing non-strict mode for backward compatibility.
+
+# v4 required promoted fields — every promoted plugin MUST declare
+# all of these.
+_V4_PROMOTED_REQUIRED_FIELDS: tuple[str, ...] = (
+    "broker_code",
+    "broker_display_name",
+    "broker_type",
+    "supported_regions",
+    "market_families",
+    "supported_venue_codes",
+    "supported_asset_classes",
+    "supported_order_types",
+    "supported_time_in_force",
+    "supported_sessions",
+    "supported_quantity_units",
+    "trading_currencies",
+    "default_currency",
+    "base_currency",
+    "auth_modes",
+    "account_context_supports",
+    "master_contract_refresh_policy",
+)
+
+# WordPress-style header fields — non-operational, allowed.
+_WP_HEADER_FIELDS: frozenset[str] = frozenset({
+    "Plugin Name",
+    "Plugin URI",
+    "Description",
+    "Version",
+    "Author",
+    "Author URI",
+})
+
+# Optional operational metadata explicitly accepted in promoted mode.
+# Adding a new key here is the deliberate way to extend the strict
+# schema. Keep it short — anything that affects routing or behavior
+# should map to a typed BrokerCapabilities field.
+_OPTIONAL_PROMOTED_FIELDS: frozenset[str] = frozenset({
+    # legacy compat (still accepted on promoted plugins)
+    "supported_exchanges",
+    "leverage_config",
+    # capability surface
+    "supports_fractional",
+    "supports_notional_orders",
+    "supports_extended_hours",
+    "supports_short_selling",
+    "supports_analyzer",
+    "supports_sandbox",
+    "supports_options",
+    "options_provider_region",
+    "supports_screener_providers",
+    "supports_combo_types",
+    "streaming",
+    "features",
+    # explicit promotion marker
+    "promoted",
+    # documentation surface
+    "documentation_url",
+    "display",
+})
+
+
+def _strict_known_fields() -> frozenset[str]:
+    return (
+        _WP_HEADER_FIELDS
+        | _OPTIONAL_PROMOTED_FIELDS
+        | frozenset(_V4_PROMOTED_REQUIRED_FIELDS)
+    )
+
+
+def _is_promoted_plugin(plugin_data: dict[str, Any]) -> bool:
+    """Promoted = explicit ``promoted: true`` OR
+    ``supported_regions`` excludes ``"india"``."""
+    if plugin_data.get("promoted") is True:
+        return True
+    regions = plugin_data.get("supported_regions") or []
+    if not isinstance(regions, list) or not regions:
+        return False
+    normalized = {str(r).strip().lower() for r in regions}
+    return "india" not in normalized
+
+
+def _strict_promoted_plugin_errors(
+    broker_name: str, plugin_data: dict[str, Any]
+) -> list[str]:
+    """Return the list of strict-mode violations for a promoted plugin.
+
+    * Missing required v4 fields.
+    * Unknown keys (additionalProperties:false equivalent).
+    """
+    if not _is_promoted_plugin(plugin_data):
+        return []
+    errors: list[str] = []
+    missing = [
+        f
+        for f in _V4_PROMOTED_REQUIRED_FIELDS
+        if f not in plugin_data or plugin_data.get(f) in (None, "", [], {})
+    ]
+    for f in missing:
+        errors.append(f"missing required promoted field {f!r}")
+    known = _strict_known_fields()
+    for key in plugin_data:
+        if key not in known:
+            errors.append(
+                f"unknown promoted plugin field {key!r} (strict mode "
+                "rejects additional properties; see ADR 0025)"
+            )
+    return errors
+
+
+# Plugin diagnostics — populated by load_broker_capabilities. Keyed
+# on broker_name; values describe loaded / loaded-with-warnings /
+# skipped state plus the missing/unknown fields. Operator inspects via
+# ``/api/v2/plugins/diagnostics``.
+_plugin_diagnostics: dict[str, dict[str, Any]] = {}
+
+
+def get_plugin_diagnostics() -> dict[str, dict[str, Any]]:
+    """Return the per-broker plugin diagnostics dict produced by the
+    last call to :func:`load_broker_capabilities`. Used by
+    ``/api/v2/plugins/diagnostics`` and operator tools.
+    """
+    # Return a shallow copy so callers cannot mutate the cache.
+    return {k: dict(v) for k, v in _plugin_diagnostics.items()}
+
+
 def _schema_path() -> str:
     """Absolute path to the plugin.schema.json file."""
     # utils/plugin_loader.py -> repo root -> docs/plugin-schema/plugin.schema.json
@@ -192,11 +327,12 @@ def load_broker_capabilities(
     * The cache is returned as a dict keyed by broker_name so existing
       callers that iterate ``capabilities.items()`` keep working.
     """
-    global _broker_capabilities, _skipped_brokers
+    global _broker_capabilities, _skipped_brokers, _plugin_diagnostics
 
     broker_path = _broker_root_path(broker_directory)
     capabilities: dict[str, BrokerCapabilities] = {}
     skipped: set[str] = set()
+    diagnostics: dict[str, dict[str, Any]] = {}
 
     try:
         entries = sorted(os.listdir(broker_path))
@@ -239,6 +375,12 @@ def load_broker_capabilities(
                 f"skipping. Errors: {'; '.join(errors)}"
             )
             skipped.add(broker_name)
+            diagnostics[broker_name] = {
+                "state": "skipped",
+                "promoted": _is_promoted_plugin(plugin_data),
+                "reason": "json_schema_validation_failed",
+                "errors": errors,
+            }
             continue
 
         # Phase 3 completeness gate. Non-India plugins must declare the
@@ -254,6 +396,12 @@ def load_broker_capabilities(
                     ", ".join(missing),
                 )
                 skipped.add(broker_name)
+                diagnostics[broker_name] = {
+                    "state": "skipped",
+                    "promoted": _is_promoted_plugin(plugin_data),
+                    "reason": "completeness_check_failed",
+                    "missing_fields": missing,
+                }
                 continue
             logger.warning(
                 "plugin.json for %s is incomplete (missing %s) but "
@@ -262,23 +410,73 @@ def load_broker_capabilities(
                 ", ".join(missing),
             )
 
+        # Phase 4 v4 (ADR 0025) — strict-mode validator for promoted
+        # plugins. Promoted plugins must have all v4 required fields
+        # AND no unknown keys (additionalProperties:false equivalent).
+        # Legacy India plugins keep non-strict mode for back-compat.
+        strict_errors = _strict_promoted_plugin_errors(broker_name, plugin_data)
+        if strict_errors:
+            if is_enabled("STRICT_CAPABILITY_INFERENCE", default=True):
+                logger.error(
+                    "plugin.json for %s failed promoted-plugin strict mode; "
+                    "skipping. Errors: %s. See ADR 0025.",
+                    broker_name,
+                    "; ".join(strict_errors),
+                )
+                skipped.add(broker_name)
+                diagnostics[broker_name] = {
+                    "state": "skipped",
+                    "promoted": True,
+                    "reason": "strict_mode_failed",
+                    "errors": strict_errors,
+                }
+                continue
+            logger.warning(
+                "plugin.json for %s failed strict mode but "
+                "STRICT_CAPABILITY_INFERENCE is off; loading with warnings: %s",
+                broker_name,
+                "; ".join(strict_errors),
+            )
+
         try:
             caps = _build_capabilities(broker_name, plugin_data)
         except BrokerCapabilityError as e:
             logger.error("plugin.json for %s rejected by capability check: %s", broker_name, e)
             skipped.add(broker_name)
+            diagnostics[broker_name] = {
+                "state": "skipped",
+                "promoted": _is_promoted_plugin(plugin_data),
+                "reason": "capability_check_failed",
+                "error": str(e),
+            }
             continue
         if caps is None:
             skipped.add(broker_name)
+            diagnostics[broker_name] = {
+                "state": "skipped",
+                "promoted": _is_promoted_plugin(plugin_data),
+                "reason": "capabilities_build_failed",
+            }
             continue
 
         capabilities[broker_name] = caps
+        diagnostics[broker_name] = {
+            "state": "loaded",
+            "promoted": _is_promoted_plugin(plugin_data),
+            "broker_type": plugin_data.get("broker_type"),
+            "supported_regions": plugin_data.get("supported_regions") or [],
+        }
 
     _broker_capabilities = capabilities
     _skipped_brokers = skipped
-    logger.debug(
-        f"Loaded capabilities for {len(capabilities)} brokers "
-        f"(skipped {len(skipped)})"
+    _plugin_diagnostics = diagnostics
+    promoted_loaded = sum(1 for d in diagnostics.values()
+                          if d.get("state") == "loaded" and d.get("promoted"))
+    logger.info(
+        "plugin loader: loaded=%d (promoted=%d), skipped=%d",
+        len(capabilities),
+        promoted_loaded,
+        len(skipped),
     )
     return capabilities
 

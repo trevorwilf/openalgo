@@ -30,6 +30,10 @@ def _legacy_indian(extra: dict | None = None) -> dict:
 def _full_us(extra: dict | None = None) -> dict:
     base = {
         "Plugin Name": "fake_us",
+        # v4 Phase 4 (ADR 0025) required promoted fields.
+        "broker_code": "fake_us",
+        "broker_display_name": "Fake US",
+        "account_context_supports": ["account_id"],
         "broker_type": "US_stock",
         "supported_regions": ["us"],
         "market_families": ["US_STOCK"],
