@@ -62,6 +62,7 @@ Lane semantics:
 | `/api/v2/capabilities` | GET | promoted | n/a | — | no | none | none |
 | `/api/v2/instruments` | GET | promoted | n/a | — | no | canonical | none |
 | `/api/v2/orders` | POST | dual | yes | place_order_service | yes | canonical | none |
+| `/api/v2/orders/combo` | POST | promoted | yes | — | yes | canonical | none |
 | `/api/v2/quotes` | POST | dual | yes | quotes_service | yes | canonical | none |
 | `/api/v2/regions` | GET | promoted | n/a | — | no | none | none |
 | `/api/v2/venues` | GET | promoted | n/a | — | no | canonical | none |
@@ -114,6 +115,7 @@ Lane semantics:
 - `/api/v2/capabilities` — `restx_api/v2/capabilities.py` (Namespace: `capabilities`)
 - `/api/v2/instruments` — `restx_api/v2/instruments.py` (Namespace: `instruments`)
 - `/api/v2/orders` — `restx_api/v2/orders.py` (Namespace: `orders`)
+- `/api/v2/orders/combo` — `restx_api/v2/orders_combo.py` (Namespace: `orders_combo`)
 - `/api/v2/quotes` — `restx_api/v2/quotes.py` (Namespace: `quotes`)
 - `/api/v2/regions` — `restx_api/v2/regions.py` (Namespace: `regions`)
 - `/api/v2/venues` — `restx_api/v2/venues.py` (Namespace: `venues`)
