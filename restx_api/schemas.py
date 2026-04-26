@@ -1,6 +1,20 @@
+"""LEGACY INDIA COMPATIBILITY — v1 API request schemas.
+
+Validates v1 request shapes against ``VALID_EXCHANGES``,
+``VALID_PRODUCT_TYPES``, ``VALID_PRICE_TYPES`` from
+``utils.constants``. New code does not import from this module. New
+non-India request validation lives in ``domain/orders.py`` and the v2
+endpoints under ``restx_api/v2/``. This module is held byte-stable so
+the existing 24+ India broker plugins continue to work; ADR 0017
+formalizes the legacy stamp.
+"""
 from marshmallow import Schema, ValidationError, fields, post_load, validate
 
 from utils.constants import CRYPTO_EXCHANGES, VALID_EXCHANGES
+
+# Sentinel read by ``scripts/audit/classify_files.py`` and the v1
+# legacy-classification contract test. Do not remove.
+LEGACY_INDIA_COMPATIBILITY = True
 
 
 def _coerce_quantity_to_int(data):

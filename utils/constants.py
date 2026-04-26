@@ -1,7 +1,20 @@
-"""
-Constants used throughout the application.
+"""LEGACY INDIA COMPATIBILITY — Indian exchange / product / price-type
+vocabularies used by the v1 API and the existing 24+ India broker
+adapters.
+
+New code MUST NOT import ``VALID_EXCHANGES``, ``VALID_PRODUCT_TYPES``,
+or ``VALID_PRICE_TYPES`` from this module. New non-India request
+validation lives in ``domain/orders.py`` and the v2 endpoints under
+``restx_api/v2/``. ADR 0017 formalizes the legacy stamp;
+``tests/contracts/test_v1_schemas_classification.py`` enforces the
+import block on classified PROMOTED_CORE files.
+
 Reference: https://docs.openalgo.in/api-documentation/v1/order-constants
 """
+
+# Sentinel read by ``scripts/audit/classify_files.py`` and the v1
+# legacy-classification contract test. Do not remove.
+LEGACY_INDIA_COMPATIBILITY = True
 
 # Exchange Types
 EXCHANGE_NSE = "NSE"  # NSE Equity

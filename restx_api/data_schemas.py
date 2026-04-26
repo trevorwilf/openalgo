@@ -1,8 +1,18 @@
+"""LEGACY INDIA COMPATIBILITY — v1 API data-request schemas.
+
+Validates v1 quote / history / option-greeks / etc request shapes
+against ``VALID_EXCHANGES`` and India-shaped grammars. New code does
+not import from this module. ADR 0017 formalizes the legacy stamp.
+"""
 import re
 
 from marshmallow import Schema, ValidationError, fields, validate
 
 from utils.constants import VALID_EXCHANGES
+
+# Sentinel read by ``scripts/audit/classify_files.py`` and the v1
+# legacy-classification contract test. Do not remove.
+LEGACY_INDIA_COMPATIBILITY = True
 
 
 # Custom validator for date or timestamp string

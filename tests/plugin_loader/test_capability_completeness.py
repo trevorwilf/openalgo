@@ -42,6 +42,14 @@ def _full_us(extra: dict | None = None) -> dict:
         "supported_sessions": ["REGULAR"],
         "supported_quantity_units": ["WHOLE"],
         "trading_currencies": ["USD"],
+        # Phase 1 v3 (ADR 0017) — required for non-India plugins.
+        "auth_modes": ["OAUTH"],
+        "master_contract_refresh_policy": {
+            "timezone": "America/New_York",
+            "cutoff_local": "08:00",
+            "frequency": "daily",
+            "skip_if_24x7": False,
+        },
     }
     if extra:
         base.update(extra)
@@ -113,3 +121,51 @@ def test_strict_off_loads_incomplete_us_plugin(
         or "incomplete" in rec.message
         for rec in caplog.records
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 v3 (ADR 0017) — non-India plugins must declare
+# master_contract_refresh_policy and auth_modes.
+# ---------------------------------------------------------------------------
+
+
+def test_us_plugin_missing_master_contract_refresh_policy_skipped(
+    make_broker_tree, chdir, caplog, monkeypatch
+) -> None:
+    monkeypatch.delenv("STRICT_CAPABILITY_INFERENCE", raising=False)
+    p = _full_us()
+    p.pop("master_contract_refresh_policy")
+    make_broker_tree({"fake_us": p})
+    with caplog.at_level("ERROR"):
+        caps = plugin_loader.load_broker_capabilities("broker")
+    assert "fake_us" not in caps
+    assert "fake_us" in plugin_loader._skipped_brokers_for_tests()
+    assert any(
+        "master_contract_refresh_policy" in rec.message for rec in caplog.records
+    )
+
+
+def test_us_plugin_missing_auth_modes_skipped(
+    make_broker_tree, chdir, caplog, monkeypatch
+) -> None:
+    monkeypatch.delenv("STRICT_CAPABILITY_INFERENCE", raising=False)
+    p = _full_us()
+    p.pop("auth_modes")
+    make_broker_tree({"fake_us": p})
+    with caplog.at_level("ERROR"):
+        caps = plugin_loader.load_broker_capabilities("broker")
+    assert "fake_us" not in caps
+    assert "fake_us" in plugin_loader._skipped_brokers_for_tests()
+    assert any("auth_modes" in rec.message for rec in caplog.records)
+
+
+def test_legacy_indian_plugin_does_not_require_phase1_v3_fields(
+    make_broker_tree, chdir
+) -> None:
+    """India plugins (no supported_regions or supported_regions=["india"])
+    are exempt from the Phase 1 v3 strengthened gate — they don't have
+    master_contract_refresh_policy or auth_modes today and shouldn't
+    suddenly need them."""
+    make_broker_tree({"legacy_in": _legacy_indian()})
+    caps = plugin_loader.load_broker_capabilities("broker")
+    assert "legacy_in" in caps
