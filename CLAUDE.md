@@ -68,6 +68,16 @@ scanner at `frontend/scripts/literal_scan.mjs` (wired to
 plugins must declare `auth_modes` and `master_contract_refresh_policy`
 or the loader skips them at startup.
 
+ADR 0018 (Phase 2 v3) makes `/api/v2/quotes` and `/api/v2/bars`
+fail-closed for non-India non-crypto brokers — missing adapter
+returns HTTP 503 `promoted_capability_unavailable` with sub-code
+`quote_adapter_not_registered` / `bar_adapter_not_registered` instead
+of falling back to the legacy India market-data services. Promoted
+dispatch resolves every InstrumentRef via the canonical
+`services.instrument_resolution.resolve_instrument`. New metrics:
+`broker_adapter_missing_total`, `instrument_resolution_failed_total`,
+`unsupported_capability_total`.
+
 ### Legacy lane (frozen)
 
 Do not add features here; bug fixes and compliance only. The lane is
