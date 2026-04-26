@@ -28,6 +28,7 @@ import os
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
+from enum import Enum
 from decimal import Decimal
 from typing import Any, Iterator, Optional
 
@@ -590,6 +591,35 @@ def instruments_deactivate(
 # ---------------------------------------------------------------------------
 
 
+class IdentifierKind(str, Enum):
+    """Canonical identifier-type vocabulary (Phase 3 v3 / ADR 0019).
+
+    Helps callers avoid bare-string typos when adding or resolving
+    `instrument_identifiers` rows. Strings are kept identical to the
+    column values (str-Enum) so old `bytes`/string callers keep
+    working.
+
+    Scoping semantics:
+
+    * Global (no broker, no venue): ``ISIN``, ``CUSIP``, ``SEDOL``,
+      ``FIGI``, ``RIC``.
+    * Venue-scoped: ``VENUE_SYMBOL``.
+    * Broker-scoped: ``BROKER_SYMBOL``, ``BROKER_TOKEN``.
+    * Cross-region: ``CANONICAL_SYMBOL`` (mirrors the canonical row
+      symbol; mostly used by sync diff tooling).
+    """
+
+    ISIN = "ISIN"
+    CUSIP = "CUSIP"
+    SEDOL = "SEDOL"
+    FIGI = "FIGI"
+    RIC = "RIC"
+    VENUE_SYMBOL = "VENUE_SYMBOL"
+    BROKER_SYMBOL = "BROKER_SYMBOL"
+    BROKER_TOKEN = "BROKER_TOKEN"
+    CANONICAL_SYMBOL = "CANONICAL_SYMBOL"
+
+
 def identifier_add(
     instrument_id: uuid.UUID,
     identifier_type: str,
@@ -636,6 +666,41 @@ def identifier_resolve(
         stmt = stmt.where(_nullable_eq(InstrumentIdentifier.broker_code, broker_code))
         stmt = stmt.where(_nullable_eq(InstrumentIdentifier.venue_code, venue_code))
         return list(s.scalars(stmt))
+
+
+def identifier_resolve_one_instrument(
+    identifier_type: str | IdentifierKind,
+    identifier_value: str,
+    *,
+    broker_code: Optional[str] = None,
+    venue_code: Optional[str] = None,
+    session: Session | None = None,
+) -> Optional[Instrument]:
+    """Return the single :class:`Instrument` matching ``identifier_value``,
+    or ``None`` when zero or more-than-one rows are found.
+
+    For globally-unique identifiers (``ISIN``, ``CUSIP``, ``SEDOL``,
+    ``FIGI``, ``RIC``) callers should pass ``broker_code=None`` and
+    ``venue_code=None``. For broker-scoped identifiers
+    (``BROKER_TOKEN`` / ``BROKER_SYMBOL``) pass the broker_code.
+    For venue-scoped identifiers (``VENUE_SYMBOL``) pass the
+    venue_code.
+
+    Phase 3 v3 / ADR 0019 — convenience helper that the v2 quote/bar
+    dispatch path can call without hand-rolling a one-of-many check.
+    """
+    if isinstance(identifier_type, IdentifierKind):
+        identifier_type = identifier_type.value
+    rows = identifier_resolve(
+        identifier_type,
+        identifier_value,
+        broker_code=broker_code,
+        venue_code=venue_code,
+        session=session,
+    )
+    if not rows or len(rows) > 1:
+        return None
+    return instruments_get_by_id(rows[0].instrument_id, session=session)
 
 
 # ---------------------------------------------------------------------------
