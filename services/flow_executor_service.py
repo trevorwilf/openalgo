@@ -2117,7 +2117,31 @@ def execute_node_chain(
 def execute_workflow(
     workflow_id: int, webhook_data: dict[str, Any] | None = None, api_key: str = None
 ) -> dict:
-    """Execute a workflow synchronously"""
+    """Execute a workflow synchronously.
+
+    Phase 4 v3 (ADR 0020): the flow executor's node defaults
+    (``exchange="NSE"``, ``product="MIS"``, etc.) are India-shaped.
+    A non-India region returns ``flow_templates_disabled_in_region``
+    instead of silently filling India defaults; the per-default
+    sites are not rewritten in this phase to preserve India parity.
+    """
+    from domain.errors import ErrorCode
+    from services.feature_gate_service import (
+        active_region_code,
+        is_india_region_active,
+    )
+
+    if not is_india_region_active():
+        return {
+            "status": "error",
+            "code": ErrorCode.FLOW_TEMPLATES_DISABLED_IN_REGION,
+            "message": (
+                "flow templates use India-shaped defaults (NSE/MIS); "
+                f"active region {active_region_code()!r} is not "
+                "supported. Phase 5 ships per-region flow defaults."
+            ),
+        }
+
     lock = get_workflow_lock(workflow_id)
 
     if lock.locked():

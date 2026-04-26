@@ -109,8 +109,32 @@ def _current_broker_session_value() -> str | None:
         return None
 
 
+def require_region_feature(flag: str, error_code: str, *, message: str | None = None) -> None:
+    """Raise ``FeatureNotAvailableInRegion`` when ``flag`` is disabled
+    for the active region.
+
+    Phase 4 v3 helper used at the entry point of India-shaped service
+    functions (option_chain, iv_chart, gex, etc.) to fail fast for
+    non-India regions instead of producing wrong results.
+    """
+    from domain.errors import FeatureNotAvailableInRegion
+
+    if is_feature_enabled_for_active_region(flag, default=False):
+        return
+    region = active_region_code()
+    raise FeatureNotAvailableInRegion(
+        active_region=region,
+        code=error_code,
+        message=(
+            message
+            or f"feature {flag!r} is disabled in region {region!r}"
+        ),
+    )
+
+
 __all__ = [
     "active_region_code",
     "is_feature_enabled_for_active_region",
     "is_india_region_active",
+    "require_region_feature",
 ]

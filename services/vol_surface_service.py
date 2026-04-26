@@ -71,7 +71,29 @@ def get_vol_surface_data(
 
     Returns:
         Tuple of (success, response_data, status_code)
+
+    Phase 4 v3 (ADR 0020): vol-surface uses India options grammar;
+    gated to India region.
     """
+    from domain.errors import ErrorCode
+    from services.feature_gate_service import (
+        active_region_code,
+        is_india_region_active,
+    )
+
+    if not is_india_region_active():
+        return (
+            False,
+            {
+                "status": "error",
+                "code": ErrorCode.VOL_SURFACE_DISABLED_IN_REGION,
+                "message": (
+                    "vol-surface uses India options-grammar; active region "
+                    f"{active_region_code()!r} is not supported."
+                ),
+            },
+            422,
+        )
     try:
         if not expiry_dates:
             return False, {"status": "error", "message": "At least one expiry is required"}, 400

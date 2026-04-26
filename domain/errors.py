@@ -120,6 +120,18 @@ class ErrorCode:
     SANDBOX_REGION_UNSUPPORTED = "sandbox_region_unsupported"
     ANALYZER_INDIA_REGION_ONLY = "analyzer_india_region_only"
 
+    # Phase 4 v3 (ADR 0020) — service-layer region gates
+    FLOW_TEMPLATES_DISABLED_IN_REGION = "flow_templates_disabled_in_region"
+    FLOW_DEFAULT_UNAVAILABLE_IN_REGION = "flow_default_unavailable_in_region"
+    OPTION_CHAIN_DISABLED_IN_REGION = "option_chain_disabled_in_region"
+    IV_CHART_DISABLED_IN_REGION = "iv_chart_disabled_in_region"
+    GEX_DISABLED_IN_REGION = "gex_disabled_in_region"
+    OPTION_GREEKS_DISABLED_IN_REGION = "option_greeks_disabled_in_region"
+    MULTI_OPTION_DISABLED_IN_REGION = "multi_option_disabled_in_region"
+    SYNTHETIC_FUTURE_DISABLED_IN_REGION = "synthetic_future_disabled_in_region"
+    STRADDLE_CHART_DISABLED_IN_REGION = "straddle_chart_disabled_in_region"
+    VOL_SURFACE_DISABLED_IN_REGION = "vol_surface_disabled_in_region"
+
 
 class FeatureNotAvailableInRegion(DomainError):
     """A feature is gated to a specific region and the active region differs.

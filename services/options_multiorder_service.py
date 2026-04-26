@@ -590,7 +590,32 @@ def place_options_multiorder(
         - Success status (bool)
         - Response data (dict)
         - HTTP status code (int)
+
+    Phase 4 v3 (ADR 0020): multi-leg options order plumbing uses India
+    option-grammar legs; gated to India region. Non-India brokers use
+    /api/v2/orders/combo with NormalizedComboOrderRequest (Phase 6).
     """
+    from domain.errors import ErrorCode
+    from services.feature_gate_service import (
+        active_region_code,
+        is_india_region_active,
+    )
+
+    if not is_india_region_active():
+        return (
+            False,
+            {
+                "status": "error",
+                "code": ErrorCode.MULTI_OPTION_DISABLED_IN_REGION,
+                "message": (
+                    "multi-leg options order uses India options-grammar; "
+                    f"active region {active_region_code()!r} is not "
+                    "supported. Use /api/v2/orders/combo for non-India "
+                    "brokers (Phase 6)."
+                ),
+            },
+            422,
+        )
     original_data = copy.deepcopy(multiorder_data)
     if api_key:
         original_data["apikey"] = api_key

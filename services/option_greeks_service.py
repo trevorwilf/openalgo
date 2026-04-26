@@ -554,7 +554,29 @@ def get_option_greeks(
 
     Returns:
         Tuple of (success, response_dict, status_code)
+
+    Phase 4 v3 (ADR 0020): option Greeks parses India-specific option
+    grammar; gated to India region.
     """
+    from domain.errors import ErrorCode
+    from services.feature_gate_service import (
+        active_region_code,
+        is_india_region_active,
+    )
+
+    if not is_india_region_active():
+        return (
+            False,
+            {
+                "status": "error",
+                "code": ErrorCode.OPTION_GREEKS_DISABLED_IN_REGION,
+                "message": (
+                    "option Greeks uses India options-grammar; active "
+                    f"region {active_region_code()!r} is not supported."
+                ),
+            },
+            422,
+        )
     try:
         # Import here to avoid circular dependency
         from services.quotes_service import get_quotes

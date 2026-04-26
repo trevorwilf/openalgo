@@ -165,7 +165,26 @@ def get_iv_chart_data(
 
     Returns:
         Tuple of (success, response_dict, status_code)
+
+    Phase 4 v3 (ADR 0020): IV chart uses India-specific DDMMMYY expiry
+    grammar and IST trading-day boundaries; gated to India region.
     """
+    from domain.errors import ErrorCode
+    from services.feature_gate_service import active_region_code, is_india_region_active
+
+    if not is_india_region_active():
+        return (
+            False,
+            {
+                "status": "error",
+                "code": ErrorCode.IV_CHART_DISABLED_IN_REGION,
+                "message": (
+                    "IV chart uses India-specific options grammar; active "
+                    f"region {active_region_code()!r} is not supported."
+                ),
+            },
+            422,
+        )
     try:
         from py_vollib.black.implied_volatility import implied_volatility as black_iv  # noqa: F401
     except ImportError:

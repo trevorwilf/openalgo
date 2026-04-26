@@ -42,7 +42,29 @@ def calculate_synthetic_future(
         - expiry: Expiry date
         - atm_strike: ATM strike price
         - synthetic_future_price: Calculated synthetic future price
+
+    Phase 4 v3 (ADR 0020): synthetic-future computation uses India
+    option-grammar; gated to India region.
     """
+    from domain.errors import ErrorCode
+    from services.feature_gate_service import (
+        active_region_code,
+        is_india_region_active,
+    )
+
+    if not is_india_region_active():
+        return (
+            False,
+            {
+                "status": "error",
+                "code": ErrorCode.SYNTHETIC_FUTURE_DISABLED_IN_REGION,
+                "message": (
+                    "synthetic-future uses India options-grammar; active "
+                    f"region {active_region_code()!r} is not supported."
+                ),
+            },
+            422,
+        )
     try:
         logger.info(f"Calculating synthetic future for {underlying} expiring {expiry_date}")
 
