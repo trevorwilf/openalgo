@@ -14,11 +14,28 @@ def _reset_env(monkeypatch):
     monkeypatch.delenv("MARKET_REGION_FOR_TESTS", raising=False)
 
 
-def test_default_active_region_is_india_when_nothing_set() -> None:
+def test_default_active_region_raises_without_legacy_fallback() -> None:
+    """v4 Phase 2 (ADR 0023 invariant 1) removed the silent India
+    fallback. ``active_region_code()`` now raises
+    ``RegionResolutionError`` when nothing resolves and the caller has
+    not opted into the legacy India compatibility path.
+    """
+    from domain.errors import RegionResolutionError
     from services.feature_gate_service import active_region_code
 
-    # No broker session, no explicit settings, no env. Falls back to india.
-    assert active_region_code() == "india"
+    with pytest.raises(RegionResolutionError):
+        active_region_code()
+
+
+def test_default_active_region_legacy_fallback_returns_india() -> None:
+    """The opt-in legacy India compatibility path still returns
+    ``"india"`` (used by ``is_india_region_active`` and the named
+    services that have not yet migrated to provider-pluggable
+    dispatch).
+    """
+    from services.feature_gate_service import active_region_code
+
+    assert active_region_code(legacy_india_fallback=True) == "india"
 
 
 def test_env_override_shortcircuits_resolution(monkeypatch) -> None:

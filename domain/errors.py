@@ -132,6 +132,30 @@ class ErrorCode:
     STRADDLE_CHART_DISABLED_IN_REGION = "straddle_chart_disabled_in_region"
     VOL_SURFACE_DISABLED_IN_REGION = "vol_surface_disabled_in_region"
 
+    # Phase 2 v4 (ADR 0023) — boundary enforcement + v1 hard-block
+    REGION_RESOLUTION_ERROR = "region_resolution_error"
+    CONFIGURATION_ERROR = "configuration_error"
+    V1_UNAVAILABLE_FOR_NON_INDIA_BROKER = "v1_unavailable_for_non_india_broker"
+    LEGACY_FALLBACK_BLOCKED_FOR_NON_INDIA = "legacy_fallback_blocked_for_non_india"
+    INSTRUMENT_AMBIGUOUS = "instrument_ambiguous"
+    INSTRUMENT_NOT_RESOLVABLE = "instrument_not_resolvable"
+
+    # Phase 5 v4 (ADR 0023) — v2 read-side fail-closed adapters
+    PROMOTED_CAPABILITY_UNAVAILABLE = "promoted_capability_unavailable"
+    QUOTE_ADAPTER_NOT_REGISTERED = "quote_adapter_not_registered"
+    BAR_ADAPTER_NOT_REGISTERED = "bar_adapter_not_registered"
+    POSITION_ADAPTER_NOT_REGISTERED = "position_adapter_not_registered"
+    BALANCE_ADAPTER_NOT_REGISTERED = "balance_adapter_not_registered"
+
+    # Phase 8 v4 (ADR 0023) — sandbox provider dispatcher
+    SANDBOX_PROVIDER_NOT_REGISTERED = "sandbox_provider_not_registered"
+
+    # Phase 9 v4 (ADR 0023) — options provider dispatcher
+    OPTIONS_PROVIDER_NOT_REGISTERED = "options_provider_not_registered"
+
+    # Phase 10 v4 (ADR 0023) — screener provider dispatcher
+    SCREENER_PROVIDER_NOT_REGISTERED = "screener_provider_not_registered"
+
 
 class FeatureNotAvailableInRegion(DomainError):
     """A feature is gated to a specific region and the active region differs.
@@ -152,6 +176,43 @@ class FeatureNotAvailableInRegion(DomainError):
             message
             or f"feature {code!r} not available in region {active_region!r}"
         )
+
+
+class RegionResolutionError(DomainError):
+    """The active region cannot be resolved from any source.
+
+    Phase 2 v4 (ADR 0023, invariant 1): missing region context in
+    promoted code is a structured error, not a silent India fallback.
+    Raised by ``services.feature_gate_service.active_region_code`` when
+    the broker has no ``supported_regions`` and no settings default is
+    configured AND the caller has not opted into the legacy India
+    compatibility path.
+
+    Carries the stable error code ``ErrorCode.REGION_RESOLUTION_ERROR``.
+    """
+
+    def __init__(self, message: str | None = None, *, attempted_sources: list[str] | None = None) -> None:
+        self.attempted_sources = list(attempted_sources or [])
+        if message is None:
+            message = (
+                "could not resolve active region: no broker capability, "
+                "no stored default, and no legacy India fallback opted in"
+            )
+        super().__init__(message)
+
+
+class ConfigurationError(DomainError):
+    """A required configuration value is missing or invalid.
+
+    Phase 2 v4 (ADR 0023, invariant 5): non-India deployments must set
+    ``SESSION_EXPIRY_TIMEZONE`` (and similar) explicitly. Missing
+    configuration in a non-India context is an error, not a silent
+    India fallback.
+    """
+
+    def __init__(self, message: str, *, missing_env: str | None = None) -> None:
+        self.missing_env = missing_env
+        super().__init__(message)
 
 
 class SandboxNotAvailableInRegion(FeatureNotAvailableInRegion):
@@ -177,10 +238,12 @@ class SandboxNotAvailableInRegion(FeatureNotAvailableInRegion):
 __all__ = [
     "BrokerCapabilityError",
     "CapabilityMismatch",
+    "ConfigurationError",
     "DomainError",
     "ErrorCode",
     "FeatureNotAvailableInRegion",
     "InstrumentNotResolvable",
+    "RegionResolutionError",
     "SandboxNotAvailableInRegion",
     "UnsupportedCapability",
     "ValidationError",

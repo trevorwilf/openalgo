@@ -10,22 +10,82 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Phase 4 — Session expiry runs in this timezone, configurable per
-# deployment. Defaults to Asia/Kolkata so existing Indian deployments
-# are a no-op upgrade. Operators on US/EU venues set
-# SESSION_EXPIRY_TIMEZONE explicitly. The expiry *time of day*
-# continues to come from SESSION_EXPIRY_TIME (HH:MM, default 03:00).
+# Phase 4 v3 + Phase 2 v4 — Session expiry runs in this timezone,
+# configured per-deployment via SESSION_EXPIRY_TIMEZONE. v4 invariant 1
+# (ADR 0023): the timezone resolution is fail-closed for non-India
+# brokers. If the env var is unset:
+#
+#   * Active broker resolves to an India region: use Asia/Kolkata
+#     (preserves existing Indian deployments).
+#   * Active broker resolves to a non-India region: raise
+#     ConfigurationError; operator must set SESSION_EXPIRY_TIMEZONE.
+#   * No active broker yet (early bootstrap before login): use
+#     Asia/Kolkata as the last-resort default and log a one-shot warning
+#     so first runs of fresh non-India deployments still come up.
+#
+# The expiry *time of day* continues to come from SESSION_EXPIRY_TIME
+# (HH:MM, default 03:00).
 def _session_tz() -> pytz.BaseTzInfo:
-    name = os.getenv("SESSION_EXPIRY_TIMEZONE", "Asia/Kolkata")
-    try:
-        return pytz.timezone(name)
-    except pytz.UnknownTimeZoneError:
-        logger.warning(
-            "SESSION_EXPIRY_TIMEZONE=%r is not a recognised IANA tz; "
-            "falling back to Asia/Kolkata",
-            name,
-        )
+    name = os.getenv("SESSION_EXPIRY_TIMEZONE")
+    if name:
+        try:
+            return pytz.timezone(name)
+        except pytz.UnknownTimeZoneError:
+            logger.warning(
+                "SESSION_EXPIRY_TIMEZONE=%r is not a recognised IANA tz; "
+                "falling back to Asia/Kolkata",
+                name,
+            )
+            return pytz.timezone("Asia/Kolkata")
+
+    # Env unset — resolve via the active BROKER session. Only a
+    # confidently-resolved non-India broker triggers the fail-closed
+    # path; absence of a broker session (early bootstrap, settings-
+    # only state) defers to the Asia/Kolkata legacy default with a
+    # one-shot warning so the app can come up.
+    broker_caps = _resolve_active_broker_caps()
+    if broker_caps is None:
+        # No broker session yet — bootstrap path. Preserve existing
+        # India deployments and let non-India operators set
+        # SESSION_EXPIRY_TIMEZONE before logging in.
         return pytz.timezone("Asia/Kolkata")
+
+    regions = list(getattr(broker_caps, "supported_regions", None) or [])
+    region_codes = [str(r).strip().lower() for r in regions]
+    if not regions or "india" in region_codes:
+        return pytz.timezone("Asia/Kolkata")
+
+    # Confidently-resolved non-India broker — fail-closed.
+    from domain.errors import ConfigurationError
+
+    raise ConfigurationError(
+        f"SESSION_EXPIRY_TIMEZONE must be set for non-India deployments "
+        f"(active broker regions: {region_codes!r}). Set the env var to "
+        f"a valid IANA timezone identifier (e.g., 'America/New_York', "
+        f"'Europe/Berlin').",
+        missing_env="SESSION_EXPIRY_TIMEZONE",
+    )
+
+
+def _resolve_active_broker_caps():
+    """Return ``BrokerCapabilities`` for the broker in the Flask
+    session, or ``None`` when there is no session / capability lookup
+    fails. Defensive — never raises.
+    """
+    try:
+        from flask import session
+
+        broker = session.get("broker")
+    except Exception:
+        return None
+    if not broker:
+        return None
+    try:
+        from utils.plugin_loader import get_broker_capabilities
+
+        return get_broker_capabilities(broker)
+    except Exception:
+        return None
 
 
 def is_session_expiry_disabled():

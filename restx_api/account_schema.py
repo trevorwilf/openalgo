@@ -1,3 +1,15 @@
+"""Marshmallow schemas for v1 account endpoints (funds, orderbook,
+tradebook, positionbook, holdings, orderstatus, openposition).
+
+Phase 2 v4 (ADR 0023) — these schemas are India-specific by virtue of
+their use sites (the v1 lane is hard-blocked for non-India brokers).
+The ``LEGACY_INDIA_COMPATIBILITY = True`` sentinel marks the module so
+the classifier and the v1-schema classification contract test
+recognise it as legacy compatibility code.
+"""
+
+LEGACY_INDIA_COMPATIBILITY = True
+
 from marshmallow import INCLUDE, Schema, fields, validate
 
 

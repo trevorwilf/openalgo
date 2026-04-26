@@ -9,13 +9,10 @@ ends in ``_FALLBACK_REGION``, ``FALLBACK_REGION_CODE``, or
 ``DEFAULT_REGION_*`` and whose value is ``"india"`` (case-insensitive)
 is a violation in PROMOTED_CORE.
 
-This test is currently expected to **fail** at:
-
-* ``services/feature_gate_service.py:26`` — ``_FALLBACK_REGION = "india"``
-* ``services/market_region_service.py:16`` — ``FALLBACK_REGION_CODE = "india"``
-
-Phase 2 of v4 removes both. After Phase 2, this test passes
-unconditionally.
+Phase 2 of v4 removed both legacy fallback constants
+(``_FALLBACK_REGION`` in ``services/feature_gate_service.py`` and
+``FALLBACK_REGION_CODE`` in ``services/market_region_service.py``).
+This test now guards against any regression.
 """
 
 from __future__ import annotations
@@ -115,13 +112,6 @@ def _check_file(path: Path) -> list[str]:
     return violations
 
 
-@pytest.mark.xfail(
-    reason=(
-        "v4 Phase 1: contract test installed; Phase 2 removes "
-        "_FALLBACK_REGION / FALLBACK_REGION_CODE from promoted core."
-    ),
-    strict=False,
-)
 def test_no_silent_india_fallback_in_promoted_core() -> None:
     files = _read_promoted_core_files()
     assert files, "PROMOTED_CORE list missing — run classify_files.py."

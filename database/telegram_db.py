@@ -168,6 +168,35 @@ class NotificationQueue(Base):
     user = relationship("TelegramUser", back_populates="notifications")
 
 
+def _default_telegram_timezone() -> str:
+    """Phase 2 v4 (ADR 0023, invariant 1) — region-aware default for
+    new user preferences.
+
+    Resolves the active broker's region timezone from the region
+    plugin. Falls back to ``"UTC"`` when no broker context exists
+    (early bootstrap, CLI, fresh install). India brokers continue to
+    get ``"Asia/Kolkata"`` because that is their region's
+    ``default_timezone``.
+    """
+    try:
+        from services.feature_gate_service import active_region_code
+        from utils.region_loader import get_market_region
+
+        try:
+            code = active_region_code(legacy_india_fallback=False)
+        except Exception:
+            code = None
+        if code:
+            region = get_market_region(code)
+            if region is not None:
+                tz = getattr(region, "default_timezone", None)
+                if tz:
+                    return str(tz)
+    except Exception:
+        pass
+    return "UTC"
+
+
 class UserPreference(Base):
     """User preferences table"""
 
@@ -180,7 +209,16 @@ class UserPreference(Base):
     daily_summary = Column(Boolean, default=True)
     summary_time = Column(String(10), default="18:00")
     language = Column(String(10), default="en")
-    timezone = Column(String(50), default="Asia/Kolkata")
+    # Phase 2 v4 — schema default is region-aware via the helper
+    # above. Existing India deployments resolve to "Asia/Kolkata" via
+    # the India region plugin's ``default_timezone``; non-India
+    # deployments resolve to the broker's region tz; missing context
+    # falls through to "UTC". No silent India fallback.
+    timezone = Column(String(50), default=_default_telegram_timezone)
+    # Tracks how the timezone value was set. Existing rows backfill to
+    # "default_legacy_india" via upgrade/migrate_telegram_timezone_source.py.
+    # New rows set "default_via_region" or "user" depending on origin.
+    timezone_source = Column(String(50), default="default_via_region")
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -626,7 +664,9 @@ def get_user_preferences(telegram_id: int) -> dict:
                 "timezone": pref.timezone,
             }
         else:
-            # Return default preferences
+            # Return default preferences. Phase 2 v4 — timezone is
+            # resolved from the active broker's region plugin
+            # (Asia/Kolkata for India, region tz for others, UTC fallback).
             result = {
                 "order_notifications": True,
                 "trade_notifications": True,
@@ -634,7 +674,7 @@ def get_user_preferences(telegram_id: int) -> dict:
                 "daily_summary": True,
                 "summary_time": "18:00",
                 "language": "en",
-                "timezone": "Asia/Kolkata",
+                "timezone": _default_telegram_timezone(),
             }
 
         # Cache the result
