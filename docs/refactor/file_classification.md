@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **817**.
+Total classified files: **823**.
 
 Classification semantics:
 
@@ -18,7 +18,7 @@ Classification semantics:
 | `BROKER_PLUGIN` | Under `broker/*` — broker facts only. |
 | `COMPATIBILITY_SHIM` | Explicit bridge between lanes (e.g. `domain/translators.py`). |
 
-## PROMOTED_CORE (59 files)
+## PROMOTED_CORE (63 files)
 
 - `__init__.py`
 - `conftest.py`
@@ -67,6 +67,10 @@ Classification semantics:
 - `services/instrument_sync_service.py`
 - `services/market_region_service.py`
 - `services/rule_enforcement.py`
+- `services/sandbox/__init__.py`
+- `services/sandbox/dispatcher.py`
+- `services/sandbox/providers/__init__.py`
+- `services/sandbox/providers/base.py`
 - `utils/__init__.py`
 - `utils/broker_context.py`
 - `utils/capability_guards.py`
@@ -302,9 +306,10 @@ Classification semantics:
 - `websocket_proxy/port_check.py`
 - `websocket_proxy/server.py`
 
-## REGION_PLUGIN (0 files)
+## REGION_PLUGIN (2 files)
 
-(none)
+- `services/sandbox/providers/india/__init__.py`
+- `services/sandbox/providers/us/__init__.py`
 
 ## BROKER_PLUGIN (533 files)
 

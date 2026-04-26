@@ -31,10 +31,6 @@ SCREENER_BASE_PATH = REPO_ROOT / "services" / "screeners" / "providers" / "base.
 SCREENER_INDIA_PATH = REPO_ROOT / "services" / "screeners" / "providers" / "india" / "__init__.py"
 
 
-@pytest.mark.xfail(
-    reason="v4 Phase 8 ships the Sandbox provider contract.",
-    strict=False,
-)
 def test_sandbox_provider_contract_exists_with_india_and_us_providers() -> None:
     assert SANDBOX_BASE_PATH.is_file(), (
         f"missing {SANDBOX_BASE_PATH.relative_to(REPO_ROOT).as_posix()} — "
