@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **816**.
+Total classified files: **817**.
 
 Classification semantics:
 
@@ -842,8 +842,9 @@ Classification semantics:
 - `broker/zerodha/streaming/zerodha_mapping.py`
 - `broker/zerodha/streaming/zerodha_websocket.py`
 
-## COMPATIBILITY_SHIM (5 files)
+## COMPATIBILITY_SHIM (6 files)
 
+- `database/venue_offset.py`
 - `domain/translators.py`
 - `restx_api/_v1_lane_guard.py`
 - `services/instrument_resolver.py`

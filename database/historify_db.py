@@ -998,9 +998,13 @@ def _get_aggregated_ohlcv(
         # Get market open time for this exchange (in seconds from midnight)
         market_open_seconds = _get_market_open_seconds(exchange)
 
-        # IST timezone offset from UTC (5 hours 30 minutes = 19800 seconds)
-        # We need this because timestamps are in UTC epoch
-        ist_offset = 19800
+        # Phase 7 v4 (ADR 0023) — venue-aware UTC offset. India venues
+        # (NSE/BSE/NFO/BFO/CDS/MCX) return 19800 (Asia/Kolkata, DST-free)
+        # so existing India aggregation is bit-identical. Non-India
+        # venues compute their offset from the venue's IANA timezone.
+        from database.venue_offset import venue_local_offset_seconds
+
+        ist_offset = venue_local_offset_seconds(exchange)
 
         # Candle alignment algorithm:
         # 1. Convert UTC timestamp to IST by adding ist_offset
@@ -1095,8 +1099,11 @@ def _get_daily_aggregated_ohlcv(
         interval_type = parsed["type"]
         interval_value = parsed.get("value", 1)
 
-        # IST timezone offset from UTC (5 hours 30 minutes = 19800 seconds)
-        ist_offset = 19800
+        # Phase 7 v4 (ADR 0023) — venue-aware UTC offset. See
+        # _aggregate_intraday_candles for details.
+        from database.venue_offset import venue_local_offset_seconds
+
+        ist_offset = venue_local_offset_seconds(exchange)
 
         # Build the GROUP BY expression based on interval type
         if interval_type == "weekly":
@@ -2581,8 +2588,18 @@ def export_to_zip(
         total_records = 0
         skipped_intervals = []  # Track computed intervals with missing 1m data
 
-        # IST timezone offset from UTC (5 hours 30 minutes = 19800 seconds)
-        ist_offset = 19800
+        # Phase 7 v4 (ADR 0023) — venue-aware UTC offset. The export
+        # path bundles many symbols × exchanges; we leave the
+        # default (India) here because rows are pre-aggregated per
+        # symbol and the offset is used as a timestamp anchor for
+        # the local-day calculation. The function returns 19800 for
+        # India venues (DST-free) and is per-day-correct for non-
+        # India when called with a specific exchange. The export
+        # currently does not pass per-exchange context — left as a
+        # follow-up for the dedicated multi-region historify export.
+        from database.venue_offset import venue_local_offset_seconds
+
+        ist_offset = venue_local_offset_seconds()
 
         with zipfile.ZipFile(abs_output, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
             with get_connection() as conn:
