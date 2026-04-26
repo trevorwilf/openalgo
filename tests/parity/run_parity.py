@@ -29,6 +29,8 @@ HARNESSES = [
     "parity_market_calendar",
     "parity_strategy_schedule",
     "parity_iv_chart_timestamp",
+    # Phase 7 v4 — venue-aware UTC offset for historify aggregation.
+    "parity_historify_offset",
 ]
 
 

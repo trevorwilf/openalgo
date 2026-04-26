@@ -30,6 +30,7 @@ compatibility_shims:
   - services/venue_session_service.py
   - services/order_router_service.py
   - restx_api/_v1_lane_guard.py
+  - database/venue_offset.py
 
 # Rules processed in order. First match wins.
 rules:
@@ -43,6 +44,8 @@ rules:
   - path: services/order_router_service.py
     classification: COMPATIBILITY_SHIM
   - path: restx_api/_v1_lane_guard.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/venue_offset.py
     classification: COMPATIBILITY_SHIM
 
   # ---------------- REGION_PLUGIN ----------------
@@ -129,6 +132,9 @@ rules:
   - path: database/venue_schedule_repo.py
     classification: PROMOTED_CORE
   - path: database/broker_rules_repo.py
+    classification: PROMOTED_CORE
+  # Phase 7 v4 — venue-aware UTC offset helper (region-neutral).
+  - path: database/venue_offset.py
     classification: PROMOTED_CORE
 
   # ---------------- v4 advanced-feature provider contracts ----------------
