@@ -91,14 +91,6 @@ def _iter_promoted_plugin_jsons() -> list[Path]:
     return out
 
 
-@pytest.mark.xfail(
-    reason=(
-        "v4 Phase 1: contract test installed; Phase 4 enforces strict mode "
-        "in utils/plugin_loader.py and adds the JSON schema with "
-        "additionalProperties:false."
-    ),
-    strict=False,
-)
 def test_promoted_plugins_have_all_v4_required_fields() -> None:
     plugins = _iter_promoted_plugin_jsons()
     assert plugins, "expected at least one promoted broker plugin"

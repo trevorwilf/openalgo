@@ -66,6 +66,10 @@ def test_supported_regions_explicit_override_round_trips(
         {
             "custom_region": {
                 "Plugin Name": "Custom Region",
+                # v4 Phase 4 (ADR 0025) required promoted fields.
+                "broker_code": "custom_region",
+                "broker_display_name": "Custom Region",
+                "account_context_supports": ["account_id"],
                 "supported_exchanges": ["XNAS"],
                 "broker_type": "IN_stock",
                 "market_families": ["US_STOCK"],
