@@ -146,3 +146,29 @@ delete `get_token` now?" the answer is objectively yes or no.
   module from the v3-era `restx_api/v2/accounts.py` skeleton. v4
   Phase 5 swapped the import to the actual `positionbook_service`.
   The bogus import has been removed; no further action.
+
+## v5 additions (2026-04-26)
+
+* `frontend/src/lib/india_legacy/legacy_fallback_exchanges.ts` —
+  deprecated alias `LEGACY_FALLBACK_EXCHANGES` REMOVED in v5
+  Phase 2. Last consumer (`useSupportedExchanges.literal.test.ts`)
+  updated to the canonical `INDIA_LEGACY_FALLBACK_EXCHANGES`.
+* `services.feature_gate_service._legacy_india_region_for_compat()`
+  — UNCHANGED in v5. Still depended on by `is_india_region_active`
+  and the named services (sandbox/options/screener) that haven't
+  yet adopted dispatcher-only paths. Eligible for removal once
+  the per-route blueprint adoption (Phase 4-bis, Phase 5-bis,
+  Phase 6-bis) lands. Estimated v6 timeline.
+* `frontend/src/lib/utils.makeFormatCurrency(broker)` — REMOVED in
+  v5 Phase 2. All page call sites migrated to
+  `useFormatCurrency()` from `@/lib/format/currency.ts`.
+* `restx_api/__init__.py` — `/api/v1/*` routes now carry
+  `Deprecation: true` + `Sunset: <date>` headers (v5 Phase 8).
+  Sunset date is operator-controlled via
+  `OPENALGO_V1_SUNSET_DATE`; defaults to deployment+180 days.
+  v6 will return 410 after the sunset date and remove the routes
+  in a subsequent phase.
+* `API_V2_<INDIA_BROKER>` default — UNCHANGED at OFF in v5
+  Phase 9. The default-flip is gated on per-broker translator +
+  parity harness completion (Phase 8-bis). Operators can flip
+  individual brokers once those are ready.
