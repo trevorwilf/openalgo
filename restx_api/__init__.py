@@ -22,6 +22,33 @@ from ._v1_lane_guard import enforce_india_only as _v1_enforce_india_only
 def _v1_block_non_india_brokers():
     return _v1_enforce_india_only()
 
+
+# v5 Phase 8 (D-1) — v1 deprecation announcement via response headers.
+# Every /api/v1/* response carries `Deprecation: true` and a `Sunset`
+# date. Operators control the actual sunset via the env var
+# OPENALGO_V1_SUNSET_DATE (ISO 8601). The default is `now + 180 days`
+# so a fresh deployment always advertises an explicit sunset date.
+import os
+from datetime import datetime, timedelta, timezone
+
+
+def _v1_sunset_date_iso() -> str:
+    raw = os.getenv("OPENALGO_V1_SUNSET_DATE")
+    if raw:
+        return raw.strip()
+    return (datetime.now(timezone.utc) + timedelta(days=180)).date().isoformat()
+
+
+@api_v1_bp.after_request
+def _v1_deprecation_headers(response):
+    # RFC 8594-aligned: Deprecation: true + Sunset: HTTP-date.
+    # The Sunset header carries an ISO date for clarity (most clients
+    # will not parse the strict HTTP-date format).
+    response.headers["Deprecation"] = "true"
+    response.headers["Sunset"] = _v1_sunset_date_iso()
+    response.headers.setdefault("Link", '<https://docs.openalgo.in/migration/v1-to-v2>; rel="deprecation"')
+    return response
+
 # Import namespaces
 from .analyzer import api as analyzer_ns
 from .basket_order import api as basket_order_ns
