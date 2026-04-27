@@ -33,6 +33,8 @@ HARNESSES = [
     "parity_historify_offset",
     # v5 Phase 4 (ADR 0026 follow-on) — India sandbox provider parity.
     "parity_sandbox_india",
+    # v5 Phase 5 (ADR 0027 follow-on) — India options provider parity.
+    "parity_options_india",
 ]
 
 

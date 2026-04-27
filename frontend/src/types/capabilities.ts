@@ -107,6 +107,8 @@ export interface BrokerCapabilities {
   supports_analyzer: boolean
   // v5 Phase 4 — sandbox/paper-trading feature flag (per-broker).
   supports_sandbox: boolean
+  // v5 Phase 5 — options trading feature flag (per-broker).
+  supports_options: boolean
   features: Record<string, boolean>
 }
 
@@ -151,6 +153,7 @@ export function hasCapability(
     | 'supports_short_selling'
     | 'supports_analyzer'
     | 'supports_sandbox'
+    | 'supports_options'
     | 'leverage_config'
 ): boolean {
   if (!cap) return false
