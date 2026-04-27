@@ -31,6 +31,7 @@ compatibility_shims:
   - services/order_router_service.py
   - restx_api/_v1_lane_guard.py
   - database/venue_offset.py
+  - utils/venue_local_time.py
 
 # Rules processed in order. First match wins.
 rules:
@@ -128,6 +129,11 @@ rules:
   # v5 Phase 1 (ADR 0030) — promoted-request observability label helper.
   - path: utils/observability.py
     classification: PROMOTED_CORE
+  # v5 Phase 3 — venue-local datetime helpers. COMPATIBILITY_SHIM
+  # because it bridges India venue-code names + Asia/Kolkata as a
+  # short-circuit (parallel to database/venue_offset.py).
+  - path: utils/venue_local_time.py
+    classification: COMPATIBILITY_SHIM
 
   # ---------------- PROMOTED_CORE — database canonical repos ----------------
   - path: database/instruments_repo.py
