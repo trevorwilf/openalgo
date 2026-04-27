@@ -1,0 +1,102 @@
+{
+  "expiries_from_2026_04_15": [
+    "2026-04-16",
+    "2026-04-23",
+    "2026-04-30",
+    "2026-05-07",
+    "2026-05-14",
+    "2026-05-21",
+    "2026-05-28",
+    "2026-06-04"
+  ],
+  "fmt_samples": [
+    {
+      "input": "NIFTY28MAR2420800CE",
+      "round_trip": "NIFTY28MAR2420800CE"
+    },
+    {
+      "input": "BANKNIFTY15FEB2447500.5PE",
+      "round_trip": "BANKNIFTY15FEB2447500.5PE"
+    }
+  ],
+  "harness": "parity_options_india",
+  "lot_sizes": {
+    "BANKEX": 15,
+    "BANKNIFTY": 15,
+    "FINNIFTY": 25,
+    "MIDCPNIFTY": 75,
+    "NIFTY": 50,
+    "SENSEX": 10
+  },
+  "parsed_samples": [
+    {
+      "currency": "INR",
+      "expiry": "2024-03-28",
+      "input": "NIFTY28MAR2420800CE",
+      "lot_size": 50,
+      "right": "CALL",
+      "strike": "20800",
+      "underlying": "NIFTY",
+      "venue_code": "NFO"
+    },
+    {
+      "currency": "INR",
+      "expiry": "2024-03-28",
+      "input": "BANKNIFTY28MAR2447500PE",
+      "lot_size": 15,
+      "right": "PUT",
+      "strike": "47500",
+      "underlying": "BANKNIFTY",
+      "venue_code": "NFO"
+    },
+    {
+      "currency": "INR",
+      "expiry": "2024-02-15",
+      "input": "FINNIFTY15FEB2421000CE",
+      "lot_size": 25,
+      "right": "CALL",
+      "strike": "21000",
+      "underlying": "FINNIFTY",
+      "venue_code": "NFO"
+    },
+    {
+      "currency": "INR",
+      "expiry": "2024-02-15",
+      "input": "MIDCPNIFTY15FEB2410500PE",
+      "lot_size": 75,
+      "right": "PUT",
+      "strike": "10500",
+      "underlying": "MIDCPNIFTY",
+      "venue_code": "NFO"
+    },
+    {
+      "currency": "INR",
+      "expiry": "2024-02-15",
+      "input": "SENSEX15FEB2475000CE",
+      "lot_size": 10,
+      "right": "CALL",
+      "strike": "75000",
+      "underlying": "SENSEX",
+      "venue_code": "NFO"
+    },
+    {
+      "currency": "INR",
+      "expiry": "2024-02-15",
+      "input": "BANKEX15FEB2455000PE",
+      "lot_size": 15,
+      "right": "PUT",
+      "strike": "55000",
+      "underlying": "BANKEX",
+      "venue_code": "NFO"
+    }
+  ],
+  "region_code": "india",
+  "supported_strategies": [
+    "BEAR_PUT_SPREAD",
+    "BULL_CALL_SPREAD",
+    "BUTTERFLY",
+    "IRON_CONDOR",
+    "STRADDLE",
+    "STRANGLE"
+  ]
+}

@@ -136,6 +136,10 @@ class BrokerCapabilities(BaseModel):
     # sandbox surfaces). Non-India brokers default False; an explicit
     # plugin.json declaration is required to enable.
     supports_sandbox: bool = False
+    # v5 Phase 5 — does the broker plugin advertise options trading?
+    # India brokers default True (NFO/BFO option chains historically
+    # supported). Non-India brokers default False; explicit opt-in.
+    supports_options: bool = False
     features: dict[str, bool] = Field(default_factory=dict)
     # Phase 8 — Schwab/Webull readiness fields. All optional; legacy
     # plugins that don't declare them get sensible defaults.
@@ -234,6 +238,8 @@ def _common_defaults() -> dict[str, Any]:
         "supports_analyzer": False,
         # v5 Phase 4 — sandbox is opt-in for non-India brokers.
         "supports_sandbox": False,
+        # v5 Phase 5 — options are opt-in for non-India brokers.
+        "supports_options": False,
     }
 
 
@@ -264,6 +270,8 @@ def _indian_defaults() -> dict[str, Any]:
             "supports_analyzer": True,
             # v5 Phase 4 — India brokers historically had sandbox enabled.
             "supports_sandbox": True,
+            # v5 Phase 5 — India brokers historically have options.
+            "supports_options": True,
         }
     )
     return base
@@ -327,6 +335,7 @@ _EXPLICIT_OVERRIDE_KEYS: frozenset[str] = frozenset(
         "supports_short_selling",
         "supports_analyzer",
         "supports_sandbox",
+        "supports_options",
         "features",
         "master_contract_refresh_policy",
         # Phase 8 — Schwab/Webull readiness fields
