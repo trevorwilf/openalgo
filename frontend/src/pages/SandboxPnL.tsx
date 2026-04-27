@@ -1,5 +1,5 @@
 import { Activity, Briefcase, Calendar, Download, Package, Settings } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,8 +13,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { cn, makeFormatCurrency } from '@/lib/utils'
-import { useAuthStore } from '@/stores/authStore'
+import { useFormatCurrency } from '@/lib/format/currency'
+import { cn } from '@/lib/utils'
 
 interface DailyPnL {
   date: string
@@ -86,8 +86,7 @@ function getPnLColor(value: number): string {
 }
 
 export default function SandboxPnL() {
-  const { user } = useAuthStore()
-  const formatCurrency = useMemo(() => makeFormatCurrency(user?.broker), [user?.broker])
+  const formatCurrency = useFormatCurrency()
   const [data, setData] = useState<SandboxData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('daily')

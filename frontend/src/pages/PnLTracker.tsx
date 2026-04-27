@@ -1,11 +1,10 @@
 import { AlertTriangle, Camera, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { showToast } from '@/utils/toast'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useThemeStore } from '@/stores/themeStore'
-import { useAuthStore } from '@/stores/authStore'
-import { makeFormatCurrency } from '@/lib/utils'
+import { useFormatCurrency } from '@/lib/format/currency'
 
 async function fetchCSRFToken(): Promise<string> {
   const response = await fetch('/auth/csrf-token', {
@@ -45,8 +44,7 @@ interface PnLData {
 export default function PnLTracker() {
   const { mode } = useThemeStore()
   const isDarkMode = mode === 'dark'
-  const { user } = useAuthStore()
-  const formatCurrency = useMemo(() => makeFormatCurrency(user?.broker), [user?.broker])
+  const formatCurrency = useFormatCurrency()
 
   // State
   const [isLoading, setIsLoading] = useState(false)
@@ -70,9 +68,8 @@ export default function PnLTracker() {
   // Stable ref for formatCurrency — always holds the latest function without
   // being a useCallback/useEffect dependency.  The chart price formatter reads
   // from this ref so it always uses the current broker format, while initChart
-  // does NOT need formatCurrency in its dependency array.  This prevents the
-  // cascade: user?.broker changes → formatCurrency new ref → initChart new ref
-  // → both useEffects fire → duplicate chart init + duplicate API requests.
+  // does NOT need formatCurrency in its dependency array.  This prevents
+  // double-init and duplicate API requests when capabilities update.
   const formatCurrencyRef = useRef(formatCurrency)
   useEffect(() => { formatCurrencyRef.current = formatCurrency }, [formatCurrency])
 
