@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **838**.
+Total classified files: **839**.
 
 Classification semantics:
 
@@ -18,7 +18,7 @@ Classification semantics:
 | `BROKER_PLUGIN` | Under `broker/*` — broker facts only. |
 | `COMPATIBILITY_SHIM` | Explicit bridge between lanes (e.g. `domain/translators.py`). |
 
-## PROMOTED_CORE (73 files)
+## PROMOTED_CORE (74 files)
 
 - `__init__.py`
 - `conftest.py`
@@ -90,6 +90,7 @@ Classification semantics:
 - `utils/logging.py`
 - `utils/logging_context.py`
 - `utils/metrics.py`
+- `utils/observability.py`
 - `utils/plugin_loader.py`
 - `utils/region_loader.py`
 - `utils/version.py`
