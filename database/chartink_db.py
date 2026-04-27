@@ -40,6 +40,11 @@ class ChartinkStrategy(Base):
     start_time = Column(String(5))  # HH:MM format
     end_time = Column(String(5))  # HH:MM format
     squareoff_time = Column(String(5))  # HH:MM format
+    # v5 Phase 6 — additive provider/region columns (D-3: nullable;
+    # India backfill is the only seeded value today; non-India will
+    # land when v6 ships a non-India screener provider).
+    provider_code = Column(String(50), nullable=True, index=True)
+    region_code = Column(String(20), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

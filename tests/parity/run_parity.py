@@ -35,6 +35,8 @@ HARNESSES = [
     "parity_sandbox_india",
     # v5 Phase 5 (ADR 0027 follow-on) — India options provider parity.
     "parity_options_india",
+    # v5 Phase 6 (ADR 0028 follow-on) — India Chartink screener parity.
+    "parity_chartink_india",
 ]
 
 

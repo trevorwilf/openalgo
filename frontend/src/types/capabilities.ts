@@ -109,6 +109,8 @@ export interface BrokerCapabilities {
   supports_sandbox: boolean
   // v5 Phase 5 — options trading feature flag (per-broker).
   supports_options: boolean
+  // v5 Phase 6 — screener providers (Chartink etc.) feature flag.
+  supports_screener_providers: boolean
   features: Record<string, boolean>
 }
 
@@ -154,6 +156,7 @@ export function hasCapability(
     | 'supports_analyzer'
     | 'supports_sandbox'
     | 'supports_options'
+    | 'supports_screener_providers'
     | 'leverage_config'
 ): boolean {
   if (!cap) return false
