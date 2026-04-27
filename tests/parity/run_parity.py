@@ -2,14 +2,26 @@
 
 Usage::
 
-    python tests/parity/run_parity.py           # verify against checked-in fixtures
-    python tests/parity/run_parity.py generate  # (re)generate fixtures
+    python tests/parity/run_parity.py                    # verify all
+    python tests/parity/run_parity.py generate           # (re)generate
+    python tests/parity/run_parity.py --lane v1          # v5: v1-lane only
+    python tests/parity/run_parity.py --lane v2          # v5: v2-lane only
 
 Exit code 0 on full pass; 1 on any diff or missing fixture.
+
+v5 Phase 9: ``--lane`` mode is a forward-compat scaffold. The
+existing harnesses don't differentiate v1 vs v2 (they snapshot
+provider behavior, not lane-specific routes); the per-lane parity
+work lands in Phase 8-bis when per-broker v2 harnesses
+(``parity_v2_<broker>_india``) are added. For now, ``--lane v2``
+runs the existing harnesses (which are India-flavored and shared
+between lanes) and ``--lane v1`` does the same — both paths return
+the same fixtures because the v1/v2 disambiguation is per-broker.
 """
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import sys
 from pathlib import Path
@@ -40,20 +52,49 @@ HARNESSES = [
 ]
 
 
+def _parse_args(argv: list[str]) -> tuple[str, str | None]:
+    """Return (mode, lane). lane is None for "all lanes"."""
+    parser = argparse.ArgumentParser(
+        prog="run_parity.py",
+        description="OpenAlgo parity harness runner",
+    )
+    parser.add_argument(
+        "mode",
+        nargs="?",
+        default="verify",
+        choices=("verify", "generate"),
+        help="verify against checked-in fixtures (default) or regenerate them",
+    )
+    parser.add_argument(
+        "--lane",
+        choices=("v1", "v2"),
+        default=None,
+        help="restrict to v1 or v2 lane harnesses (v5 Phase 9 scaffold)",
+    )
+    ns = parser.parse_args(argv[1:])
+    return ns.mode, ns.lane
+
+
 def main(argv: list[str]) -> int:
-    mode = "verify"
-    if len(argv) > 1:
-        if argv[1] == "generate":
-            mode = "generate"
-        elif argv[1] == "verify":
-            mode = "verify"
-        else:
-            print(f"unknown mode: {argv[1]}")
-            return 2
+    try:
+        mode, lane = _parse_args(argv)
+    except SystemExit as e:
+        return int(e.code or 0)
+
+    # Lane filter: v2-only harnesses have a `parity_v2_` prefix; v1-only
+    # would have `parity_v1_`. Today every harness is shared between
+    # lanes so both filters return the same set. Phase 8-bis adds
+    # per-broker `parity_v2_<broker>_india` harnesses; the runner will
+    # then split as expected.
+    selected = HARNESSES
+    if lane == "v2":
+        selected = [n for n in HARNESSES if not n.startswith("parity_v1_")]
+    elif lane == "v1":
+        selected = [n for n in HARNESSES if not n.startswith("parity_v2_")]
 
     total_ok = 0
     total_fail = 0
-    for name in HARNESSES:
+    for name in selected:
         module = importlib.import_module(f"tests.parity.baseline.{name}")
         ok, messages = _common.run_harness(name, module.generate, mode=mode)
         status = "OK  " if ok else "FAIL"
@@ -65,7 +106,11 @@ def main(argv: list[str]) -> int:
         else:
             total_fail += 1
 
-    print(f"\n{total_ok}/{len(HARNESSES)} passed, {total_fail} failed ({mode} mode)")
+    lane_suffix = f", lane={lane}" if lane else ""
+    print(
+        f"\n{total_ok}/{len(selected)} passed, {total_fail} failed "
+        f"({mode} mode{lane_suffix})"
+    )
     return 0 if total_fail == 0 else 1
 
 
