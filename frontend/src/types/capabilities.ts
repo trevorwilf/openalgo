@@ -111,6 +111,9 @@ export interface BrokerCapabilities {
   supports_options: boolean
   // v5 Phase 6 — screener providers (Chartink etc.) feature flag.
   supports_screener_providers: boolean
+  // v5 Phase 7 — broker-wide combo types (single source of truth;
+  // per-asset overrides live in `products[*].supports_combo_types`).
+  supports_combo_types?: string[]
   features: Record<string, boolean>
 }
 
