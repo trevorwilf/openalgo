@@ -1,0 +1,54 @@
+{
+  "harness": "parity_chartink_india",
+  "provider_code": "chartink",
+  "region_code": "india",
+  "supported_venues": [
+    "NSE",
+    "BSE"
+  ],
+  "validated_signals": {
+    "bearish": {
+      "price": "1500.0",
+      "raw_payload_keys": [
+        "alert_name",
+        "scan_name",
+        "stocks",
+        "trigger_prices",
+        "triggered_at"
+      ],
+      "signal_type": "sell",
+      "symbols": [
+        "INFY"
+      ]
+    },
+    "bullish_breakout": {
+      "price": "525.5",
+      "raw_payload_keys": [
+        "alert_name",
+        "scan_name",
+        "stocks",
+        "trigger_prices",
+        "triggered_at"
+      ],
+      "signal_type": "buy",
+      "symbols": [
+        "SBIN",
+        "RELIANCE",
+        "TCS"
+      ]
+    },
+    "single_stock_no_price": {
+      "price": null,
+      "raw_payload_keys": [
+        "alert_name",
+        "scan_name",
+        "stocks",
+        "triggered_at"
+      ],
+      "signal_type": "buy",
+      "symbols": [
+        "BANKBARODA"
+      ]
+    }
+  }
+}

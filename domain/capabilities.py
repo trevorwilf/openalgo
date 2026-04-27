@@ -140,6 +140,10 @@ class BrokerCapabilities(BaseModel):
     # India brokers default True (NFO/BFO option chains historically
     # supported). Non-India brokers default False; explicit opt-in.
     supports_options: bool = False
+    # v5 Phase 6 — does the broker plugin advertise screener providers
+    # (Chartink etc.)? India brokers default True (Chartink webhooks
+    # are India-only today). Non-India brokers default False.
+    supports_screener_providers: bool = False
     features: dict[str, bool] = Field(default_factory=dict)
     # Phase 8 — Schwab/Webull readiness fields. All optional; legacy
     # plugins that don't declare them get sensible defaults.
@@ -240,6 +244,8 @@ def _common_defaults() -> dict[str, Any]:
         "supports_sandbox": False,
         # v5 Phase 5 — options are opt-in for non-India brokers.
         "supports_options": False,
+        # v5 Phase 6 — screener providers (Chartink etc.) opt-in.
+        "supports_screener_providers": False,
     }
 
 
@@ -272,6 +278,8 @@ def _indian_defaults() -> dict[str, Any]:
             "supports_sandbox": True,
             # v5 Phase 5 — India brokers historically have options.
             "supports_options": True,
+            # v5 Phase 6 — Chartink (India screener) historically on.
+            "supports_screener_providers": True,
         }
     )
     return base
@@ -336,6 +344,7 @@ _EXPLICIT_OVERRIDE_KEYS: frozenset[str] = frozenset(
         "supports_analyzer",
         "supports_sandbox",
         "supports_options",
+        "supports_screener_providers",
         "features",
         "master_contract_refresh_policy",
         # Phase 8 — Schwab/Webull readiness fields
