@@ -36,21 +36,49 @@ class UnsupportedCapability(DomainError):
     Example: a crypto-only broker being asked for an Indian-style MIS
     product. `broker_code`, `capability_name`, and `details` are for
     structured logging.
+
+    v5 Phase 1: optional `dimension` field — one of "order_type", "tif",
+    "session", "quantity_unit", "currency", "asset_class",
+    "product_intent", "combo_type", "stream_transport". Allows the v2
+    error body to point the client at exactly which dimension failed
+    so the UI can mark the offending control.
     """
+
+    DIMENSIONS = (
+        "order_type",
+        "tif",
+        "session",
+        "quantity_unit",
+        "currency",
+        "asset_class",
+        "product_intent",
+        "combo_type",
+        "stream_transport",
+    )
 
     def __init__(
         self,
         broker_code: str,
         capability_name: str,
         details: str | None = None,
+        *,
+        dimension: str | None = None,
     ) -> None:
+        if dimension is not None and dimension not in self.DIMENSIONS:
+            raise ValueError(
+                f"unknown UnsupportedCapability.dimension {dimension!r}; "
+                f"valid: {self.DIMENSIONS}"
+            )
         msg = f"broker {broker_code!r} does not support capability {capability_name!r}"
+        if dimension:
+            msg = f"{msg} (dimension={dimension})"
         if details:
             msg = f"{msg}: {details}"
         super().__init__(msg)
         self.broker_code = broker_code
         self.capability_name = capability_name
         self.details = details
+        self.dimension = dimension
 
 
 class CapabilityMismatch(DomainError):
@@ -156,6 +184,22 @@ class ErrorCode:
     # Phase 10 v4 (ADR 0023) — screener provider dispatcher
     SCREENER_PROVIDER_NOT_REGISTERED = "screener_provider_not_registered"
 
+    # Phase 1 v5 (ADR 0029) — structured market-context error taxonomy.
+    # Net-new error codes promoted-lane callers can branch on. Existing
+    # provider-specific *_NOT_REGISTERED codes above remain valid; the
+    # umbrella UNSUPPORTED_PROVIDER carries a `feature` field so a
+    # generic client can render a single message.
+    UNSUPPORTED_REGION = "unsupported_region"
+    MISSING_REGION_CONTEXT = "missing_region_context"
+    UNSUPPORTED_VENUE = "unsupported_venue"
+    MISSING_VENUE_CONTEXT = "missing_venue_context"
+    MISSING_CURRENCY_CONTEXT = "missing_currency_context"
+    MISSING_INSTRUMENT_IDENTITY = "missing_instrument_identity"
+    MISSING_TRANSLATOR = "missing_translator"
+    UNSUPPORTED_PROVIDER = "unsupported_provider"
+    LEGACY_LANE_BLOCKED = "legacy_lane_blocked"
+    ENTITLEMENT_REQUIRED = "entitlement_required"
+
 
 class FeatureNotAvailableInRegion(DomainError):
     """A feature is gated to a specific region and the active region differs.
@@ -235,16 +279,211 @@ class SandboxNotAvailableInRegion(FeatureNotAvailableInRegion):
         )
 
 
+# --- v5 Phase 1 (ADR 0029) structured market-context error classes --- #
+
+
+class UnsupportedRegion(DomainError):
+    """Active region is not supported by the operation/provider/translator.
+
+    Distinguished from `MissingRegionContext`: here the region is known
+    and explicitly declared unsupported by something downstream (e.g.,
+    a provider rejecting `eu` because it only registered for `india`).
+    Carries `region_code` and `code = ErrorCode.UNSUPPORTED_REGION`.
+    """
+
+    code = ErrorCode.UNSUPPORTED_REGION
+
+    def __init__(self, region_code: str | None, message: str | None = None) -> None:
+        self.region_code = region_code
+        super().__init__(message or f"region {region_code!r} is not supported")
+
+
+class MissingRegionContext(DomainError):
+    """The promoted lane needs a region but none could be resolved.
+
+    Distinct from `RegionResolutionError` (which is what
+    `feature_gate_service.active_region_code` raises): this one is
+    raised by callers that receive `None` from a context lookup and
+    need to communicate the gap to the API client.
+    Carries `code = ErrorCode.MISSING_REGION_CONTEXT`.
+    """
+
+    code = ErrorCode.MISSING_REGION_CONTEXT
+
+    def __init__(self, message: str | None = None, *, attempted_sources: list[str] | None = None) -> None:
+        self.attempted_sources = list(attempted_sources or [])
+        super().__init__(message or "missing region context for promoted request")
+
+
+class UnsupportedVenue(DomainError):
+    """The supplied venue code is not registered or not allowed here."""
+
+    code = ErrorCode.UNSUPPORTED_VENUE
+
+    def __init__(self, venue_code: str | None, message: str | None = None) -> None:
+        self.venue_code = venue_code
+        super().__init__(message or f"venue {venue_code!r} is not supported")
+
+
+class MissingVenueContext(DomainError):
+    """A promoted request requires a venue but none was supplied or resolvable."""
+
+    code = ErrorCode.MISSING_VENUE_CONTEXT
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or "missing venue context for promoted request")
+
+
+class MissingCurrencyContext(DomainError):
+    """A promoted request requires a currency but none was supplied or resolvable.
+
+    Promoted code MUST NOT default to INR. Account context, venue
+    base_currency, instrument currency, or explicit request fields are
+    the only valid sources.
+    """
+
+    code = ErrorCode.MISSING_CURRENCY_CONTEXT
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or "missing currency context for promoted request")
+
+
+class MissingInstrumentIdentity(DomainError):
+    """An instrument lookup failed because no identifier was supplied or resolvable.
+
+    Hybrid identity (D-2): internal UUID, MIC+symbol, or external IDs
+    (FIGI/ISIN/CUSIP/SEDOL/OSI). At least one must be supplied.
+    """
+
+    code = ErrorCode.MISSING_INSTRUMENT_IDENTITY
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or "missing instrument identity for promoted request")
+
+
+class MissingTranslator(DomainError):
+    """No `BrokerTranslator` is registered for the active broker.
+
+    Net-new in v5; alias-style code for `TRANSLATOR_NOT_REGISTERED`
+    that promoted-lane v2 admission uses (the existing code stays
+    valid for backward compatibility).
+    """
+
+    code = ErrorCode.MISSING_TRANSLATOR
+
+    def __init__(self, broker_code: str | None, message: str | None = None) -> None:
+        self.broker_code = broker_code
+        super().__init__(
+            message or f"no translator registered for broker {broker_code!r}"
+        )
+
+
+class UnsupportedProvider(DomainError):
+    """No provider for the requested feature is registered for the active region.
+
+    Umbrella class on top of the per-feature *_PROVIDER_NOT_REGISTERED
+    codes. Carries `feature: "sandbox" | "options" | "screener" |
+    "analyzer" | "flow" | "iv" | "gex" | "straddle" |
+    "synthetic_future" | "oi"` so the UI can disable the matching tab.
+    """
+
+    code = ErrorCode.UNSUPPORTED_PROVIDER
+    FEATURES = (
+        "sandbox",
+        "options",
+        "screener",
+        "analyzer",
+        "flow",
+        "iv",
+        "gex",
+        "straddle",
+        "synthetic_future",
+        "oi",
+    )
+
+    def __init__(
+        self,
+        feature: str,
+        region_code: str | None = None,
+        message: str | None = None,
+    ) -> None:
+        if feature not in self.FEATURES:
+            raise ValueError(
+                f"unknown UnsupportedProvider.feature {feature!r}; valid: {self.FEATURES}"
+            )
+        self.feature = feature
+        self.region_code = region_code
+        super().__init__(
+            message
+            or f"no {feature} provider registered for region {region_code!r}"
+        )
+
+
+class LegacyLaneBlocked(DomainError):
+    """A non-India request reached an India-only legacy surface and was rejected.
+
+    Companion to `V1_UNAVAILABLE_FOR_NON_INDIA_BROKER`. Used when a
+    deeper component (not just the v1 entry guard) detects the
+    misroute.
+    """
+
+    code = ErrorCode.LEGACY_LANE_BLOCKED
+
+    def __init__(self, surface: str, broker_code: str | None = None, message: str | None = None) -> None:
+        self.surface = surface
+        self.broker_code = broker_code
+        super().__init__(
+            message
+            or f"legacy lane {surface!r} blocked for broker {broker_code!r}"
+        )
+
+
+class EntitlementRequired(DomainError):
+    """Account context lacks an entitlement the request requires.
+
+    Carries `entitlement` (the missing entitlement code) and optional
+    `account_id` for diagnostics. Used by Phase 7 promoted-order
+    admission to gate options access, fractional/notional, shorting,
+    extended-hours, etc.
+    """
+
+    code = ErrorCode.ENTITLEMENT_REQUIRED
+
+    def __init__(
+        self,
+        entitlement: str,
+        *,
+        account_id: str | None = None,
+        message: str | None = None,
+    ) -> None:
+        self.entitlement = entitlement
+        self.account_id = account_id
+        super().__init__(
+            message
+            or f"entitlement {entitlement!r} required (account_id={account_id!r})"
+        )
+
+
 __all__ = [
     "BrokerCapabilityError",
     "CapabilityMismatch",
     "ConfigurationError",
     "DomainError",
+    "EntitlementRequired",
     "ErrorCode",
     "FeatureNotAvailableInRegion",
     "InstrumentNotResolvable",
+    "LegacyLaneBlocked",
+    "MissingCurrencyContext",
+    "MissingInstrumentIdentity",
+    "MissingRegionContext",
+    "MissingTranslator",
+    "MissingVenueContext",
     "RegionResolutionError",
     "SandboxNotAvailableInRegion",
     "UnsupportedCapability",
+    "UnsupportedProvider",
+    "UnsupportedRegion",
+    "UnsupportedVenue",
     "ValidationError",
 ]

@@ -125,6 +125,9 @@ rules:
     classification: PROMOTED_CORE
   - path: utils/config.py
     classification: PROMOTED_CORE
+  # v5 Phase 1 (ADR 0030) — promoted-request observability label helper.
+  - path: utils/observability.py
+    classification: PROMOTED_CORE
 
   # ---------------- PROMOTED_CORE — database canonical repos ----------------
   - path: database/instruments_repo.py
