@@ -144,6 +144,14 @@ class BrokerCapabilities(BaseModel):
     # (Chartink etc.)? India brokers default True (Chartink webhooks
     # are India-only today). Non-India brokers default False.
     supports_screener_providers: bool = False
+    # v5 Phase 7 — top-level combo type capability. The list applies
+    # broker-wide; per-asset-class overrides live on
+    # ``ProductCapabilities.supports_combo_types``. The two locations
+    # were drifting (mock plugin JSON had top-level; runtime model
+    # only had per-asset). v5 Phase 7 lifts the top-level into the
+    # canonical model so the v2 combo route's gate
+    # (``caps.supports_combo_types``) actually fires.
+    supports_combo_types: list[ComboType] = Field(default_factory=list)
     features: dict[str, bool] = Field(default_factory=dict)
     # Phase 8 — Schwab/Webull readiness fields. All optional; legacy
     # plugins that don't declare them get sensible defaults.
@@ -345,6 +353,7 @@ _EXPLICIT_OVERRIDE_KEYS: frozenset[str] = frozenset(
         "supports_sandbox",
         "supports_options",
         "supports_screener_providers",
+        "supports_combo_types",
         "features",
         "master_contract_refresh_policy",
         # Phase 8 — Schwab/Webull readiness fields
