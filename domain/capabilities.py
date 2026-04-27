@@ -131,6 +131,11 @@ class BrokerCapabilities(BaseModel):
     supports_extended_hours: bool = False
     supports_short_selling: bool = False
     supports_analyzer: bool = False
+    # v5 Phase 4 — does the broker plugin advertise sandbox/paper trading?
+    # India brokers default True (preserves the existing analyzer/
+    # sandbox surfaces). Non-India brokers default False; an explicit
+    # plugin.json declaration is required to enable.
+    supports_sandbox: bool = False
     features: dict[str, bool] = Field(default_factory=dict)
     # Phase 8 — Schwab/Webull readiness fields. All optional; legacy
     # plugins that don't declare them get sensible defaults.
@@ -227,6 +232,8 @@ def _common_defaults() -> dict[str, Any]:
         "supports_extended_hours": False,
         "supports_short_selling": False,
         "supports_analyzer": False,
+        # v5 Phase 4 — sandbox is opt-in for non-India brokers.
+        "supports_sandbox": False,
     }
 
 
@@ -255,6 +262,8 @@ def _indian_defaults() -> dict[str, Any]:
             "trading_currencies": [Currency.INR],
             "base_currency": Currency.INR,
             "supports_analyzer": True,
+            # v5 Phase 4 — India brokers historically had sandbox enabled.
+            "supports_sandbox": True,
         }
     )
     return base
@@ -317,6 +326,7 @@ _EXPLICIT_OVERRIDE_KEYS: frozenset[str] = frozenset(
         "supports_extended_hours",
         "supports_short_selling",
         "supports_analyzer",
+        "supports_sandbox",
         "features",
         "master_contract_refresh_policy",
         # Phase 8 — Schwab/Webull readiness fields

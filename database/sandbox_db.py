@@ -77,6 +77,13 @@ class SandboxOrders(Base):
     margin_blocked = Column(
         DECIMAL(10, 2), nullable=True, default=0.00
     )  # Margin blocked at order placement
+    # v5 Phase 4 — additive provider/region/currency columns (D-3:
+    # additive-only; nullable; no-guess backfill). The India sandbox
+    # provider sets `region_code='india'`, `currency='INR'`,
+    # `provider_code='india'` going forward; legacy rows retain NULL.
+    region_code = Column(String(20), nullable=True, index=True)
+    currency = Column(String(8), nullable=True)
+    provider_code = Column(String(50), nullable=True)
     order_timestamp = Column(DateTime, nullable=False, default=func.now())
     update_timestamp = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
 
@@ -147,6 +154,11 @@ class SandboxPositions(Base):
     # This prevents margin release bugs when execution price differs from order placement price
     margin_blocked = Column(DECIMAL(15, 2), default=0.00)  # Total margin blocked for this position
 
+    # v5 Phase 4 — additive provider/region/currency columns.
+    region_code = Column(String(20), nullable=True, index=True)
+    currency = Column(String(8), nullable=True)
+    provider_code = Column(String(50), nullable=True)
+
     # Timestamps
     created_at = Column(DateTime, nullable=False, default=func.now())
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
@@ -210,6 +222,11 @@ class SandboxFunds(Base):
     # Reset tracking
     last_reset_date = Column(DateTime, nullable=False, default=func.now())
     reset_count = Column(Integer, default=0)  # Number of times reset has occurred
+
+    # v5 Phase 4 — additive provider/region/currency columns.
+    region_code = Column(String(20), nullable=True, index=True)
+    currency = Column(String(8), nullable=True)
+    provider_code = Column(String(50), nullable=True)
 
     # Timestamps
     created_at = Column(DateTime, nullable=False, default=func.now())
