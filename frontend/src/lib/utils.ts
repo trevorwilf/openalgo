@@ -66,30 +66,8 @@ export function formatCurrencyByCode(
   }).format(value)
 }
 
-// Deprecated: `makeFormatCurrency` branches on broker name. New code
-// should use `formatCurrencyByCode(value, currencyCode)` with the
-// currency from the instrument / account. A one-shot warning surfaces
-// the migration path without spamming the console.
-let _deprecationWarned = false
-
-export function _resetDeprecationWarningForTests(): void {
-  _deprecationWarned = false
-}
-
-/**
- * @deprecated Use `formatCurrencyByCode(value, currencyCode)` instead.
- * Kept so existing call sites keep compiling during the Phase 7+
- * migration.
- */
-export function makeFormatCurrency(broker?: string | null): (value: number) => string {
-  if (!_deprecationWarned) {
-    _deprecationWarned = true
-    // biome-ignore lint/suspicious/noConsole: deprecation path
-    console.warn(
-      'makeFormatCurrency is deprecated — use formatCurrencyByCode(value, currencyCode).',
-    )
-  }
-  const isUSD = broker === 'deltaexchange'
-  const currency = isUSD ? 'USD' : 'INR'
-  return (value: number) => formatCurrencyByCode(value, currency)
-}
+// v5 Phase 2 (ADR 0029, invariant 11): `makeFormatCurrency` removed.
+// New code uses `formatCurrencyAmount` from `@/lib/format/currency`
+// or the `useFormatCurrency` hook for the active broker's currency.
+// `formatCurrencyByCode` above is retained as a deprecated alias for
+// any external scripts; new call sites must import the new helper.

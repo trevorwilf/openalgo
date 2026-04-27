@@ -22,7 +22,7 @@ import {
   Zap,
   ZapOff,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { showToast } from '@/utils/toast'
 import { Badge } from '@/components/ui/badge'
@@ -36,8 +36,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { cn, makeFormatCurrency } from '@/lib/utils'
-import { useAuthStore } from '@/stores/authStore'
+import { useFormatCurrency } from '@/lib/format/currency'
+import { cn } from '@/lib/utils'
 
 async function fetchCSRFToken(): Promise<string> {
   const response = await fetch('/auth/csrf-token', { credentials: 'include' })
@@ -221,9 +221,8 @@ interface WebSocketTestProps {
 }
 
 export default function WebSocketTest({ depthLevel = 5 }: WebSocketTestProps) {
-  const { user } = useAuthStore()
   const { tradingExchanges } = useSupportedExchanges()
-  const formatCurrency = useMemo(() => makeFormatCurrency(user?.broker), [user?.broker])
+  const formatCurrency = useFormatCurrency()
   // Connection state - INDEPENDENT WebSocket (not shared with MarketDataManager)
   // This page needs its own connection for testing/debugging purposes
   const [isConnected, setIsConnected] = useState(false)

@@ -48,7 +48,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
+import { useFormatCurrency } from '@/lib/format/currency'
+import { cn, sanitizeCSV } from '@/lib/utils'
 // Note: AlertDialog still used for Cancel All Orders
 import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { useAuthStore } from '@/stores/authStore'
@@ -119,9 +120,9 @@ const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; l
 }
 
 export default function OrderBook() {
-  const { apiKey, user } = useAuthStore()
+  const { apiKey } = useAuthStore()
   const { isCrypto } = useSupportedExchanges()
-  const formatCurrency = useMemo(() => makeFormatCurrency(user?.broker), [user?.broker])
+  const formatCurrency = useFormatCurrency()
   const [orders, setOrders] = useState<Order[]>([])
   const [stats, setStats] = useState<OrderStats | null>(null)
   const [isLoading, setIsLoading] = useState(true)

@@ -171,6 +171,14 @@
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {
+      "path": "src/lib/format/currency.ts",
+      "reason": "v5 Phase 2 — multi-region currency formatter; INR appears only as one of N currency codes in the per-currency locale dispatch table (parity with the en-IN grouping that pre-existing INR users see)."
+    },
+    {
+      "path": "src/lib/format/timezone.ts",
+      "reason": "v5 Phase 2 — multi-region timezone display helper; Asia/Kolkata + IST appear only as one of N entries in the IANA-to-short-label dispatch table."
+    },
+    {
       "path": "src/pages/ActionCenter.tsx",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },

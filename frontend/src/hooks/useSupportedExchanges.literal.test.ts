@@ -2,11 +2,11 @@ import { renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { useBrokerStore } from '@/stores/brokerStore'
 import type { BrokerCapabilities } from '@/types/capabilities'
-import { LEGACY_FALLBACK_EXCHANGES } from '@/lib/india_legacy/legacy_fallback_exchanges'
+import { INDIA_LEGACY_FALLBACK_EXCHANGES } from '@/lib/india_legacy/legacy_fallback_exchanges'
 import { useSupportedExchanges } from './useSupportedExchanges'
 
 // Phase 1 v3 (ADR 0017) — verify the literal containment refactor
-// preserves behavior. The hook used to define LEGACY_FALLBACK_EXCHANGES
+// preserves behavior. The hook used to define INDIA_LEGACY_FALLBACK_EXCHANGES
 // inline; it now imports from `@/lib/india_legacy/...`. The downstream
 // behavior must remain bit-identical.
 
@@ -58,11 +58,11 @@ describe('useSupportedExchanges literal containment (ADR 0017)', () => {
     })
   })
 
-  it('LEGACY_FALLBACK_EXCHANGES is exported from the india_legacy module', () => {
-    expect(Array.isArray(LEGACY_FALLBACK_EXCHANGES)).toBe(true)
-    expect(LEGACY_FALLBACK_EXCHANGES).toContain('NSE')
-    expect(LEGACY_FALLBACK_EXCHANGES).toContain('BSE')
-    expect(LEGACY_FALLBACK_EXCHANGES).toContain('CRYPTO')
+  it('INDIA_LEGACY_FALLBACK_EXCHANGES is exported from the india_legacy module', () => {
+    expect(Array.isArray(INDIA_LEGACY_FALLBACK_EXCHANGES)).toBe(true)
+    expect(INDIA_LEGACY_FALLBACK_EXCHANGES).toContain('NSE')
+    expect(INDIA_LEGACY_FALLBACK_EXCHANGES).toContain('BSE')
+    expect(INDIA_LEGACY_FALLBACK_EXCHANGES).toContain('CRYPTO')
   })
 
   it('non-India broker → empty exchange list (no fallback)', () => {
@@ -83,16 +83,16 @@ describe('useSupportedExchanges literal containment (ADR 0017)', () => {
     expect(result.current.tradingExchanges).toEqual([])
   })
 
-  it('India broker without venue codes → uses LEGACY_FALLBACK_EXCHANGES', () => {
+  it('India broker without venue codes → uses INDIA_LEGACY_FALLBACK_EXCHANGES', () => {
     useBrokerStore.setState({ capabilities: null, isLoaded: false })
     const { result } = renderHook(() =>
       useSupportedExchanges({ allowLegacyFallback: true }),
     )
     const labels = result.current.tradingExchanges.map((e) => e.value)
-    // Every value in tradingExchanges must come from LEGACY_FALLBACK_EXCHANGES
+    // Every value in tradingExchanges must come from INDIA_LEGACY_FALLBACK_EXCHANGES
     // (minus the _INDEX-suffixed entries which the hook filters out).
     for (const v of labels) {
-      expect(LEGACY_FALLBACK_EXCHANGES).toContain(v)
+      expect(INDIA_LEGACY_FALLBACK_EXCHANGES).toContain(v)
     }
     expect(result.current.isFallback).toBe(true)
   })

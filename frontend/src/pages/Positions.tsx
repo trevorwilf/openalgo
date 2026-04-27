@@ -53,7 +53,8 @@ import {
 } from '@/components/ui/table'
 import { useLivePrice } from '@/hooks/useLivePrice'
 import { usePageVisibility } from '@/hooks/usePageVisibility'
-import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
+import { useFormatCurrency } from '@/lib/format/currency'
+import { cn, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { onModeChange } from '@/stores/themeStore'
@@ -139,9 +140,9 @@ const PRODUCT_COLORS: Record<string, string> = {
 }
 
 export default function Positions() {
-  const { apiKey, user } = useAuthStore()
+  const { apiKey } = useAuthStore()
   const { isCrypto } = useSupportedExchanges()
-  const formatCurrency = useMemo(() => makeFormatCurrency(user?.broker), [user?.broker])
+  const formatCurrency = useFormatCurrency()
   const [positions, setPositions] = useState<Position[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)

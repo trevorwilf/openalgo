@@ -24,7 +24,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
+import { useFormatCurrency } from '@/lib/format/currency'
+import { cn, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { onModeChange } from '@/stores/themeStore'
@@ -90,9 +91,9 @@ function formatTime(timestamp: string): string {
 }
 
 export default function TradeBook() {
-  const { apiKey, user } = useAuthStore()
+  const { apiKey } = useAuthStore()
   const { isCrypto } = useSupportedExchanges()
-  const formatCurrency = useMemo(() => makeFormatCurrency(user?.broker), [user?.broker])
+  const formatCurrency = useFormatCurrency()
   const [trades, setTrades] = useState<Trade[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
