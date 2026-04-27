@@ -180,6 +180,44 @@ The v4 closing invariant gate is
 invariant in one place. It must pass before promoting non-India
 brokers.
 
+ADRs 0029–0030 (v5 of the refactor) close the v4 deferred bis-phases
+and add the structured-error + observability surface.
+
+* **ADR 0029** — structured market-context error taxonomy
+  (10 net-new error codes + extended `unsupported_capability`
+  with `dimension` enum).
+* **ADR 0030** — promoted-request observability label set
+  (10-label canonical schema; emitted via
+  `utils/observability.py::log_promoted_request`).
+
+v5 invariants (additive to v4 invariants 1–12):
+
+1. (v5-1) Every promoted (v2) error response carries a stable
+   `code` from `domain.errors.ErrorCode`. New v5 codes:
+   `unsupported_region`, `missing_region_context`,
+   `unsupported_venue`, `missing_venue_context`,
+   `missing_currency_context`, `missing_instrument_identity`,
+   `missing_translator`, `unsupported_provider` (10-feature enum),
+   `legacy_lane_blocked`, `entitlement_required`. Existing
+   per-feature codes remain valid.
+2. (v5-2) Every promoted (v2) request emits one structured-log line
+   with the canonical 10-label set. Legacy (v1) requests do NOT
+   emit it. The contract test
+   `tests/contracts/test_v5_observability_labels_complete.py`
+   enforces both halves.
+
+The v5 closing invariant gate is
+`tests/contracts/test_v5_closing_invariants.py` — runs every v4
+invariant via the v4 closing test, plus the v5-specific
+invariants above. It must pass before declaring v5 complete.
+
+`/api/v1/*` is officially deprecated (v5 Phase 8): every response
+carries `Deprecation: true` + `Sunset: <date>` headers. Operator
+overrides the sunset date via `OPENALGO_V1_SUNSET_DATE`. v1 routes
+remain alive for the operator-controlled sunset window;
+`API_V2_<INDIA_BROKER>` defaults stay OFF until per-broker
+translators land in Phase 8-bis (v6).
+
 ### Legacy lane (frozen)
 
 Do not add features here; bug fixes and compliance only. The lane is
