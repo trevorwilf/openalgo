@@ -31,6 +31,8 @@ HARNESSES = [
     "parity_iv_chart_timestamp",
     # Phase 7 v4 — venue-aware UTC offset for historify aggregation.
     "parity_historify_offset",
+    # v5 Phase 4 (ADR 0026 follow-on) — India sandbox provider parity.
+    "parity_sandbox_india",
 ]
 
 

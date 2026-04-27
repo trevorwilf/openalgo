@@ -105,6 +105,8 @@ export interface BrokerCapabilities {
   supports_extended_hours: boolean
   supports_short_selling: boolean
   supports_analyzer: boolean
+  // v5 Phase 4 — sandbox/paper-trading feature flag (per-broker).
+  supports_sandbox: boolean
   features: Record<string, boolean>
 }
 
@@ -148,6 +150,7 @@ export function hasCapability(
     | 'supports_extended_hours'
     | 'supports_short_selling'
     | 'supports_analyzer'
+    | 'supports_sandbox'
     | 'leverage_config'
 ): boolean {
   if (!cap) return false

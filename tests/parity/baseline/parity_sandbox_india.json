@@ -1,0 +1,26 @@
+{
+  "base_currency": "INR",
+  "harness": "parity_sandbox_india",
+  "initial_funds": "1000000.00",
+  "partial_fills_supported": false,
+  "region_code": "india",
+  "settlement": {
+    "equity_2026-04-15": "2026-04-16",
+    "equity_friday_2026-04-17": "2026-04-18",
+    "option_2026-04-15": "2026-04-16"
+  },
+  "squareoff": {
+    "CNC_NSE_2026-04-15": null,
+    "MIS_NSE_2026-04-15": {
+      "hour": 15,
+      "minute": 15,
+      "tz": "Asia/Kolkata"
+    },
+    "NRML_NFO_2026-04-15": null
+  },
+  "supported_products": [
+    "CNC",
+    "MIS",
+    "NRML"
+  ]
+}
