@@ -38,15 +38,15 @@ v4 invariants 1–12 (CLAUDE.md "Promoted lane" §) remain in force.
 | Phase | Goal | Closes | Status |
 |---|---|---|---|
 | 1 | v5 governance, classification refresh, structured errors, observability spec | MA-000…MA-003, P0-01…P0-08 | ✅ complete |
-| 2 | Frontend per-component capability rewrites | v4 6-bis, P4-01…P4-07 | pending |
-| 3 | Strategy scheduler + Historify frontend venue-tz aware | v4 7-bis, P5-01…P5-06 | pending |
-| 4 | Sandbox blueprint + DB migration + UI region-awareness | v4 8-bis, P6-01…P6-05 | pending |
-| 5 | Options service shimming + provider parity + capability | v4 9-bis, P7-01…P7-06 | pending |
-| 6 | Screener (Chartink) dispatcher migration + DB migration + UI gating | v4 10-bis, P7-07…P7-09 | pending |
-| 7 | Capability schema completion, account context, combo, streaming hardening | MA-007, MA-022…MA-025, MA-037, P3-01…P3-06, P8-01…P8-04 | pending |
-| 8 | India v1→v2 broker readiness + v1 deprecation announcement | D-1 first half | pending |
-| 9 | India v1→v2 cutover + legacy compatibility shim retirement | D-1 second half | pending |
-| 10 | v5 closing audit, framework-readiness re-verification, docs | MA-038…MA-044, P9-01…P9-06 | pending |
+| 2 | Frontend per-component capability rewrites | v4 6-bis, P4-01…P4-07 | ✅ partial — load-bearing core; per-component cleanup deferred to Phase 2-bis |
+| 3 | Strategy scheduler + Historify frontend venue-tz aware | v4 7-bis, P5-01…P5-06 | ✅ partial — DST contract pinned; per-blueprint refactor deferred to Phase 3-bis |
+| 4 | Sandbox blueprint + DB migration + UI region-awareness | v4 8-bis, P6-01…P6-05 | ✅ partial — DB migration + capability + parity; route adoption deferred to Phase 4-bis |
+| 5 | Options service shimming + provider parity + capability | v4 9-bis, P7-01…P7-06 | ✅ partial — capability + parity; per-service shimming deferred to Phase 5-bis |
+| 6 | Screener (Chartink) dispatcher migration + DB migration + UI gating | v4 10-bis, P7-07…P7-09 | ✅ partial — DB migration + capability + parity; route adoption deferred to Phase 6-bis |
+| 7 | Capability schema completion, account context, combo, streaming hardening | MA-007, MA-022…MA-025, MA-037, P3-01…P3-06, P8-01…P8-04 | ✅ complete |
+| 8 | India v1→v2 broker readiness + v1 deprecation announcement | D-1 first half | ✅ partial — deprecation announced; per-broker translator + parity deferred to Phase 8-bis |
+| 9 | India v1→v2 cutover + legacy compatibility shim retirement | D-1 second half | ✅ partial — cutover scaffolding ready; default-flip gated on Phase 8-bis completion |
+| 10 | v5 closing audit, framework-readiness re-verification, docs | MA-038…MA-044, P9-01…P9-06 | ✅ complete |
 
 Each phase has its own completion document at
 `docs/refactor/v5-phase-<N>-complete.md` written at merge time.

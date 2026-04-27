@@ -9,6 +9,46 @@ Status: framework-only (Phase 8 v2 + Phase 6 v3 + Phase 11 v4).
 Plugin implementation deliberately out of scope per the v2/v3/v4
 prompts.
 
+## v5 framework-readiness extension (Phase 10)
+
+v5 closes the v4 deferred bis-phases and adds the structured-error
++ observability surface a real Webull plugin will emit. Webull-
+specific findings:
+
+* **Subaccount model** — `AccountContext.subaccount_id` already
+  models Webull's parent/sub split; the mock declares
+  `account_context_supports.subaccount_id=true`. A real Webull
+  plugin reads `parentId`/`subAccountId` from Webull's API and
+  populates the field.
+* **Streaming transport** — the mock declares the websocket-style
+  handle/lifecycle; real Webull also uses websocket. The Phase 10
+  closing audit verifies the lifecycle test passes for the mock
+  ahead of real-plugin work.
+* **Region restrictions** — Webull plugins declare
+  `supported_regions: ["us"]`; v5's `unsupported_region` /
+  `missing_region_context` errors fire correctly when an account
+  context lacks the resolved region.
+* **Combo types** — v5 Phase 7 made `supports_combo_types`
+  top-level on `BrokerCapabilities`; the mock Webull declares
+  `["SINGLE", "OCO", "OTO", "OTOCO"]` at top level. The combo
+  dispatcher's gate now fires on this list.
+
+v5 verification surface (mirrors the Schwab readiness extension):
+
+| Surface | Status | Test |
+|---|---|---|
+| Structured market-context error taxonomy (ADR 0029) | ✅ pass | `tests/contracts/test_v5_structured_errors_emitted.py` |
+| Promoted-request observability label set (ADR 0030) | ✅ pass | `tests/contracts/test_v5_observability_labels_complete.py` |
+| Combo single source of truth | ✅ pass | `tests/contracts/test_v5_combo_capability_single_source.py` |
+| Account context entitlement contract | ✅ pass | `tests/domain/test_v5_account_context_entitlements.py` |
+
+A real Webull plugin will additionally need:
+
+* `unsupported_capability` + `dimension="quantity_unit"` for
+  fractional/notional unsupported on certain account types.
+* `entitlement_required` for Webull options levels (especially
+  the unique 0DTE / multi-leg gates Webull applies per account).
+
 ## v4 framework-readiness extension (Phase 11, ADR 0023)
 
 v4 adds the following surfaces. Each maps to a contract test in

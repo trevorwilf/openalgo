@@ -9,6 +9,46 @@ Status: framework-only (Phase 8 v2 + Phase 6 v3 + Phase 11 v4).
 Plugin implementation deliberately out of scope per the v2/v3/v4
 prompts.
 
+## v5 framework-readiness extension (Phase 10)
+
+v5 closes the v4 deferred bis-phases and adds the structured-error
++ observability surface a real Schwab plugin will emit. Each new
+surface is verified by a v5 contract test:
+
+| Surface | Status | Test |
+|---|---|---|
+| Structured market-context error taxonomy (ADR 0029) | ✅ pass | `tests/contracts/test_v5_structured_errors_emitted.py` |
+| Promoted-request observability label set (ADR 0030) | ✅ pass | `tests/contracts/test_v5_observability_labels_complete.py` |
+| `BrokerCapabilities.supports_sandbox` declarable | ✅ pass | `tests/plugin_loader/test_v5_supports_sandbox_capability.py` |
+| `BrokerCapabilities.supports_options` declarable | ✅ pass | `tests/plugin_loader/test_v5_supports_options_capability.py` |
+| `BrokerCapabilities.supports_screener_providers` declarable | ✅ pass | `tests/plugin_loader/test_v5_supports_screener_capability.py` |
+| `BrokerCapabilities.supports_combo_types` (top-level, single source) | ✅ pass | `tests/contracts/test_v5_combo_capability_single_source.py` |
+| Account context entitlement contract | ✅ pass | `tests/domain/test_v5_account_context_entitlements.py` |
+| DST correctness for promoted venues (NY/London/Paris) | ✅ pass | `tests/contracts/test_v5_dst_correctness.py` |
+| `/api/v1/*` deprecation headers (Sunset, Deprecation) | ✅ pass | `tests/contracts/test_v5_india_v2_readiness.py::test_v1_route_emits_deprecation_headers` |
+| Dual-lane parity runner (`--lane v1\|v2`) | ✅ pass | `tests/contracts/test_v5_india_v2_default_on.py::test_run_parity_supports_lane_filter` |
+
+A real Schwab plugin will emit:
+
+* `unsupported_region`, `missing_region_context` — when an account's
+  region cannot be resolved before order admission.
+* `missing_translator` — if the SchwabBrokerTranslator is somehow
+  not registered (defensive; should never fire in production).
+* `unsupported_capability` with `dimension` ∈ `DIMENSIONS` — when
+  the order ticket UI sends a TIF / order type / session combination
+  Schwab does not support for the requested asset class.
+* `entitlement_required` — for Schwab options levels, market-data
+  entitlements, extended-hours access.
+* `unsupported_provider` with `feature` ∈ `FEATURES` — when the UI
+  asks for a feature Schwab does not provide (e.g., Chartink
+  screener).
+
+Every promoted Schwab request will emit one structured-log line
+with the canonical 10-label set (`region_code`, `broker_code`,
+`venue_code`, `instrument_id`, `currency`, `provider_code`,
+`capability_source`, `legacy_lane=false`, `route="v2"`,
+`request_id`). See `docs/observability/promoted_request_labels.md`.
+
 ## v4 framework-readiness extension (Phase 11, ADR 0023)
 
 v4 adds the following surfaces beyond what v3 already proved. Each
