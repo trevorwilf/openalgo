@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from domain.errors import DomainError, ErrorCode
 from services.options.providers.base import OptionsProvider
+from services.options.providers.eu import EUOptionsProvider
 from services.options.providers.india import IndiaOptionsProvider
+from services.options.providers.uk import UKOptionsProvider
 from services.options.providers.us import USOptionsProvider
 from utils.logging import get_logger
 
@@ -50,6 +52,8 @@ def clear_options_registry_for_tests() -> None:
 def install_default_options_providers() -> None:
     register_options_provider(IndiaOptionsProvider())
     register_options_provider(USOptionsProvider())
+    register_options_provider(EUOptionsProvider())
+    register_options_provider(UKOptionsProvider())
 
 
 install_default_options_providers()

@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from domain.errors import DomainError, ErrorCode
 from services.sandbox.providers.base import SandboxProvider
+from services.sandbox.providers.eu import EUSandboxProvider
 from services.sandbox.providers.india import IndiaSandboxProvider
+from services.sandbox.providers.uk import UKSandboxProvider
 from services.sandbox.providers.us import USSandboxProvider
 from utils.logging import get_logger
 
@@ -60,9 +62,12 @@ def clear_sandbox_registry_for_tests() -> None:
 
 
 def install_default_sandbox_providers() -> None:
-    """Register the India + US providers shipped in v4."""
+    """Register the India + US providers shipped in v4 plus the EU +
+    UK stubs added in v6 Phase 3."""
     register_sandbox_provider(IndiaSandboxProvider())
     register_sandbox_provider(USSandboxProvider())
+    register_sandbox_provider(EUSandboxProvider())
+    register_sandbox_provider(UKSandboxProvider())
 
 
 # Auto-install at import time so the dispatcher is usable as soon as

@@ -49,8 +49,12 @@ def test_dispatcher_module_exposes_documented_surface() -> None:
         assert hasattr(d, name), f"options dispatcher missing: {name}"
 
 
-@pytest.mark.parametrize("region", ["india", "us"])
+@pytest.mark.parametrize("region", ["india", "us", "eu", "uk"])
 def test_default_provider_registered(region: str) -> None:
+    """v6 Phase 2 registered india + us; v6 Phase 3 added eu + uk
+    options provider stubs (every method on the stubs raises a
+    structured ``option_chain_disabled_in_region`` error per ADR
+    0027)."""
     provider = get_options_provider(region)
     assert isinstance(provider, OptionsProvider), (
         f"{region} options provider does not satisfy OptionsProvider Protocol"
@@ -58,15 +62,14 @@ def test_default_provider_registered(region: str) -> None:
     assert provider.region_code.lower() == region
 
 
-def test_eu_provider_not_yet_registered_returns_structured_error() -> None:
+def test_unknown_region_returns_structured_error() -> None:
     with pytest.raises(OptionsProviderNotRegistered) as exc_info:
-        get_options_provider("eu")
+        get_options_provider("zz_unknown_region")
     assert exc_info.value.code == ErrorCode.OPTIONS_PROVIDER_NOT_REGISTERED
-    assert exc_info.value.region_code == "eu"
+    assert exc_info.value.region_code == "zz_unknown_region"
 
 
 def test_unregistered_region_or_none_helper_returns_none() -> None:
-    assert get_options_provider_or_none("eu") is None
     assert get_options_provider_or_none("zz_unknown") is None
 
 
