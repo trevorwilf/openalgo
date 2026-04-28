@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **840**.
+Total classified files: **846**.
 
 Classification semantics:
 
@@ -317,14 +317,20 @@ Classification semantics:
 - `websocket_proxy/port_check.py`
 - `websocket_proxy/server.py`
 
-## REGION_PLUGIN (7 files)
+## REGION_PLUGIN (13 files)
 
+- `services/options/providers/eu/__init__.py`
 - `services/options/providers/india/__init__.py`
+- `services/options/providers/uk/__init__.py`
 - `services/options/providers/us/__init__.py`
+- `services/sandbox/providers/eu/__init__.py`
 - `services/sandbox/providers/india/__init__.py`
+- `services/sandbox/providers/uk/__init__.py`
 - `services/sandbox/providers/us/__init__.py`
+- `services/screeners/providers/eu/__init__.py`
 - `services/screeners/providers/india/__init__.py`
 - `services/screeners/providers/india/chartink.py`
+- `services/screeners/providers/uk/__init__.py`
 - `services/screeners/providers/us/__init__.py`
 
 ## BROKER_PLUGIN (533 files)

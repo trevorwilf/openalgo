@@ -153,8 +153,11 @@ def test_dispatcher_resolves_us():
 def test_dispatcher_failclosed_for_unknown():
     dispatcher.clear_options_registry_for_tests()
     dispatcher.install_default_options_providers()
+    # v6 Phase 3 added eu + uk options provider stubs; use a region
+    # still outside the four-region matrix to verify the fail-closed
+    # path.
     with pytest.raises(dispatcher.OptionsProviderNotRegistered) as exc:
-        dispatcher.get_options_provider("eu")
+        dispatcher.get_options_provider("zz_unregistered_region")
     assert exc.value.code == "options_provider_not_registered"
 
 

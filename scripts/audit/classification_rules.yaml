@@ -187,11 +187,16 @@ rules:
   - path: services/options/dispatcher.py
     classification: PROMOTED_CORE
 
-  # Screeners (Phase 10 of v4) — provider directories pre-allowlisted.
-  # owner: phase-10 — pre-creation allowlist; populated by Phase 10.
+  # Screeners (Phase 10 of v4 + Phase 3 of v6) — provider directories
+  # pre-allowlisted. india + us shipped in v4; eu + uk added in v6.
+  # owner: phase-10 / v6-phase-3 — populated per phase.
   - path_prefix: services/screeners/providers/india/
     classification: REGION_PLUGIN
   - path_prefix: services/screeners/providers/us/
+    classification: REGION_PLUGIN
+  - path_prefix: services/screeners/providers/eu/
+    classification: REGION_PLUGIN
+  - path_prefix: services/screeners/providers/uk/
     classification: REGION_PLUGIN
   - path_prefix: services/screeners/providers/
     classification: PROMOTED_CORE

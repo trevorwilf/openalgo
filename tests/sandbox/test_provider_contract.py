@@ -106,12 +106,16 @@ def test_dispatcher_resolves_us_provider():
 def test_dispatcher_failclosed_for_unknown_region():
     dispatcher.clear_sandbox_registry_for_tests()
     dispatcher.install_default_sandbox_providers()
+    # v6 Phase 3 added eu + uk sandbox provider stubs; use a region
+    # still outside the four-region matrix to verify the fail-closed
+    # path.
     with pytest.raises(dispatcher.SandboxProviderNotRegistered) as exc:
-        dispatcher.get_sandbox_provider("eu")
+        dispatcher.get_sandbox_provider("zz_unregistered_region")
     assert exc.value.code == "sandbox_provider_not_registered"
 
 
 def test_dispatcher_get_or_none_returns_none_for_unknown():
     dispatcher.clear_sandbox_registry_for_tests()
     dispatcher.install_default_sandbox_providers()
-    assert dispatcher.get_sandbox_provider_or_none("eu") is None
+    # v6 Phase 3 made "eu" registered; use an out-of-matrix code.
+    assert dispatcher.get_sandbox_provider_or_none("zz_unregistered_region") is None
