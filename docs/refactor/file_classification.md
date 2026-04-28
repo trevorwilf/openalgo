@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **846**.
+Total classified files: **851**.
 
 Classification semantics:
 
@@ -333,7 +333,7 @@ Classification semantics:
 - `services/screeners/providers/uk/__init__.py`
 - `services/screeners/providers/us/__init__.py`
 
-## BROKER_PLUGIN (533 files)
+## BROKER_PLUGIN (538 files)
 
 - `broker/__init__.py`
 - `broker/_mock_schwab_like/__init__.py`
@@ -397,6 +397,7 @@ Classification semantics:
 - `broker/angel/streaming/angel_adapter.py`
 - `broker/angel/streaming/angel_mapping.py`
 - `broker/angel/streaming/smartWebSocketV2.py`
+- `broker/angel/translator.py`
 - `broker/compositedge/api/__init__.py`
 - `broker/compositedge/api/auth_api.py`
 - `broker/compositedge/api/data.py`
@@ -463,6 +464,7 @@ Classification semantics:
 - `broker/dhan/streaming/dhan_adapter.py`
 - `broker/dhan/streaming/dhan_mapping.py`
 - `broker/dhan/streaming/dhan_websocket.py`
+- `broker/dhan/translator.py`
 - `broker/dhan_sandbox/__init__.py`
 - `broker/dhan_sandbox/api/__init__.py`
 - `broker/dhan_sandbox/api/auth_api.py`
@@ -558,6 +560,7 @@ Classification semantics:
 - `broker/fyers/streaming/fyers_token_converter.py`
 - `broker/fyers/streaming/fyers_websocket_adapter.py`
 - `broker/fyers/streaming/msg_pb2.py`
+- `broker/fyers/translator.py`
 - `broker/groww/__init__.py`
 - `broker/groww/api/__init__.py`
 - `broker/groww/api/auth_api.py`
@@ -824,6 +827,7 @@ Classification semantics:
 - `broker/upstox/streaming/upstox_adapter.py`
 - `broker/upstox/streaming/upstox_client.py`
 - `broker/upstox/streaming/upstox_mapping.py`
+- `broker/upstox/translator.py`
 - `broker/wisdom/api/__init__.py`
 - `broker/wisdom/api/auth_api.py`
 - `broker/wisdom/api/data.py`
@@ -868,6 +872,7 @@ Classification semantics:
 - `broker/zerodha/streaming/zerodha_adapter.py`
 - `broker/zerodha/streaming/zerodha_mapping.py`
 - `broker/zerodha/streaming/zerodha_websocket.py`
+- `broker/zerodha/translator.py`
 
 ## COMPATIBILITY_SHIM (7 files)
 

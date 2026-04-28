@@ -49,6 +49,12 @@ HARNESSES = [
     "parity_options_india",
     # v5 Phase 6 (ADR 0028 follow-on) — India Chartink screener parity.
     "parity_chartink_india",
+    # v6 Phase 5 — per-broker v2 translator parity, popularity order.
+    "parity_v2_zerodha_india",
+    "parity_v2_angel_india",
+    "parity_v2_dhan_india",
+    "parity_v2_upstox_india",
+    "parity_v2_fyers_india",
 ]
 
 

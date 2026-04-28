@@ -1,0 +1,135 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "disclosed_quantity": "0",
+        "instrument_token": "12345",
+        "is_amo": "false",
+        "order_type": "MARKET",
+        "price": "0",
+        "product": "D",
+        "quantity": "10",
+        "tag": "string",
+        "transaction_type": "BUY",
+        "trigger_price": "0",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "disclosed_quantity": "0",
+        "instrument_token": "12345",
+        "is_amo": "false",
+        "order_type": "LIMIT",
+        "price": "2950.50",
+        "product": "I",
+        "quantity": "5",
+        "tag": "string",
+        "transaction_type": "BUY",
+        "trigger_price": "0",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "disclosed_quantity": "0",
+        "instrument_token": "12345",
+        "is_amo": "false",
+        "order_type": "LIMIT",
+        "price": "200.00",
+        "product": "D",
+        "quantity": "15",
+        "tag": "string",
+        "transaction_type": "SELL",
+        "trigger_price": "0",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "disclosed_quantity": "0",
+        "instrument_token": "12345",
+        "is_amo": "false",
+        "order_type": "SL",
+        "price": "1500.00",
+        "product": "I",
+        "quantity": "20",
+        "tag": "string",
+        "transaction_type": "BUY",
+        "trigger_price": "1495.00",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "disclosed_quantity": "0",
+        "instrument_token": "12345",
+        "is_amo": "false",
+        "order_type": "SL-M",
+        "price": "0",
+        "product": "I",
+        "quantity": "5",
+        "tag": "string",
+        "transaction_type": "SELL",
+        "trigger_price": "3800.00",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "disclosed_quantity": "0",
+        "instrument_token": "12345",
+        "is_amo": "false",
+        "order_type": "MARKET",
+        "price": "0",
+        "product": "D",
+        "quantity": "1",
+        "tag": "string",
+        "transaction_type": "BUY",
+        "trigger_price": "0",
+        "validity": "IOC"
+      }
+    }
+  ],
+  "broker_code": "upstox",
+  "harness": "parity_v2_upstox_india",
+  "rejected": [
+    {
+      "broker_code": "upstox",
+      "capability_name": "time_in_force",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "upstox",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "upstox",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "data": {
+        "order_id": "240319000123456"
+      },
+      "status": "success"
+    },
+    "order_id": "240319000123456",
+    "status": "success"
+  }
+}
