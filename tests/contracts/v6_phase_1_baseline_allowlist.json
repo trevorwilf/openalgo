@@ -1,0 +1,342 @@
+{
+  "_comment": "Frontend literal scan allowlist. Each entry is a frontend-relative POSIX path exempted from the India-literal scan. Phase 1 of v3 establishes the containment perimeter: existing India-specific UI surfaces are allowlisted; future code that adds an India literal in a non-allowlisted file fails the scan. Phase 5 region-gating reduces the entries.",
+  "_schema": "{ allowlist: [{ path: string, reason: string }] }",
+  "allowlist": [
+    {
+      "path": "src/lib/india_legacy/legacy_fallback_exchanges.ts",
+      "reason": "Last-resort India fallback list; gated behind India region check at the call site."
+    },
+    {
+      "path": "src/api/chartink.ts",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/api/iv-chart.ts",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/api/python-strategy.ts",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/api/strategy-portfolio.ts",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/ExpiryNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/GetDepthNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/GetQuoteNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/HistoryNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/MultiQuotesNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/OpenPositionNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/OptionChainNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/OptionsMultiOrderNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/OptionsOrderNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/OptionSymbolNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/PlaceOrderNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/PriceAlertNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/SmartOrderNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/SplitOrderNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/SubscribeDepthNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/SubscribeLTPNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/SubscribeQuoteNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/SymbolNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/nodes/SyntheticFutureNode.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/flow/panels/ConfigPanel.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/option-chain/ColumnReorderPanel.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/playground/MessageComposer.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/strategy-builder/EditLegDialog.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/strategy-builder/GreeksTab.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/strategy-builder/ManualLegBuilder.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/strategy-builder/PayoffChart.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/strategy-builder/PnLTab.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/strategy-builder/PositionsPanel.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/strategy-builder/TemplateDialog.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/trading/PlaceOrderDialog.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/components/trading/QuoteHeader.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/hooks/useOptionChainLive.ts",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/hooks/useSupportedExchanges.ts",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/lib/flow/constants.ts",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/lib/strategyMath.ts",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/lib/strategyTemplates.ts",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/lib/utils.ts",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/lib/format/currency.ts",
+      "reason": "v5 Phase 2 — multi-region currency formatter; INR appears only as one of N currency codes in the per-currency locale dispatch table (parity with the en-IN grouping that pre-existing INR users see)."
+    },
+    {
+      "path": "src/lib/format/timezone.ts",
+      "reason": "v5 Phase 2 — multi-region timezone display helper; Asia/Kolkata + IST appear only as one of N entries in the IANA-to-short-label dispatch table."
+    },
+    {
+      "path": "src/pages/ActionCenter.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/admin/AdminIndex.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/admin/FreezeQty.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/admin/MarketTimings.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/Analyzer.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/chartink/ChartinkIndex.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/chartink/ConfigureChartinkSymbols.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/chartink/NewChartinkStrategy.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/chartink/ViewChartinkStrategy.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/CustomStraddle.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/Faq.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/GEXDashboard.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/GoCharting.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/HealthMonitor.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/Historify.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/HistorifyCharts.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/IVChart.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/IVSmile.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/MasterContract.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/monitoring/LatencyDashboard.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/monitoring/SecurityDashboard.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/OIProfile.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/OITracker.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/OrderBook.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/Positions.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/python-strategy/NewPythonStrategy.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/python-strategy/PythonStrategyGuide.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/python-strategy/PythonStrategyIndex.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/python-strategy/SchedulePythonStrategy.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/Sandbox.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/SandboxPnL.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/StraddleChart.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/strategy/ConfigureSymbols.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/StrategyBuilder.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/StrategyPortfolio.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/telegram/TelegramConfig.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/Token.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/Tools.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/TradeBook.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    },
+    {
+      "path": "src/pages/TradingView.tsx",
+      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
+    }
+  ]
+}
