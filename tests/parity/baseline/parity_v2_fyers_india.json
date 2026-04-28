@@ -1,0 +1,147 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "disclosedQty": 0,
+        "limitPrice": 0.0,
+        "offlineOrder": false,
+        "orderTag": "openalgo",
+        "productType": "CNC",
+        "qty": 10,
+        "side": 1,
+        "stopLoss": 0,
+        "stopPrice": 0.0,
+        "symbol": "SBIN",
+        "takeProfit": 0,
+        "type": 2,
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "disclosedQty": 0,
+        "limitPrice": 2950.5,
+        "offlineOrder": false,
+        "orderTag": "openalgo",
+        "productType": "INTRADAY",
+        "qty": 5,
+        "side": 1,
+        "stopLoss": 0,
+        "stopPrice": 0.0,
+        "symbol": "RELIANCE",
+        "takeProfit": 0,
+        "type": 1,
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "disclosedQty": 0,
+        "limitPrice": 200.0,
+        "offlineOrder": false,
+        "orderTag": "openalgo",
+        "productType": "MARGIN",
+        "qty": 15,
+        "side": -1,
+        "stopLoss": 0,
+        "stopPrice": 0.0,
+        "symbol": "BANKNIFTY24APR2447500CE",
+        "takeProfit": 0,
+        "type": 1,
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "disclosedQty": 0,
+        "limitPrice": 1500.0,
+        "offlineOrder": false,
+        "orderTag": "openalgo",
+        "productType": "INTRADAY",
+        "qty": 20,
+        "side": 1,
+        "stopLoss": 0,
+        "stopPrice": 1495.0,
+        "symbol": "INFY",
+        "takeProfit": 0,
+        "type": 4,
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "disclosedQty": 0,
+        "limitPrice": 0.0,
+        "offlineOrder": false,
+        "orderTag": "openalgo",
+        "productType": "INTRADAY",
+        "qty": 5,
+        "side": -1,
+        "stopLoss": 0,
+        "stopPrice": 3800.0,
+        "symbol": "TCS",
+        "takeProfit": 0,
+        "type": 3,
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "disclosedQty": 0,
+        "limitPrice": 0.0,
+        "offlineOrder": false,
+        "orderTag": "openalgo",
+        "productType": "CNC",
+        "qty": 1,
+        "side": 1,
+        "stopLoss": 0,
+        "stopPrice": 0.0,
+        "symbol": "HDFCBANK",
+        "takeProfit": 0,
+        "type": 2,
+        "validity": "IOC"
+      }
+    }
+  ],
+  "broker_code": "fyers",
+  "harness": "parity_v2_fyers_india",
+  "rejected": [
+    {
+      "broker_code": "fyers",
+      "capability_name": "time_in_force",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "fyers",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "fyers",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "data": {
+        "id": "240319000123456"
+      },
+      "s": "ok"
+    },
+    "order_id": "240319000123456",
+    "status": "ACCEPTED"
+  }
+}

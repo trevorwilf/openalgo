@@ -1,0 +1,163 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "disclosed_quantity": "0",
+        "exchange": "NSE",
+        "market_protection": "-1",
+        "order_type": "MARKET",
+        "price": "0",
+        "product": "CNC",
+        "quantity": "10",
+        "tag": "openalgo",
+        "tradingsymbol": "SBIN",
+        "transaction_type": "BUY",
+        "trigger_price": "0",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "disclosed_quantity": "0",
+        "exchange": "NSE",
+        "market_protection": "-1",
+        "order_type": "LIMIT",
+        "price": "2950.50",
+        "product": "MIS",
+        "quantity": "5",
+        "tag": "openalgo",
+        "tradingsymbol": "RELIANCE",
+        "transaction_type": "BUY",
+        "trigger_price": "0",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "disclosed_quantity": "0",
+        "exchange": "NFO",
+        "market_protection": "-1",
+        "order_type": "LIMIT",
+        "price": "200.00",
+        "product": "NRML",
+        "quantity": "15",
+        "tag": "openalgo",
+        "tradingsymbol": "BANKNIFTY24APR2447500CE",
+        "transaction_type": "SELL",
+        "trigger_price": "0",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "disclosed_quantity": "0",
+        "exchange": "NSE",
+        "market_protection": "-1",
+        "order_type": "SL",
+        "price": "1500.00",
+        "product": "MIS",
+        "quantity": "20",
+        "tag": "openalgo",
+        "tradingsymbol": "INFY",
+        "transaction_type": "BUY",
+        "trigger_price": "1495.00",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "disclosed_quantity": "0",
+        "exchange": "NSE",
+        "market_protection": "-1",
+        "order_type": "SL-M",
+        "price": "0",
+        "product": "MIS",
+        "quantity": "5",
+        "tag": "openalgo",
+        "tradingsymbol": "TCS",
+        "transaction_type": "SELL",
+        "trigger_price": "3800.00",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "disclosed_quantity": "0",
+        "exchange": "NSE",
+        "market_protection": "-1",
+        "order_type": "MARKET",
+        "price": "0",
+        "product": "CNC",
+        "quantity": "1",
+        "tag": "openalgo",
+        "tradingsymbol": "HDFCBANK",
+        "transaction_type": "BUY",
+        "trigger_price": "0",
+        "validity": "IOC"
+      }
+    },
+    {
+      "label": "tagged_market_order",
+      "native": {
+        "disclosed_quantity": "0",
+        "exchange": "NSE",
+        "market_protection": "-1",
+        "order_type": "MARKET",
+        "price": "0",
+        "product": "CNC",
+        "quantity": "100",
+        "tag": "swing-v2",
+        "tradingsymbol": "WIPRO",
+        "transaction_type": "BUY",
+        "trigger_price": "0",
+        "validity": "DAY"
+      }
+    }
+  ],
+  "broker_code": "zerodha",
+  "harness": "parity_v2_zerodha_india",
+  "rejected": [
+    {
+      "broker_code": "zerodha",
+      "capability_name": "order_type",
+      "expected_dimension": "order_type",
+      "label": "trailing_stop_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "zerodha",
+      "capability_name": "time_in_force",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "zerodha",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "zerodha",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "order_id": "240319000123456",
+      "status": "success"
+    },
+    "order_id": "240319000123456",
+    "status": "success"
+  }
+}

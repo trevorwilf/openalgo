@@ -1,0 +1,153 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "disclosedquantity": "0",
+        "duration": "DAY",
+        "exchange": "NSE",
+        "ordertype": "MARKET",
+        "price": "0",
+        "producttype": "DELIVERY",
+        "quantity": "10",
+        "squareoff": "0",
+        "stoploss": "0",
+        "symboltoken": "12345",
+        "tradingsymbol": "SBIN",
+        "transactiontype": "BUY",
+        "triggerprice": "0",
+        "variety": "NORMAL"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "disclosedquantity": "0",
+        "duration": "DAY",
+        "exchange": "NSE",
+        "ordertype": "LIMIT",
+        "price": "2950.50",
+        "producttype": "INTRADAY",
+        "quantity": "5",
+        "squareoff": "0",
+        "stoploss": "0",
+        "symboltoken": "12345",
+        "tradingsymbol": "RELIANCE",
+        "transactiontype": "BUY",
+        "triggerprice": "0",
+        "variety": "NORMAL"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "disclosedquantity": "0",
+        "duration": "DAY",
+        "exchange": "NFO",
+        "ordertype": "LIMIT",
+        "price": "200.00",
+        "producttype": "CARRYFORWARD",
+        "quantity": "15",
+        "squareoff": "0",
+        "stoploss": "0",
+        "symboltoken": "12345",
+        "tradingsymbol": "BANKNIFTY24APR2447500CE",
+        "transactiontype": "SELL",
+        "triggerprice": "0",
+        "variety": "NORMAL"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "disclosedquantity": "0",
+        "duration": "DAY",
+        "exchange": "NSE",
+        "ordertype": "STOPLOSS_LIMIT",
+        "price": "1500.00",
+        "producttype": "INTRADAY",
+        "quantity": "20",
+        "squareoff": "0",
+        "stoploss": "1495.00",
+        "symboltoken": "12345",
+        "tradingsymbol": "INFY",
+        "transactiontype": "BUY",
+        "triggerprice": "1495.00",
+        "variety": "STOPLOSS"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "disclosedquantity": "0",
+        "duration": "DAY",
+        "exchange": "NSE",
+        "ordertype": "STOPLOSS_MARKET",
+        "price": "0",
+        "producttype": "INTRADAY",
+        "quantity": "5",
+        "squareoff": "0",
+        "stoploss": "3800.00",
+        "symboltoken": "12345",
+        "tradingsymbol": "TCS",
+        "transactiontype": "SELL",
+        "triggerprice": "3800.00",
+        "variety": "STOPLOSS"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "disclosedquantity": "0",
+        "duration": "IOC",
+        "exchange": "NSE",
+        "ordertype": "MARKET",
+        "price": "0",
+        "producttype": "DELIVERY",
+        "quantity": "1",
+        "squareoff": "0",
+        "stoploss": "0",
+        "symboltoken": "12345",
+        "tradingsymbol": "HDFCBANK",
+        "transactiontype": "BUY",
+        "triggerprice": "0",
+        "variety": "NORMAL"
+      }
+    }
+  ],
+  "broker_code": "angel",
+  "harness": "parity_v2_angel_india",
+  "rejected": [
+    {
+      "broker_code": "angel",
+      "capability_name": "time_in_force",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "angel",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "angel",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "data": {
+        "orderid": "240319000123456"
+      },
+      "status": true
+    },
+    "order_id": "240319000123456",
+    "status": "ACCEPTED"
+  }
+}

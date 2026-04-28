@@ -1,0 +1,120 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "dhanClientId": "dhan-test-account",
+        "exchangeSegment": "NSE_EQ",
+        "orderType": "MARKET",
+        "productType": "CNC",
+        "quantity": 10,
+        "securityId": "12345",
+        "transactionType": "BUY",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "dhanClientId": "dhan-test-account",
+        "exchangeSegment": "NSE_EQ",
+        "orderType": "LIMIT",
+        "price": 2950.5,
+        "productType": "INTRADAY",
+        "quantity": 5,
+        "securityId": "12345",
+        "transactionType": "BUY",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "dhanClientId": "dhan-test-account",
+        "exchangeSegment": "NSE_FNO",
+        "orderType": "LIMIT",
+        "price": 200.0,
+        "productType": "MARGIN",
+        "quantity": 15,
+        "securityId": "12345",
+        "transactionType": "SELL",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "dhanClientId": "dhan-test-account",
+        "exchangeSegment": "NSE_EQ",
+        "orderType": "STOP_LOSS",
+        "price": 1500.0,
+        "productType": "INTRADAY",
+        "quantity": 20,
+        "securityId": "12345",
+        "transactionType": "BUY",
+        "triggerPrice": 1495.0,
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "dhanClientId": "dhan-test-account",
+        "exchangeSegment": "NSE_EQ",
+        "orderType": "STOP_LOSS_MARKET",
+        "productType": "INTRADAY",
+        "quantity": 5,
+        "securityId": "12345",
+        "transactionType": "SELL",
+        "triggerPrice": 3800.0,
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "dhanClientId": "dhan-test-account",
+        "exchangeSegment": "NSE_EQ",
+        "orderType": "MARKET",
+        "productType": "CNC",
+        "quantity": 1,
+        "securityId": "12345",
+        "transactionType": "BUY",
+        "validity": "IOC"
+      }
+    }
+  ],
+  "broker_code": "dhan",
+  "harness": "parity_v2_dhan_india",
+  "rejected": [
+    {
+      "broker_code": "dhan",
+      "capability_name": "time_in_force",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "dhan",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "dhan",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "orderId": "112345678",
+      "orderStatus": "PENDING"
+    },
+    "order_id": "112345678",
+    "status": "PENDING"
+  }
+}
