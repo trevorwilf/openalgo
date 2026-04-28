@@ -218,6 +218,54 @@ remain alive for the operator-controlled sunset window;
 `API_V2_<INDIA_BROKER>` defaults stay OFF until per-broker
 translators land in Phase 8-bis (v6).
 
+ADR 0031 (v6 of the refactor) closes the framework-completeness gaps
+surfaced by two independent expert reviews after v5: it adds 6 v6-
+specific invariants and the v6 closing-invariant gate.
+
+* **ADR 0031** — v6 scope + closing invariants. Records resolved
+  decisions, the EU + UK provider stub additions, the four-region
+  matrix completion, and the dispatcher-only contract surface.
+
+v6 invariants (additive to v4 1–12 and v5-1, v5-2):
+
+1. (v6-1) Four-region matrix complete: every region (`india`, `us`,
+   `eu`, `uk`) has a registered sandbox provider AND a registered
+   options provider. Screener providers may be region-typed or
+   provider-typed per ADR 0028.
+2. (v6-2) Non-India regions never silently fall back to India:
+   non-India sandbox providers carry no INR / India products / ₹10L
+   default; non-India options providers declare non-India region;
+   non-India region plugins use non-India currency / tz / venues.
+3. (v6-3) Every region plugin satisfies the same contract:
+   required top-level fields, required venue fields, required
+   session fields, required symbol_display fields.
+4. (v6-4) Frontend literal-scan allowlist may shrink (per-component
+   cleanup) but never grows. Phase 1 baseline pins the watermark.
+5. (v6-5) The `useVenueTimezone` hook is available at
+   `frontend/src/hooks/useVenueTimezone.ts` and re-exports the v5
+   Phase 2 capability-driven helpers.
+6. (v6-6) Dispatcher-only contract surfaces are locked at the
+   contract level for sandbox / options / screener / strategy-
+   scheduler. Per-surface caller migration (Phase 2-bis) lands per-
+   PR with India parity guard.
+
+The v6 closing invariant gate is
+`tests/contracts/test_v6_closing_invariants.py` — runs every v6
+invariant in one place plus re-runs the v5 closing test. It must
+pass before declaring v6 complete.
+
+What v7 should consider:
+
+* Phases 5/6/7 of v6 (30 India broker × per-broker translator +
+  parity harness) — deferred from single-session v6 execution.
+* Phase 1-bis (frontend per-component cleanup), Phase 2-bis
+  (per-surface dispatcher migration), Phase 4-bis (helper retirement
+  + mock plugin extension) — deferred from v6 single-session work.
+* Real Schwab / Webull / Alpaca / EU / UK plugins.
+* `/api/v1/*` removal after operator-controlled sunset.
+* Multi-broker-per-instance.
+* APAC ex-India / LATAM region plugins.
+
 ### Legacy lane (frozen)
 
 Do not add features here; bug fixes and compliance only. The lane is
