@@ -27,6 +27,10 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import {
+  useVenueTimezone,
+  useVenueTimezoneLabel,
+} from '@/hooks/useVenueTimezone'
 import { showToast } from '@/utils/toast'
 import {
   acknowledgeAlert,
@@ -121,13 +125,21 @@ function StatusIcon({ status }: { status: 'pass' | 'warn' | 'fail' | 'unknown' }
   return <WifiOff className="h-4 w-4 text-muted-foreground" />
 }
 
-const IST_TIME_ZONE = 'Asia/Kolkata'
-
-function formatIstDateTime(timestamp: string, options?: Intl.DateTimeFormatOptions): string {
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) return '-'
-  return new Intl.DateTimeFormat('en-IN', {
-    timeZone: IST_TIME_ZONE,
+/**
+ * v6 Phase 1-bis — venue-aware timestamp formatting.
+ *
+ * Builds an ``Intl.DateTimeFormat`` for the active broker's venue
+ * timezone (falling back to UTC when no broker is connected). Locale
+ * is left unset so the user's browser locale chooses the date format
+ * style — India users see Indian English, US users see American
+ * English, etc.
+ */
+function buildDateTimeFormatter(
+  timeZone: string,
+  options?: Intl.DateTimeFormatOptions,
+): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -136,11 +148,25 @@ function formatIstDateTime(timestamp: string, options?: Intl.DateTimeFormatOptio
     second: '2-digit',
     hour12: true,
     ...options,
-  }).format(date)
+  })
 }
 
-function formatIstTime(timestamp: string): string {
-  return formatIstDateTime(timestamp, { year: undefined, month: undefined, day: undefined })
+function formatVenueDateTime(
+  timestamp: string,
+  timeZone: string,
+  options?: Intl.DateTimeFormatOptions,
+): string {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return '-'
+  return buildDateTimeFormatter(timeZone, options).format(date)
+}
+
+function formatVenueTime(timestamp: string, timeZone: string): string {
+  return formatVenueDateTime(timestamp, timeZone, {
+    year: undefined,
+    month: undefined,
+    day: undefined,
+  })
 }
 
 // Check if dark mode is active
@@ -157,6 +183,11 @@ export default function HealthMonitor() {
   const [refreshing, setRefreshing] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [tabVisible, setTabVisible] = useState(true)
+
+  // v6 Phase 1-bis — venue-aware timezone for timestamp display.
+  // Falls back to UTC when no broker is connected.
+  const venueTimezone = useVenueTimezone() ?? 'UTC'
+  const venueTimezoneLabel = useVenueTimezoneLabel() ?? 'UTC'
 
   // Chart refs
   const fdChartContainerRef = useRef<HTMLDivElement>(null)
@@ -462,7 +493,7 @@ export default function HealthMonitor() {
               System Status: {currentMetrics.overall_status.toUpperCase()}
             </p>
             <p className="text-sm text-muted-foreground">
-              Last updated (IST): {formatIstDateTime(currentMetrics.timestamp)}
+              Last updated ({venueTimezoneLabel}): {formatVenueDateTime(currentMetrics.timestamp, venueTimezone)}
             </p>
           </div>
         </div>
@@ -809,7 +840,7 @@ export default function HealthMonitor() {
               {historicalMetrics.slice(-20).reverse().map((metric, idx) => (
                 <TableRow key={idx}>
                   <TableCell className="font-mono text-xs">
-                    {formatIstTime(metric.timestamp)}
+                    {formatVenueTime(metric.timestamp, venueTimezone)}
                   </TableCell>
                   <TableCell className="text-right">{metric.fd_count}</TableCell>
                   <TableCell className="text-right">{metric.memory_rss_mb.toFixed(1)}</TableCell>

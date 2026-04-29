@@ -1,6 +1,7 @@
 import { ArrowLeft, CheckCircle, Download, Gauge, RefreshCw, XCircle, Zap } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useVenueTimezone } from '@/hooks/useVenueTimezone'
 import { showToast } from '@/utils/toast'
 import { webClient } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
@@ -73,6 +74,9 @@ export default function LatencyDashboard() {
   const [selectedOrder, setSelectedOrder] = useState<LatencyLog | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
+  // v6 Phase 1-bis — venue-aware timezone for timestamp display.
+  const venueTimezone = useVenueTimezone() ?? 'UTC'
+
   useEffect(() => {
     fetchData()
     // Auto-refresh every 30 seconds
@@ -124,8 +128,8 @@ export default function LatencyDashboard() {
   const formatTimestamp = (timestamp: string) => {
     try {
       const date = new Date(timestamp)
-      return date.toLocaleString('en-IN', {
-        timeZone: 'Asia/Kolkata',
+      return date.toLocaleString(undefined, {
+        timeZone: venueTimezone,
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
