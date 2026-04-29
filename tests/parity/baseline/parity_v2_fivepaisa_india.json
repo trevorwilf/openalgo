@@ -1,0 +1,135 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "AHPlaced": "N",
+        "DisQty": 0,
+        "Exchange": "N",
+        "ExchangeType": "C",
+        "IsIntraday": false,
+        "OrderType": "B",
+        "Price": 0.0,
+        "Qty": 10,
+        "RemoteOrderID": "OpenAlgo",
+        "ScripCode": "12345",
+        "StopLossPrice": 0.0
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "AHPlaced": "N",
+        "DisQty": 0,
+        "Exchange": "N",
+        "ExchangeType": "C",
+        "IsIntraday": true,
+        "OrderType": "B",
+        "Price": 2950.5,
+        "Qty": 5,
+        "RemoteOrderID": "OpenAlgo",
+        "ScripCode": "12345",
+        "StopLossPrice": 0.0
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "AHPlaced": "N",
+        "DisQty": 0,
+        "Exchange": "N",
+        "ExchangeType": "D",
+        "IsIntraday": false,
+        "OrderType": "S",
+        "Price": 200.0,
+        "Qty": 15,
+        "RemoteOrderID": "OpenAlgo",
+        "ScripCode": "12345",
+        "StopLossPrice": 0.0
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "AHPlaced": "N",
+        "DisQty": 0,
+        "Exchange": "N",
+        "ExchangeType": "C",
+        "IsIntraday": true,
+        "OrderType": "B",
+        "Price": 1500.0,
+        "Qty": 20,
+        "RemoteOrderID": "OpenAlgo",
+        "ScripCode": "12345",
+        "StopLossPrice": 1495.0
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "AHPlaced": "N",
+        "DisQty": 0,
+        "Exchange": "N",
+        "ExchangeType": "C",
+        "IsIntraday": true,
+        "OrderType": "S",
+        "Price": 0.0,
+        "Qty": 5,
+        "RemoteOrderID": "OpenAlgo",
+        "ScripCode": "12345",
+        "StopLossPrice": 3800.0
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "AHPlaced": "N",
+        "DisQty": 0,
+        "Exchange": "N",
+        "ExchangeType": "C",
+        "IsIntraday": false,
+        "OrderType": "B",
+        "Price": 0.0,
+        "Qty": 1,
+        "RemoteOrderID": "OpenAlgo",
+        "ScripCode": "12345",
+        "StopLossPrice": 0.0
+      }
+    }
+  ],
+  "broker_code": "fivepaisa",
+  "harness": "parity_v2_fivepaisa_india",
+  "rejected": [
+    {
+      "broker_code": "fivepaisa",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "fivepaisa",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "fivepaisa",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "body": {
+        "BrokerOrderID": "240319000123456",
+        "Status": "0"
+      }
+    },
+    "order_id": "240319000123456",
+    "status": "0"
+  }
+}

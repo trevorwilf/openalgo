@@ -1,0 +1,120 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "MARKET",
+        "product": "CNC",
+        "quantity": 10,
+        "segment": "CASH",
+        "trading_symbol": "SBIN",
+        "transaction_type": "BUY",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "LIMIT",
+        "price": 2950.5,
+        "product": "MIS",
+        "quantity": 5,
+        "segment": "CASH",
+        "trading_symbol": "RELIANCE",
+        "transaction_type": "BUY",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "LIMIT",
+        "price": 200.0,
+        "product": "NRML",
+        "quantity": 15,
+        "segment": "FNO",
+        "trading_symbol": "BANKNIFTY24APR2447500CE",
+        "transaction_type": "SELL",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "STOP_LOSS_LIMIT",
+        "price": 1500.0,
+        "product": "MIS",
+        "quantity": 20,
+        "segment": "CASH",
+        "trading_symbol": "INFY",
+        "transaction_type": "BUY",
+        "trigger_price": 1495.0,
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "STOP_LOSS_MARKET",
+        "product": "MIS",
+        "quantity": 5,
+        "segment": "CASH",
+        "trading_symbol": "TCS",
+        "transaction_type": "SELL",
+        "trigger_price": 3800.0,
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "MARKET",
+        "product": "CNC",
+        "quantity": 1,
+        "segment": "CASH",
+        "trading_symbol": "HDFCBANK",
+        "transaction_type": "BUY",
+        "validity": "IOC"
+      }
+    }
+  ],
+  "broker_code": "groww",
+  "harness": "parity_v2_groww_india",
+  "rejected": [
+    {
+      "broker_code": "groww",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "groww",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "groww",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "groww_order_id": "240319000123456",
+      "order_status": "NEW"
+    },
+    "order_id": "240319000123456",
+    "status": "NEW"
+  }
+}

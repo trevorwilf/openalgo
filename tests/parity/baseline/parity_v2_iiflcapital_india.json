@@ -1,0 +1,126 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "apiOrderSource": "openalgo",
+        "exchange": "NSEEQ",
+        "instrumentId": "12345",
+        "orderComplexity": "REGULAR",
+        "orderType": "MARKET",
+        "product": "DELIVERY",
+        "quantity": "10",
+        "transactionType": "BUY",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "apiOrderSource": "openalgo",
+        "exchange": "NSEEQ",
+        "instrumentId": "12345",
+        "orderComplexity": "REGULAR",
+        "orderType": "LIMIT",
+        "price": 2950.5,
+        "product": "INTRADAY",
+        "quantity": "5",
+        "transactionType": "BUY",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "apiOrderSource": "openalgo",
+        "exchange": "NSEFO",
+        "instrumentId": "12345",
+        "orderComplexity": "REGULAR",
+        "orderType": "LIMIT",
+        "price": 200.0,
+        "product": "NORMAL",
+        "quantity": "15",
+        "transactionType": "SELL",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "apiOrderSource": "openalgo",
+        "exchange": "NSEEQ",
+        "instrumentId": "12345",
+        "orderComplexity": "REGULAR",
+        "orderType": "SL",
+        "price": 1500.0,
+        "product": "INTRADAY",
+        "quantity": "20",
+        "transactionType": "BUY",
+        "triggerPrice": 1495.0,
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "apiOrderSource": "openalgo",
+        "exchange": "NSEEQ",
+        "instrumentId": "12345",
+        "orderComplexity": "REGULAR",
+        "orderType": "SLM",
+        "product": "INTRADAY",
+        "quantity": "5",
+        "transactionType": "SELL",
+        "triggerPrice": 3800.0,
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "apiOrderSource": "openalgo",
+        "exchange": "NSEEQ",
+        "instrumentId": "12345",
+        "orderComplexity": "REGULAR",
+        "orderType": "MARKET",
+        "product": "DELIVERY",
+        "quantity": "1",
+        "transactionType": "BUY",
+        "validity": "IOC"
+      }
+    }
+  ],
+  "broker_code": "iiflcapital",
+  "harness": "parity_v2_iiflcapital_india",
+  "rejected": [
+    {
+      "broker_code": "iiflcapital",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "iiflcapital",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "iiflcapital",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "orderId": "240319000123456",
+      "status": "PENDING"
+    },
+    "order_id": "240319000123456",
+    "status": "PENDING"
+  }
+}

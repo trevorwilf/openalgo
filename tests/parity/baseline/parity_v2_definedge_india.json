@@ -1,0 +1,111 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "BUY",
+        "price": "0",
+        "price_type": "MARKET",
+        "product_type": "CNC",
+        "quantity": "10",
+        "tradingsymbol": "SBIN"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "BUY",
+        "price": "2950.50",
+        "price_type": "LIMIT",
+        "product_type": "INTRADAY",
+        "quantity": "5",
+        "tradingsymbol": "RELIANCE"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "exchange": "NFO",
+        "order_type": "SELL",
+        "price": "200.00",
+        "price_type": "LIMIT",
+        "product_type": "NRML",
+        "quantity": "15",
+        "tradingsymbol": "BANKNIFTY24APR2447500CE"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "BUY",
+        "price": "1500.00",
+        "price_type": "SL",
+        "product_type": "INTRADAY",
+        "quantity": "20",
+        "tradingsymbol": "INFY",
+        "trigger_price": "1495.00"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "SELL",
+        "price": "0",
+        "price_type": "SL-M",
+        "product_type": "INTRADAY",
+        "quantity": "5",
+        "tradingsymbol": "TCS",
+        "trigger_price": "3800.00"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "BUY",
+        "price": "0",
+        "price_type": "MARKET",
+        "product_type": "CNC",
+        "quantity": "1",
+        "tradingsymbol": "HDFCBANK"
+      }
+    }
+  ],
+  "broker_code": "definedge",
+  "harness": "parity_v2_definedge_india",
+  "rejected": [
+    {
+      "broker_code": "definedge",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "definedge",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "definedge",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "order_id": "240319000123456",
+      "status": "OK"
+    },
+    "order_id": "240319000123456",
+    "status": "OK"
+  }
+}
