@@ -123,18 +123,6 @@
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {
-      "path": "src/components/strategy-builder/PayoffChart.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/strategy-builder/PnLTab.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/strategy-builder/PositionsPanel.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
       "path": "src/components/strategy-builder/TemplateDialog.tsx",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
@@ -231,10 +219,6 @@
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {
-      "path": "src/pages/HealthMonitor.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
       "path": "src/pages/Historify.tsx",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
@@ -252,14 +236,6 @@
     },
     {
       "path": "src/pages/MasterContract.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/monitoring/LatencyDashboard.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/monitoring/SecurityDashboard.tsx",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {

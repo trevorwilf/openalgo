@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useVenueTimezone } from '@/hooks/useVenueTimezone'
 import { showToast } from '@/utils/toast'
 import { webClient } from '@/api/client'
 import {
@@ -116,6 +117,8 @@ interface ActiveSessionEntry {
 
 export default function SecurityDashboard() {
   const [isLoading, setIsLoading] = useState(true)
+  // v6 Phase 1-bis — venue-aware timezone for timestamp display.
+  const venueTimezone = useVenueTimezone() ?? 'UTC'
   const [settings, setSettings] = useState<SecuritySettings>({
     auto_ban_enabled: false,
     '404_threshold': 100,
@@ -1306,7 +1309,7 @@ export default function SecurityDashboard() {
                         <TableRow key={idx}>
                           <TableCell className="text-xs whitespace-nowrap">
                             {attempt.timestamp
-                              ? new Date(attempt.timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+                              ? new Date(attempt.timestamp).toLocaleString(undefined, { timeZone: venueTimezone })
                               : '-'}
                           </TableCell>
                           <TableCell>
@@ -1390,7 +1393,7 @@ export default function SecurityDashboard() {
                         <TableRow key={s.session_id}>
                           <TableCell className="text-xs whitespace-nowrap">
                             {s.login_time
-                              ? new Date(s.login_time).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+                              ? new Date(s.login_time).toLocaleString(undefined, { timeZone: venueTimezone })
                               : '-'}
                           </TableCell>
                           <TableCell className="font-mono text-sm">{s.ip_address || '-'}</TableCell>
@@ -1402,7 +1405,7 @@ export default function SecurityDashboard() {
                           </TableCell>
                           <TableCell className="text-xs whitespace-nowrap">
                             {s.last_seen
-                              ? new Date(s.last_seen).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+                              ? new Date(s.last_seen).toLocaleString(undefined, { timeZone: venueTimezone })
                               : '-'}
                           </TableCell>
                           <TableCell>

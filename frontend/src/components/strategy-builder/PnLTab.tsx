@@ -7,6 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useFormatCurrency } from '@/lib/format/currency'
 import type { StrategyLeg } from '@/lib/strategyMath'
 import { cn } from '@/lib/utils'
 
@@ -15,14 +16,19 @@ export interface PnLTabProps {
   currentPrices: Record<string, number>
 }
 
-function formatCurrency(v: number): string {
-  if (!isFinite(v)) return '-'
-  const abs = Math.abs(v)
-  const sign = v < 0 ? '-' : v > 0 ? '+' : ''
-  return `${sign}₹${abs.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
-}
-
 export function PnLTab({ legs, currentPrices }: PnLTabProps) {
+  // v6 Phase 1-bis — capability-driven currency formatter (per the
+  // active broker's base_currency). Replaces the v5 hardcoded
+  // rupee + Indian-locale formatter.
+  const formatCurrencyValue = useFormatCurrency()
+  const formatSignedCurrency = (v: number): string => {
+    if (!isFinite(v)) return '-'
+    const abs = Math.abs(v)
+    const sign = v < 0 ? '-' : v > 0 ? '+' : ''
+    return `${sign}${formatCurrencyValue(abs)}`
+  }
+  const formatPrice = (v: number): string => formatCurrencyValue(v)
+
   const rows = legs.map((leg) => {
     const current = currentPrices[leg.id] ?? leg.price
     const qty = leg.lots * leg.lotSize
@@ -76,18 +82,18 @@ export function PnLTab({ legs, currentPrices }: PnLTabProps) {
                 </span>
               </TableCell>
               <TableCell className="text-right text-xs tabular-nums">
-                ₹{leg.price.toFixed(2)}
+                {formatPrice(leg.price)}
               </TableCell>
               <TableCell className="text-right text-xs tabular-nums">
                 {isClosed ? (
                   <span className="text-muted-foreground">—</span>
                 ) : (
-                  `₹${current.toFixed(2)}`
+                  formatPrice(current)
                 )}
               </TableCell>
               <TableCell className="text-right text-xs tabular-nums">
                 {isClosed ? (
-                  <span className="font-semibold">₹{(leg.exitPrice ?? 0).toFixed(2)}</span>
+                  <span className="font-semibold">{formatPrice(leg.exitPrice ?? 0)}</span>
                 ) : (
                   <span className="text-muted-foreground">—</span>
                 )}
@@ -99,7 +105,7 @@ export function PnLTab({ legs, currentPrices }: PnLTabProps) {
                   pnl < 0 && 'text-rose-600 dark:text-rose-400'
                 )}
               >
-                {formatCurrency(pnl)}
+                {formatSignedCurrency(pnl)}
               </TableCell>
             </TableRow>
           ))}
@@ -117,7 +123,7 @@ export function PnLTab({ legs, currentPrices }: PnLTabProps) {
                   total < 0 && 'text-rose-600 dark:text-rose-400'
                 )}
               >
-                {formatCurrency(total)}
+                {formatSignedCurrency(total)}
               </TableCell>
             </TableRow>
           </TableFooter>

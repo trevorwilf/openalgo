@@ -115,3 +115,31 @@ export function useFormatCurrency(): (value: number) => string {
     return (value: number) => formatCurrencyAmount(value, code)
   }, [currency])
 }
+
+/**
+ * v6 Phase 1-bis — currency code → display symbol map for chart
+ * hovertemplates / Plotly axis titles where Intl.NumberFormat cannot
+ * be used (Plotly templates are strings, not React). INR is one of
+ * N entries — the resolution is capability-driven via the active
+ * broker's base_currency.
+ */
+const CURRENCY_DISPLAY_SYMBOL: Record<string, string> = {
+  INR: '₹',
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  JPY: '¥',
+  AUD: 'A$',
+  CAD: 'C$',
+  CHF: 'Fr',
+  HKD: 'HK$',
+  SGD: 'S$',
+}
+
+export function currencyDisplaySymbol(
+  currency: string | null | undefined,
+): string {
+  if (!currency) return ''
+  const upper = currency.toUpperCase()
+  return CURRENCY_DISPLAY_SYMBOL[upper] ?? `${upper} `
+}

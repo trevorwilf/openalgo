@@ -1,6 +1,7 @@
 import { Pencil, RotateCw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { useFormatCurrency } from '@/lib/format/currency'
 import type { StrategyLeg } from '@/lib/strategyMath'
 import { cn } from '@/lib/utils'
 
@@ -30,17 +31,6 @@ export interface PositionsPanelProps {
   marginSupported?: boolean | null
 }
 
-function formatCurrency(v: number): string {
-  // Unlimited-profit / unlimited-loss strategies report ±Infinity from
-  // computePayoff. Surface that clearly instead of a generic dash.
-  if (v === Infinity) return 'Unlimited'
-  if (v === -Infinity) return 'Unlimited'
-  if (!isFinite(v)) return '-'
-  const abs = Math.abs(v)
-  const sign = v < 0 ? '-' : v > 0 ? '+' : ''
-  return `${sign}₹${abs.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
-}
-
 function formatPct(v: number): string {
   if (!isFinite(v)) return '-'
   return `${v.toFixed(2)}%`
@@ -67,6 +57,22 @@ export function PositionsPanel({
 }: PositionsPanelProps) {
   const allSelected = legs.length > 0 && legs.every((l) => l.active)
   const activeCount = legs.filter((l) => l.active).length
+
+  // v6 Phase 1-bis — capability-driven currency formatter (per the
+  // active broker's base_currency). Replaces the v5 hardcoded
+  // Indian-locale + rupee symbol formatter.
+  const formatCurrencyValue = useFormatCurrency()
+  const formatCurrency = (v: number): string => {
+    // Unlimited-profit / unlimited-loss strategies report ±Infinity from
+    // computePayoff. Surface that clearly instead of a generic dash.
+    if (v === Infinity) return 'Unlimited'
+    if (v === -Infinity) return 'Unlimited'
+    if (!isFinite(v)) return '-'
+    const abs = Math.abs(v)
+    const sign = v < 0 ? '-' : v > 0 ? '+' : ''
+    return `${sign}${formatCurrencyValue(abs)}`
+  }
+  const formatPrice = (v: number): string => formatCurrencyValue(v)
 
   const metrics: Array<{ label: string; value: string; tone?: 'profit' | 'loss' | 'neutral' }> = [
     {
@@ -110,7 +116,7 @@ export function PositionsPanel({
     },
     {
       label: 'Est. Premium',
-      value: `₹${Math.abs(estPremium).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+      value: formatPrice(Math.abs(estPremium)),
     },
   ]
 
@@ -123,7 +129,7 @@ export function PositionsPanel({
       value: isMarginLoading
         ? 'Calculating…'
         : marginRequired !== null && marginRequired !== undefined
-          ? `₹${marginRequired.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+          ? formatPrice(marginRequired)
           : '—',
     })
   }
@@ -219,14 +225,13 @@ export function PositionsPanel({
                           ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
                           : 'bg-rose-500/10 text-rose-700 dark:text-rose-400'
                       )}
-                      title={`Entry ₹${leg.price.toFixed(2)} → Exit ₹${(leg.exitPrice ?? 0).toFixed(2)}`}
+                      title={`Entry ${formatPrice(leg.price)} → Exit ${formatPrice(leg.exitPrice ?? 0)}`}
                     >
-                      {realisedPnl >= 0 ? '+' : '-'}₹
-                      {Math.abs(realisedPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      {realisedPnl >= 0 ? '+' : '-'}{formatPrice(Math.abs(realisedPnl))}
                     </span>
                   ) : (
                     <span className="shrink-0 tabular-nums text-muted-foreground">
-                      ₹{leg.price.toFixed(2)}
+                      {formatPrice(leg.price)}
                     </span>
                   )}
 

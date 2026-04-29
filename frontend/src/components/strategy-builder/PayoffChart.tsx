@@ -1,7 +1,9 @@
 import type * as PlotlyTypes from 'plotly.js'
 import { useMemo } from 'react'
 import Plot from 'react-plotly.js'
+import { currencyDisplaySymbol } from '@/lib/format/currency'
 import type { PayoffResult } from '@/lib/strategyMath'
+import { useBrokerStore } from '@/stores/brokerStore'
 import { useThemeStore } from '@/stores/themeStore'
 
 export interface PayoffChartProps {
@@ -27,6 +29,14 @@ export function PayoffChart({
   const { mode, appMode } = useThemeStore()
   const isAnalyzer = appMode === 'analyzer'
   const isDark = mode === 'dark' || isAnalyzer
+
+  // v6 Phase 1-bis — capability-driven currency symbol for the chart.
+  // Resolves the active broker's base_currency. Falls back to no
+  // symbol when no broker is connected.
+  const currencyCode = useBrokerStore(
+    (s) => s.capabilities?.base_currency ?? null,
+  )
+  const currencySymbol = currencyDisplaySymbol(currencyCode)
 
   const colors = useMemo(
     () => ({
@@ -116,7 +126,7 @@ export function PayoffChart({
         // customdata carries a pre-formatted percent string per point.
         customdata: pctFromSpot as unknown as PlotlyTypes.Datum[],
         hovertemplate:
-          '<b>At Expiry P&L</b> ₹%{y:,.0f}' +
+          `<b>At Expiry P&L</b> ${currencySymbol}%{y:,.0f}` +
           '<br>Chg. from Spot: %{customdata}' +
           '<extra></extra>',
       },
@@ -130,7 +140,7 @@ export function PayoffChart({
         mode: 'lines',
         name: 'T+0',
         line: { color: colors.tplus0Line, width: 2, dash: 'dash' },
-        hovertemplate: '<b>T+0 P&L</b> ₹%{y:,.0f}<extra></extra>',
+        hovertemplate: `<b>T+0 P&L</b> ${currencySymbol}%{y:,.0f}<extra></extra>`,
       })
     }
 
@@ -308,7 +318,10 @@ export function PayoffChart({
         zeroline: false,
       },
       yaxis: {
-        title: { text: 'Profit / Loss (₹)', font: { color: colors.text, size: 12 } },
+        title: {
+          text: currencySymbol ? `Profit / Loss (${currencySymbol})` : 'Profit / Loss',
+          font: { color: colors.text, size: 12 },
+        },
         tickfont: { color: colors.text, size: 10 },
         gridcolor: colors.grid,
         zeroline: true,
