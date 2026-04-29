@@ -181,17 +181,56 @@ def test_v6_invariant_v6_9_legacy_helper_retired() -> None:
 
 def test_v6_phase_completion_docs_present() -> None:
     """Every v6 phase that ran must have a phase-complete doc on
-    disk."""
+    disk. v6 Phases 0-8 plus the bis-phases all closed in this v6
+    cycle."""
     base = REPO_ROOT / "docs" / "refactor"
     for n in range(0, 9):
-        # Phase 5/6/7 are deferred and have no completion doc; the
-        # ADR 0031 phase status table is authoritative for those.
-        if n in (5, 6, 7):
-            continue
         p = base / f"v6-phase-{n}-complete.md"
         assert p.is_file(), (
             f"missing {p.relative_to(REPO_ROOT).as_posix()}"
         )
+    # bis-phase closing docs.
+    for slug in (
+        "v6-phase-1-bis-complete.md",
+        "v6-phase-2-bis-sandbox-complete.md",
+        "v6-phase-2-bis-options-complete.md",
+        "v6-phase-2-bis-screener-complete.md",
+        "v6-phase-2-bis-strategy-complete.md",
+        "v6-phase-4-bis-helper-retirement-complete.md",
+        "v6-phase-4-bis-mocks-complete.md",
+        "v6-phase-5-bis-complete.md",
+    ):
+        p = base / slug
+        assert p.is_file(), f"missing {p.relative_to(REPO_ROOT).as_posix()}"
+
+
+def test_v6_invariant_v6_10_dispatcher_caller_migration_contracts_pass() -> None:
+    """v6 Phase 2-bis: dispatcher-caller migration contract tests for
+    sandbox / options / screener / strategy each pass."""
+    rc = _run_pytest(
+        "tests/contracts/test_v6_sandbox_dispatcher_caller_migration.py",
+        "tests/contracts/test_v6_options_dispatcher_caller_migration.py",
+        "tests/contracts/test_v6_screener_dispatcher_caller_migration.py",
+        "tests/contracts/test_v6_strategy_dispatcher_caller_migration.py",
+    )
+    assert rc == 0, "v6-10 regression: a caller-migration test failed"
+
+
+def test_v6_invariant_v6_11_mock_extensions_present() -> None:
+    """v6 Phase 4-bis: mock plugin extensions (combo MULTILEG_OPTIONS,
+    position-adapter currency propagation, account-context entitlements)
+    are pinned by the contract test."""
+    rc = _run_pytest("tests/contracts/test_v6_mock_plugin_extensions.py")
+    assert rc == 0, "v6-11 regression: mock extension test failed"
+
+
+def test_v6_invariant_v6_12_runtime_activation_pipeline_works() -> None:
+    """v6 Phase 5-bis: bootstrap + MPP pipeline work end-to-end."""
+    rc = _run_pytest(
+        "tests/services/test_v6_india_translator_bootstrap.py",
+        "tests/services/test_v6_promoted_mpp_service.py",
+    )
+    assert rc == 0, "v6-12 regression: runtime activation pipeline failed"
 
 
 def test_v6_adr_0031_present() -> None:
