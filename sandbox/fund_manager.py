@@ -49,6 +49,14 @@ class FundManager:
 
     def __init__(self, user_id):
         self.user_id = user_id
+        # v6 Phase 2-bis sandbox — keep the legacy "10000000.00" /
+        # ₹1Cr default (operator-overridable via ``starting_capital``
+        # config). The dispatcher's
+        # ``get_sandbox_provider("india").initial_funds()`` currently
+        # returns ₹10L (Decimal "1000000.00"), which differs from
+        # this legacy default by 10×; reconciling those values is
+        # tracked as a follow-up so India parity stays bit-identical
+        # for existing installs.
         self.starting_capital = Decimal(get_config("starting_capital", "10000000.00"))
 
     def initialize_funds(self):

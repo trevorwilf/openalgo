@@ -1099,8 +1099,15 @@ class OrderManager:
         if order_data["price_type"].upper() not in ["MARKET", "LIMIT", "SL", "SL-M"]:
             return False, "Invalid price_type. Must be MARKET, LIMIT, SL, or SL-M"
 
-        # Validate product
-        if order_data["product"].upper() not in ["CNC", "NRML", "MIS"]:
+        # v6 Phase 2-bis sandbox — read supported products from the
+        # India sandbox provider via dispatcher. For India:
+        # provider.supported_products() == {"MIS", "CNC", "NRML"} —
+        # behavior is bit-identical with the prior hardcoded list.
+        from services.sandbox.dispatcher import get_sandbox_provider
+
+        sandbox_provider = get_sandbox_provider("india")
+        supported_products = sandbox_provider.supported_products()
+        if order_data["product"].upper() not in supported_products:
             return False, "Invalid product. Must be CNC, NRML, or MIS"
 
         # Validate product-exchange compatibility
