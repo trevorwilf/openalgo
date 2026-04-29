@@ -258,6 +258,22 @@ def _dispatch_promoted(normalized, *, broker: str, auth_token: str, promoted):
             details={"code": e.code, "rule_id": e.rule_id},
         ), 422
 
+    # v6 Phase 5-bis — pre-translator Market Price Protection (MPP).
+    # For India brokers whose v1 transform_data converts MARKET → LIMIT
+    # (and SL-M → SL for motilal/samco) via LTP+slab, the v2 dispatcher
+    # applies the same conversion BEFORE the translator runs so the
+    # wire payload stays bit-identical with v1. No-op for brokers that
+    # don't require MPP and for non-MARKET / non-STOP orders. See
+    # ADR 0031 / Q4 option B.
+    from services.promoted_mpp_service import apply_mpp_if_required
+
+    normalized = apply_mpp_if_required(
+        normalized,
+        broker_code=broker,
+        instrument=resolved,
+        auth_token=auth_token,
+    )
+
     try:
         promoted.validate(normalized, resolved, account_ctx)
     except UnsupportedCapability as e:

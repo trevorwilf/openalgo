@@ -100,6 +100,11 @@ rules:
     classification: PROMOTED_CORE
   - path: services/instrument_sync_adapters/__init__.py
     classification: PROMOTED_CORE
+  # v6 Phase 5-bis — runtime activation + dispatcher MPP for India v2.
+  - path: services/india_translator_bootstrap.py
+    classification: PROMOTED_CORE
+  - path: services/promoted_mpp_service.py
+    classification: PROMOTED_CORE
 
   # ---------------- PROMOTED_CORE — utils explicitly clean ----------------
   - path: utils/__init__.py

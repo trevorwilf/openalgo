@@ -488,6 +488,26 @@ def setup_environment(app):
         load_broker_capabilities()  # cache broker plugin.json data in memory
         load_market_regions(os.path.join(app.root_path, "market_regions"))  # cache market-region plugin metadata in memory
 
+        # v6 Phase 5-bis — install India v2 broker translators per
+        # operator-controlled API_V2_<BROKER>=1 env flag. Each flag
+        # defaults OFF; the v2 dispatcher falls through to the legacy
+        # lane for India brokers exactly as v5 Phase 9 left it. See
+        # services/india_translator_bootstrap.py for the broker list.
+        try:
+            from services.india_translator_bootstrap import (
+                install_enabled_india_translators,
+            )
+
+            activated = install_enabled_india_translators()
+            if activated:
+                logger.info(
+                    "v6 Phase 5-bis: %d India v2 translator(s) activated: %s",
+                    len(activated),
+                    ", ".join(activated),
+                )
+        except Exception as e:  # never block app startup on this hook
+            logger.exception("v6 Phase 5-bis bootstrap failed: %s", e)
+
     # Setup ngrok cleanup handlers (always register, regardless of ngrok being enabled)
     # This ensures proper cleanup on shutdown even if ngrok is enabled/disabled via UI
     # The actual tunnel creation happens in the __main__ block below
