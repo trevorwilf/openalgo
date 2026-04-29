@@ -20,7 +20,14 @@ NATIVE_ENTRUST_TYPES = {
     "OCO": "OCO",
     "OTO": "STOP_TRAIL",
     "OTOCO": "BRACKET",
+    # v6 Phase 4-bis — MULTILEG_OPTIONS extension. Webull's
+    # multi-leg options API uses "MULTILEG_OPTIONS" directly.
+    "MULTILEG_OPTIONS": "MULTILEG_OPTIONS",
 }
+
+# v6 Phase 4-bis — alias as NATIVE_STRATEGY_TYPES for symmetry with
+# the mock Schwab translator's name; contract tests reference both.
+NATIVE_STRATEGY_TYPES = NATIVE_ENTRUST_TYPES
 
 SENT_NATIVE_PAYLOADS: list[dict[str, Any]] = []
 
