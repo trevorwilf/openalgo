@@ -185,6 +185,27 @@ def get_iv_chart_data(
             },
             422,
         )
+
+    # v6 Phase 2-bis options — dispatcher integration (parallel to
+    # expiry_service). The India options provider is the home for
+    # IV / Greeks math on Phase 2-bis-2.
+    from services.options.dispatcher import (
+        OptionsProviderNotRegistered,
+        get_options_provider,
+    )
+    try:
+        get_options_provider("india")
+    except OptionsProviderNotRegistered:
+        return (
+            False,
+            {
+                "status": "error",
+                "code": ErrorCode.OPTIONS_PROVIDER_NOT_REGISTERED,
+                "message": "India options provider not registered.",
+            },
+            503,
+        )
+
     try:
         from py_vollib.black.implied_volatility import implied_volatility as black_iv  # noqa: F401
     except ImportError:

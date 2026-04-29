@@ -51,6 +51,30 @@ def get_expiry_dates(
             },
             422,
         )
+
+    # v6 Phase 2-bis options — dispatcher integration. Resolve the
+    # India options provider through the registry. India parity is
+    # bit-identical (the provider returns India semantics); the
+    # dispatcher call replaces a hardcoded "India is the only region
+    # we support" assumption with a proper region → provider lookup.
+    # Phase 2-bis-2 migrates the legacy SymToken query below into a
+    # provider.list_expiries(...) method.
+    from services.options.dispatcher import (
+        OptionsProviderNotRegistered,
+        get_options_provider,
+    )
+    try:
+        get_options_provider("india")
+    except OptionsProviderNotRegistered:
+        return (
+            False,
+            {
+                "status": "error",
+                "code": ErrorCode.OPTIONS_PROVIDER_NOT_REGISTERED,
+                "message": "India options provider not registered.",
+            },
+            503,
+        )
     try:
         # Validate API key if provided
         if api_key:
