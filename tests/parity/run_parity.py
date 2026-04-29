@@ -55,6 +55,19 @@ HARNESSES = [
     "parity_v2_dhan_india",
     "parity_v2_upstox_india",
     "parity_v2_fyers_india",
+    # v6 Phase 6 — alpha batch 1 of remaining India brokers.
+    "parity_v2_aliceblue_india",
+    "parity_v2_compositedge_india",
+    "parity_v2_definedge_india",
+    "parity_v2_firstock_india",
+    "parity_v2_fivepaisa_india",
+    "parity_v2_fivepaisaxts_india",
+    "parity_v2_flattrade_india",
+    "parity_v2_groww_india",
+    "parity_v2_ibulls_india",
+    "parity_v2_iifl_india",
+    "parity_v2_iiflcapital_india",
+    "parity_v2_indmoney_india",
 ]
 
 

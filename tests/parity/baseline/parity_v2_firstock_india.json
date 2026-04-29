@@ -1,0 +1,133 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "exchange": "NSE",
+        "price": "0",
+        "priceType": "MKT",
+        "product": "C",
+        "quantity": "10",
+        "remarks": "Place Order",
+        "retention": "DAY",
+        "tradingSymbol": "SBIN",
+        "transactionType": "B",
+        "triggerPrice": "0",
+        "userId": "firstock-test-account"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "exchange": "NSE",
+        "price": "2950.50",
+        "priceType": "LMT",
+        "product": "I",
+        "quantity": "5",
+        "remarks": "Place Order",
+        "retention": "DAY",
+        "tradingSymbol": "RELIANCE",
+        "transactionType": "B",
+        "triggerPrice": "0",
+        "userId": "firstock-test-account"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "exchange": "NFO",
+        "price": "200.00",
+        "priceType": "LMT",
+        "product": "M",
+        "quantity": "15",
+        "remarks": "Place Order",
+        "retention": "DAY",
+        "tradingSymbol": "BANKNIFTY24APR2447500CE",
+        "transactionType": "S",
+        "triggerPrice": "0",
+        "userId": "firstock-test-account"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "exchange": "NSE",
+        "price": "1500.00",
+        "priceType": "SL-LMT",
+        "product": "I",
+        "quantity": "20",
+        "remarks": "Place Order",
+        "retention": "DAY",
+        "tradingSymbol": "INFY",
+        "transactionType": "B",
+        "triggerPrice": "1495.00",
+        "userId": "firstock-test-account"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "exchange": "NSE",
+        "price": "0",
+        "priceType": "SL-MKT",
+        "product": "I",
+        "quantity": "5",
+        "remarks": "Place Order",
+        "retention": "DAY",
+        "tradingSymbol": "TCS",
+        "transactionType": "S",
+        "triggerPrice": "3800.00",
+        "userId": "firstock-test-account"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "exchange": "NSE",
+        "price": "0",
+        "priceType": "MKT",
+        "product": "C",
+        "quantity": "1",
+        "remarks": "Place Order",
+        "retention": "IOC",
+        "tradingSymbol": "HDFCBANK",
+        "transactionType": "B",
+        "triggerPrice": "0",
+        "userId": "firstock-test-account"
+      }
+    }
+  ],
+  "broker_code": "firstock",
+  "harness": "parity_v2_firstock_india",
+  "rejected": [
+    {
+      "broker_code": "firstock",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "firstock",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "firstock",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "orderNumber": "240319000123456",
+      "stat": "Ok"
+    },
+    "order_id": "240319000123456",
+    "status": "Ok"
+  }
+}

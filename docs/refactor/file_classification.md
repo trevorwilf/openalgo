@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **851**.
+Total classified files: **864**.
 
 Classification semantics:
 
@@ -333,7 +333,7 @@ Classification semantics:
 - `services/screeners/providers/uk/__init__.py`
 - `services/screeners/providers/us/__init__.py`
 
-## BROKER_PLUGIN (538 files)
+## BROKER_PLUGIN (551 files)
 
 - `broker/__init__.py`
 - `broker/_mock_schwab_like/__init__.py`
@@ -358,6 +358,7 @@ Classification semantics:
 - `broker/_mock_webull_like/api/stream_api.py`
 - `broker/_mock_webull_like/sync/__init__.py`
 - `broker/_mock_webull_like/sync/instrument_sync.py`
+- `broker/_xts_family/__init__.py`
 - `broker/aliceblue/api/__init__.py`
 - `broker/aliceblue/api/alicebluewebsocket.py`
 - `broker/aliceblue/api/auth_api.py`
@@ -373,6 +374,7 @@ Classification semantics:
 - `broker/aliceblue/streaming/aliceblue_adapter.py`
 - `broker/aliceblue/streaming/aliceblue_client.py`
 - `broker/aliceblue/streaming/aliceblue_mapping.py`
+- `broker/aliceblue/translator.py`
 - `broker/alpaca/__init__.py`
 - `broker/alpaca/api/__init__.py`
 - `broker/alpaca/api/account_api.py`
@@ -413,6 +415,7 @@ Classification semantics:
 - `broker/compositedge/streaming/compositedge_adapter.py`
 - `broker/compositedge/streaming/compositedge_mapping.py`
 - `broker/compositedge/streaming/compositedge_websocket.py`
+- `broker/compositedge/translator.py`
 - `broker/definedge/__init__.py`
 - `broker/definedge/api/__init__.py`
 - `broker/definedge/api/auth_api.py`
@@ -431,6 +434,7 @@ Classification semantics:
 - `broker/definedge/streaming/definedge_adapter.py`
 - `broker/definedge/streaming/definedge_mapping.py`
 - `broker/definedge/streaming/definedge_websocket.py`
+- `broker/definedge/translator.py`
 - `broker/deltaexchange/__init__.py`
 - `broker/deltaexchange/api/__init__.py`
 - `broker/deltaexchange/api/auth_api.py`
@@ -497,6 +501,7 @@ Classification semantics:
 - `broker/firstock/streaming/firstock_adapter.py`
 - `broker/firstock/streaming/firstock_mapping.py`
 - `broker/firstock/streaming/firstock_websocket.py`
+- `broker/firstock/translator.py`
 - `broker/fivepaisa/__init__.py`
 - `broker/fivepaisa/api/__init__.py`
 - `broker/fivepaisa/api/auth_api.py`
@@ -512,6 +517,7 @@ Classification semantics:
 - `broker/fivepaisa/streaming/fivepaisa_adapter.py`
 - `broker/fivepaisa/streaming/fivepaisa_mapping.py`
 - `broker/fivepaisa/streaming/fivepaisa_websocket.py`
+- `broker/fivepaisa/translator.py`
 - `broker/fivepaisaxts/api/__init__.py`
 - `broker/fivepaisaxts/api/auth_api.py`
 - `broker/fivepaisaxts/api/data.py`
@@ -527,6 +533,7 @@ Classification semantics:
 - `broker/fivepaisaxts/streaming/fivepaisaxts_adapter.py`
 - `broker/fivepaisaxts/streaming/fivepaisaxts_mapping.py`
 - `broker/fivepaisaxts/streaming/fivepaisaxts_websocket.py`
+- `broker/fivepaisaxts/translator.py`
 - `broker/flattrade/__init__.py`
 - `broker/flattrade/api/__init__.py`
 - `broker/flattrade/api/auth_api.py`
@@ -542,6 +549,7 @@ Classification semantics:
 - `broker/flattrade/streaming/flattrade_adapter.py`
 - `broker/flattrade/streaming/flattrade_mapping.py`
 - `broker/flattrade/streaming/flattrade_websocket.py`
+- `broker/flattrade/translator.py`
 - `broker/fyers/api/__init__.py`
 - `broker/fyers/api/auth_api.py`
 - `broker/fyers/api/data.py`
@@ -579,6 +587,7 @@ Classification semantics:
 - `broker/groww/streaming/groww_nkeys.py`
 - `broker/groww/streaming/groww_protobuf.py`
 - `broker/groww/streaming/nats_websocket.py`
+- `broker/groww/translator.py`
 - `broker/ibulls/api/__init__.py`
 - `broker/ibulls/api/auth_api.py`
 - `broker/ibulls/api/data.py`
@@ -594,6 +603,7 @@ Classification semantics:
 - `broker/ibulls/streaming/ibulls_adapter.py`
 - `broker/ibulls/streaming/ibulls_mapping.py`
 - `broker/ibulls/streaming/ibulls_websocket.py`
+- `broker/ibulls/translator.py`
 - `broker/iifl/api/__init__.py`
 - `broker/iifl/api/auth_api.py`
 - `broker/iifl/api/data.py`
@@ -609,6 +619,7 @@ Classification semantics:
 - `broker/iifl/streaming/iifl_adapter.py`
 - `broker/iifl/streaming/iifl_mapping.py`
 - `broker/iifl/streaming/iifl_websocket.py`
+- `broker/iifl/translator.py`
 - `broker/iiflcapital/__init__.py`
 - `broker/iiflcapital/api/__init__.py`
 - `broker/iiflcapital/api/auth_api.py`
@@ -624,6 +635,7 @@ Classification semantics:
 - `broker/iiflcapital/mapping/transform_data.py`
 - `broker/iiflcapital/streaming/__init__.py`
 - `broker/iiflcapital/streaming/iiflcapital_adapter.py`
+- `broker/iiflcapital/translator.py`
 - `broker/indmoney/__init__.py`
 - `broker/indmoney/api/__init__.py`
 - `broker/indmoney/api/auth_api.py`
@@ -640,6 +652,7 @@ Classification semantics:
 - `broker/indmoney/streaming/indWebSocket.py`
 - `broker/indmoney/streaming/indmoney_adapter.py`
 - `broker/indmoney/streaming/indmoney_mapping.py`
+- `broker/indmoney/translator.py`
 - `broker/jainamxts/api/__init__.py`
 - `broker/jainamxts/api/auth_api.py`
 - `broker/jainamxts/api/data.py`

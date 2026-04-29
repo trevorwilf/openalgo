@@ -1,0 +1,151 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "disclosedQuantity": "",
+        "exchange": "NSE",
+        "instrumentId": "12345",
+        "marketProtectionPercent": "",
+        "orderComplexity": "REGULAR",
+        "orderType": "MARKET",
+        "price": "0",
+        "product": "LONGTERM",
+        "quantity": 10,
+        "slLegPrice": "",
+        "slTriggerPrice": "0",
+        "targetLegPrice": "",
+        "transactionType": "BUY",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "disclosedQuantity": "",
+        "exchange": "NSE",
+        "instrumentId": "12345",
+        "marketProtectionPercent": "",
+        "orderComplexity": "REGULAR",
+        "orderType": "LIMIT",
+        "price": "2950.50",
+        "product": "INTRADAY",
+        "quantity": 5,
+        "slLegPrice": "",
+        "slTriggerPrice": "0",
+        "targetLegPrice": "",
+        "transactionType": "BUY",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "disclosedQuantity": "",
+        "exchange": "NFO",
+        "instrumentId": "12345",
+        "marketProtectionPercent": "",
+        "orderComplexity": "REGULAR",
+        "orderType": "LIMIT",
+        "price": "200.00",
+        "product": "NRML",
+        "quantity": 15,
+        "slLegPrice": "",
+        "slTriggerPrice": "0",
+        "targetLegPrice": "",
+        "transactionType": "SELL",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "disclosedQuantity": "",
+        "exchange": "NSE",
+        "instrumentId": "12345",
+        "marketProtectionPercent": "",
+        "orderComplexity": "REGULAR",
+        "orderType": "SL",
+        "price": "1500.00",
+        "product": "INTRADAY",
+        "quantity": 20,
+        "slLegPrice": "",
+        "slTriggerPrice": "1495.00",
+        "targetLegPrice": "",
+        "transactionType": "BUY",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "disclosedQuantity": "",
+        "exchange": "NSE",
+        "instrumentId": "12345",
+        "marketProtectionPercent": "",
+        "orderComplexity": "REGULAR",
+        "orderType": "SLM",
+        "price": "0",
+        "product": "INTRADAY",
+        "quantity": 5,
+        "slLegPrice": "",
+        "slTriggerPrice": "3800.00",
+        "targetLegPrice": "",
+        "transactionType": "SELL",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "disclosedQuantity": "",
+        "exchange": "NSE",
+        "instrumentId": "12345",
+        "marketProtectionPercent": "",
+        "orderComplexity": "REGULAR",
+        "orderType": "MARKET",
+        "price": "0",
+        "product": "LONGTERM",
+        "quantity": 1,
+        "slLegPrice": "",
+        "slTriggerPrice": "0",
+        "targetLegPrice": "",
+        "transactionType": "BUY",
+        "validity": "IOC"
+      }
+    }
+  ],
+  "broker_code": "aliceblue",
+  "harness": "parity_v2_aliceblue_india",
+  "rejected": [
+    {
+      "broker_code": "aliceblue",
+      "capability_name": "time_in_force",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "aliceblue",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "aliceblue",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "orderNumber": "240319000123456",
+      "stat": "Ok"
+    },
+    "order_id": "240319000123456",
+    "status": "Ok"
+  }
+}

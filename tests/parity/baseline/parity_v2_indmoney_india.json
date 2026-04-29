@@ -1,0 +1,124 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "exchange": "NSE",
+        "is_amo": false,
+        "order_type": "MARKET",
+        "product": "CNC",
+        "qty": 10,
+        "security_id": "12345",
+        "segment": "EQUITY",
+        "txn_type": "BUY",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "exchange": "NSE",
+        "is_amo": false,
+        "limit_price": 2950.5,
+        "order_type": "LIMIT",
+        "product": "INTRADAY",
+        "qty": 5,
+        "security_id": "12345",
+        "segment": "EQUITY",
+        "txn_type": "BUY",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "exchange": "NSE",
+        "is_amo": false,
+        "limit_price": 200.0,
+        "order_type": "LIMIT",
+        "product": "MARGIN",
+        "qty": 15,
+        "security_id": "12345",
+        "segment": "DERIVATIVE",
+        "txn_type": "SELL",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "exchange": "NSE",
+        "is_amo": false,
+        "limit_price": 1500.0,
+        "order_type": "LIMIT",
+        "product": "INTRADAY",
+        "qty": 20,
+        "security_id": "12345",
+        "segment": "EQUITY",
+        "txn_type": "BUY",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "exchange": "NSE",
+        "is_amo": false,
+        "order_type": "MARKET",
+        "product": "INTRADAY",
+        "qty": 5,
+        "security_id": "12345",
+        "segment": "EQUITY",
+        "txn_type": "SELL",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "exchange": "NSE",
+        "is_amo": false,
+        "order_type": "MARKET",
+        "product": "CNC",
+        "qty": 1,
+        "security_id": "12345",
+        "segment": "EQUITY",
+        "txn_type": "BUY",
+        "validity": "IOC"
+      }
+    }
+  ],
+  "broker_code": "indmoney",
+  "harness": "parity_v2_indmoney_india",
+  "rejected": [
+    {
+      "broker_code": "indmoney",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "indmoney",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "indmoney",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "orderId": "240319000123456",
+      "status": "PENDING"
+    },
+    "order_id": "240319000123456",
+    "status": "PENDING"
+  }
+}
