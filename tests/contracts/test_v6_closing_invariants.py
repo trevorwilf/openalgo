@@ -106,6 +106,35 @@ def test_v6_invariant_v6_6_dispatcher_contracts_locked() -> None:
     assert rc == 0, "v6-6 regression: a dispatcher contract test failed"
 
 
+def test_v6_invariant_v6_7_30_india_translators_bootstrap_table_present() -> None:
+    """v6 Phase 5-bis: every India broker has an entry in
+    INDIA_TRANSLATORS so the runtime bootstrap can install it when
+    the operator flips API_V2_<BROKER>=1."""
+    from services.india_translator_bootstrap import INDIA_TRANSLATORS
+
+    codes = {bc for bc, _ in INDIA_TRANSLATORS}
+    assert len(codes) == 30, f"expected 30 India brokers; got {len(codes)}"
+    # Spot-check: every broker has Phase 5/6/7 translator file.
+    for bc in codes:
+        assert (REPO_ROOT / "broker" / bc / "translator.py").is_file(), (
+            f"broker/{bc}/translator.py missing"
+        )
+
+
+def test_v6_invariant_v6_8_promoted_mpp_service_present() -> None:
+    """v6 Phase 5-bis: dispatcher-level MPP for the 9 brokers whose
+    v1 transform_data converts MARKET → LIMIT."""
+    from services.promoted_mpp_service import (
+        BROKERS_REQUIRING_MPP_MARKET,
+        BROKERS_REQUIRING_MPP_SLM,
+        apply_mpp_if_required,
+    )
+
+    assert len(BROKERS_REQUIRING_MPP_MARKET) == 9
+    assert len(BROKERS_REQUIRING_MPP_SLM) == 2
+    assert callable(apply_mpp_if_required)
+
+
 def test_v6_invariant_helper_retirement_marker_present() -> None:
     """Phase 4 ships a deferred-state marker for the helper
     retirement. While Phase 4-bis is pending the marker stays; once
