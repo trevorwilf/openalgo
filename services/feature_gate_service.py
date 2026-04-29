@@ -10,21 +10,18 @@ Active region resolution order:
 1. The active broker's ``BrokerCapabilities.supported_regions[0]``
    (the broker plugin's primary region).
 2. The user's stored ``settings.default_market_region``.
-3. The explicit legacy-India compatibility path (only when the caller
-   passes ``legacy_india_fallback=True``).
 
-If neither (1) nor (2) yields a region AND the caller has not opted
-into the legacy India fallback, ``active_region_code`` raises
-``RegionResolutionError`` (ADR 0023 invariant 1). Phase 2 of v4
-removed the silent ``_FALLBACK_REGION = "india"`` constant; missing
-region context is now a structured error in promoted code.
-
-The two callers in this module — ``is_india_region_active`` and
-``is_feature_enabled_for_active_region`` — pass
-``legacy_india_fallback=True`` because they are the explicit, named
-region gate used by services that have not yet migrated to provider-
-pluggable dispatch (Sandbox until v4 Phase 8; Options until Phase 9;
-Screeners until Phase 10).
+If neither (1) nor (2) yields a region, ``active_region_code``
+raises ``RegionResolutionError`` (ADR 0023 invariant 1; ADR 0031 v6
+Phase 4-bis closing). v6 Phase 4-bis retired the
+``legacy_india_fallback`` parameter and the
+``_legacy_india_region_for_compat`` helper that used to back step 3
+of the resolution chain. Missing region context is now ALWAYS a
+structured error in active_region_code; the named gates
+(``is_india_region_active`` and
+``is_feature_enabled_for_active_region``) catch the exception and
+return ``False`` / the caller's ``default`` instead of silently
+falling back to India.
 """
 
 from __future__ import annotations
@@ -34,22 +31,19 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def active_region_code(*, legacy_india_fallback: bool = False) -> str:
+def active_region_code() -> str:
     """Return the active region code per the resolution order above.
 
-    Parameters
-    ----------
-    legacy_india_fallback:
-        When ``True`` and no broker / settings region is resolvable,
-        the function returns ``"india"`` for the explicit legacy India
-        compatibility path. When ``False`` (the v4 default), the same
-        situation raises :class:`domain.errors.RegionResolutionError`.
-
-    The two named callers in this module (:func:`is_india_region_active`
-    and :func:`is_feature_enabled_for_active_region`) opt into the
-    legacy fallback because they are the named region gate used by
-    services that have not yet migrated to provider-pluggable
-    dispatch.
+    v6 Phase 4-bis (ADR 0031): the ``legacy_india_fallback`` parameter
+    has been retired. The function now ALWAYS raises
+    :class:`domain.errors.RegionResolutionError` when no broker /
+    settings region is resolvable. Named callers
+    (:func:`is_india_region_active`,
+    :func:`is_feature_enabled_for_active_region`,
+    :func:`require_region_feature`) catch the exception and decide
+    their own fallback semantics — by reading
+    :class:`BrokerCapabilities` directly, not via a hidden literal
+    fallback.
     """
     # Test-only override — short-circuits everything.
     import os
@@ -86,36 +80,31 @@ def active_region_code(*, legacy_india_fallback: bool = False) -> str:
     except Exception as e:  # pragma: no cover - defensive
         logger.debug("default region lookup failed: %s", e)
 
-    # 3. Either return the legacy India fallback (named callers opt
-    # in) or raise the structured error (promoted code).
-    if legacy_india_fallback:
-        return _legacy_india_region_for_compat()
-
+    # No broker, no settings, no env override → raise the structured
+    # error. v6 Phase 4-bis retired the legacy India fallback that
+    # used to live here.
     from domain.errors import RegionResolutionError
 
     raise RegionResolutionError(attempted_sources=attempted_sources)
 
 
-def _legacy_india_region_for_compat() -> str:
-    """Return ``"india"`` for the explicit legacy India compatibility path.
-
-    Wrapped in a single named function so every call-site is greppable
-    and the deprecation can be tracked. Phase 8 (Sandbox), Phase 9
-    (Options), and Phase 10 (Screeners) of v4 each remove one batch of
-    callers; once provider-pluggable dispatch covers every advanced
-    feature, this helper itself can be deprecated.
-    """
-    return "india"
-
-
 def is_india_region_active() -> bool:
     """Named region gate — returns ``True`` when the active region is
-    India. Uses the legacy India compatibility fallback so this
-    function never raises; intended for the explicit, named region
-    branch in services that have not yet migrated to provider-
-    pluggable dispatch.
+    India.
+
+    v6 Phase 4-bis (ADR 0031): capability-driven. Reads the active
+    broker's :class:`BrokerCapabilities.supported_regions`; returns
+    ``True`` iff ``"india"`` is in that list. Returns ``False`` when
+    no broker is connected or the broker is not India-shaped — there
+    is no longer a silent India fallback.
+
+    Never raises.
     """
-    return active_region_code(legacy_india_fallback=True) == "india"
+    try:
+        return active_region_code() == "india"
+    except Exception:
+        # No broker, no settings, no env override → not India.
+        return False
 
 
 def is_feature_enabled_for_active_region(flag: str, default: bool = False) -> bool:
@@ -125,10 +114,13 @@ def is_feature_enabled_for_active_region(flag: str, default: bool = False) -> bo
     Reads the flag from the region plugin's ``feature_flags`` block
     (Phase 2 schema v2).
 
-    Uses the legacy India compatibility fallback so this function
-    never raises.
+    v6 Phase 4-bis (ADR 0031): never raises — falls through to
+    ``default`` when the region cannot be resolved.
     """
-    code = active_region_code(legacy_india_fallback=True)
+    try:
+        code = active_region_code()
+    except Exception:
+        return default
     try:
         from services.market_region_service import is_region_feature_enabled
 
@@ -175,7 +167,14 @@ def require_region_feature(flag: str, error_code: str, *, message: str | None = 
 
     if is_feature_enabled_for_active_region(flag, default=False):
         return
-    region = active_region_code(legacy_india_fallback=True)
+    try:
+        region = active_region_code()
+    except Exception:
+        # v6 Phase 4-bis: when no region resolves, surface "unknown"
+        # rather than silently fall back to India. The caller's gate
+        # is_feature_enabled_for_active_region already returned
+        # False, so we know the feature is disabled regardless.
+        region = "unknown"
     raise FeatureNotAvailableInRegion(
         active_region=region,
         code=error_code,

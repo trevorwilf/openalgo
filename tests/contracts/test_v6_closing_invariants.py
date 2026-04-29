@@ -136,15 +136,46 @@ def test_v6_invariant_v6_8_promoted_mpp_service_present() -> None:
 
 
 def test_v6_invariant_helper_retirement_marker_present() -> None:
-    """Phase 4 ships a deferred-state marker for the helper
-    retirement. While Phase 4-bis is pending the marker stays; once
-    Phase 4-bis lands the marker file is updated to assert the
-    inverted state. The presence of the file is the v6-close
-    contract."""
+    """v6 Phase 4 / 4-bis: the helper-retirement marker test exists.
+    Phase 4 shipped it as a deferred-state marker; v6 Phase 4-bis
+    inverted it to assert the retired state. The presence of the
+    file is the v6-close contract; the file's own assertions test
+    the actual retirement."""
     p = REPO_ROOT / "tests" / "contracts" / "test_v6_helper_retired.py"
     assert p.is_file(), (
         "v6 Phase 4 marker test missing — helper retirement "
         "tracking lost"
+    )
+
+
+def test_v6_invariant_v6_9_legacy_helper_retired() -> None:
+    """v6 Phase 4-bis (ADR 0031): the
+    ``_legacy_india_region_for_compat`` helper has been removed from
+    services.feature_gate_service, and ``active_region_code`` no
+    longer accepts a ``legacy_india_fallback`` parameter.
+
+    A ``_legacy_india_region_for_compat`` IS retained in
+    ``services.market_region_service`` — that is a different concern
+    (multi-region catalog tie-breaker, not a region gate) and is
+    explicitly allowed to remain.
+    """
+    import inspect
+
+    from services.feature_gate_service import active_region_code
+
+    # The helper has been removed from feature_gate_service.
+    import services.feature_gate_service as fgs
+
+    assert not hasattr(fgs, "_legacy_india_region_for_compat"), (
+        "v6-9 violated: services.feature_gate_service still exposes "
+        "_legacy_india_region_for_compat"
+    )
+
+    # The parameter has been removed.
+    sig = inspect.signature(active_region_code)
+    assert "legacy_india_fallback" not in sig.parameters, (
+        "v6-9 violated: active_region_code still accepts "
+        "legacy_india_fallback parameter"
     )
 
 

@@ -54,17 +54,13 @@ def test_default_active_region_raises_without_legacy_fallback(monkeypatch) -> No
         active_region_code()
 
 
-def test_default_active_region_legacy_fallback_returns_india(monkeypatch) -> None:
-    """The opt-in legacy India compatibility path still returns
-    ``"india"`` (used by ``is_india_region_active`` and the named
-    services that have not yet migrated to provider-pluggable
-    dispatch).
-
-    Same v5 Phase 2 monkeypatch hardening as above so the assertion
-    isn't accidentally satisfied by the installed-catalog fallback.
-    """
+def test_default_active_region_raises_when_no_broker_no_settings(monkeypatch) -> None:
+    """v6 Phase 4-bis: with no broker AND no configured default region,
+    ``active_region_code()`` raises ``RegionResolutionError``. The
+    legacy ``legacy_india_fallback=True`` opt-in path is gone."""
     from services import feature_gate_service
     from services.feature_gate_service import active_region_code
+    from domain.errors import RegionResolutionError
 
     monkeypatch.setattr(
         feature_gate_service,
@@ -75,7 +71,9 @@ def test_default_active_region_legacy_fallback_returns_india(monkeypatch) -> Non
         "services.market_region_service.resolve_default_market_region_code",
         lambda: None,
     )
-    assert active_region_code(legacy_india_fallback=True) == "india"
+    import pytest as _pytest
+    with _pytest.raises(RegionResolutionError):
+        active_region_code()
 
 
 def test_env_override_shortcircuits_resolution(monkeypatch) -> None:
