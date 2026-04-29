@@ -26,7 +26,7 @@
   "supports_analyzer": false,
   "auth_modes": ["SIGNATURE", "OAUTH"],
   "account_context_supports": ["subaccount_id", "entitlements"],
-  "supports_combo_types": ["SINGLE", "OCO", "OTO", "OTOCO"],
+  "supports_combo_types": ["SINGLE", "OCO", "OTO", "OTOCO", "MULTILEG_OPTIONS"],
   "streaming": {
     "order_events": {"transport": "grpc"},
     "market_data": {"transport": "mqtt"}
