@@ -1,0 +1,127 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "delivery_type": "ORDER_DELIVERY_TYPE_CNC",
+        "exchange": "NSE",
+        "instrument_token": "12345",
+        "order_type": "ORDER_TYPE_REGULAR",
+        "price": 0.0,
+        "quantity": 10,
+        "side": "ORDER_SIDE_BUY",
+        "trading_symbol": "SBIN",
+        "trigger_price": 0.0,
+        "validity": "ORDER_VALIDITY_DAY"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "delivery_type": "ORDER_DELIVERY_TYPE_IDAY",
+        "exchange": "NSE",
+        "instrument_token": "12345",
+        "order_type": "ORDER_TYPE_REGULAR",
+        "price": 2950.5,
+        "quantity": 5,
+        "side": "ORDER_SIDE_BUY",
+        "trading_symbol": "RELIANCE",
+        "trigger_price": 0.0,
+        "validity": "ORDER_VALIDITY_DAY"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "delivery_type": "ORDER_DELIVERY_TYPE_CNC",
+        "exchange": "NFO",
+        "instrument_token": "12345",
+        "order_type": "ORDER_TYPE_REGULAR",
+        "price": 200.0,
+        "quantity": 15,
+        "side": "ORDER_SIDE_SELL",
+        "trading_symbol": "BANKNIFTY24APR2447500CE",
+        "trigger_price": 0.0,
+        "validity": "ORDER_VALIDITY_DAY"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "delivery_type": "ORDER_DELIVERY_TYPE_IDAY",
+        "exchange": "NSE",
+        "instrument_token": "12345",
+        "order_type": "ORDER_TYPE_STOPLOSS",
+        "price": 1500.0,
+        "quantity": 20,
+        "side": "ORDER_SIDE_BUY",
+        "trading_symbol": "INFY",
+        "trigger_price": 1495.0,
+        "validity": "ORDER_VALIDITY_DAY"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "delivery_type": "ORDER_DELIVERY_TYPE_IDAY",
+        "exchange": "NSE",
+        "instrument_token": "12345",
+        "order_type": "ORDER_TYPE_STOPLOSS",
+        "price": 0.0,
+        "quantity": 5,
+        "side": "ORDER_SIDE_SELL",
+        "trading_symbol": "TCS",
+        "trigger_price": 3800.0,
+        "validity": "ORDER_VALIDITY_DAY"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "delivery_type": "ORDER_DELIVERY_TYPE_CNC",
+        "exchange": "NSE",
+        "instrument_token": "12345",
+        "order_type": "ORDER_TYPE_REGULAR",
+        "price": 0.0,
+        "quantity": 1,
+        "side": "ORDER_SIDE_BUY",
+        "trading_symbol": "HDFCBANK",
+        "trigger_price": 0.0,
+        "validity": "ORDER_VALIDITY_IOC"
+      }
+    }
+  ],
+  "broker_code": "nubra",
+  "harness": "parity_v2_nubra_india",
+  "rejected": [
+    {
+      "broker_code": "nubra",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "nubra",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "nubra",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "order_id": "240319000123456",
+      "status": "ACCEPTED"
+    },
+    "order_id": "240319000123456",
+    "status": "ACCEPTED"
+  }
+}

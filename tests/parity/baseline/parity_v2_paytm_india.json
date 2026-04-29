@@ -1,0 +1,135 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "MARKET",
+        "price": 0.0,
+        "product": "C",
+        "quantity": 10,
+        "security_id": "12345",
+        "segment": "E",
+        "source": "M",
+        "trigger_price": 0.0,
+        "txn_type": "B",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "LIMIT",
+        "price": 2950.5,
+        "product": "I",
+        "quantity": 5,
+        "security_id": "12345",
+        "segment": "E",
+        "source": "M",
+        "trigger_price": 0.0,
+        "txn_type": "B",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "LIMIT",
+        "price": 200.0,
+        "product": "M",
+        "quantity": 15,
+        "security_id": "12345",
+        "segment": "D",
+        "source": "M",
+        "trigger_price": 0.0,
+        "txn_type": "S",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "STOP_LOSS",
+        "price": 1500.0,
+        "product": "I",
+        "quantity": 20,
+        "security_id": "12345",
+        "segment": "E",
+        "source": "M",
+        "trigger_price": 1495.0,
+        "txn_type": "B",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "STOP_LOSS_MARKET",
+        "price": 0.0,
+        "product": "I",
+        "quantity": 5,
+        "security_id": "12345",
+        "segment": "E",
+        "source": "M",
+        "trigger_price": 3800.0,
+        "txn_type": "S",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "exchange": "NSE",
+        "order_type": "MARKET",
+        "price": 0.0,
+        "product": "C",
+        "quantity": 1,
+        "security_id": "12345",
+        "segment": "E",
+        "source": "M",
+        "trigger_price": 0.0,
+        "txn_type": "B",
+        "validity": "IOC"
+      }
+    }
+  ],
+  "broker_code": "paytm",
+  "harness": "parity_v2_paytm_india",
+  "rejected": [
+    {
+      "broker_code": "paytm",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "paytm",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "paytm",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "data": {
+        "orderNo": "240319000123456"
+      },
+      "status": "success"
+    },
+    "order_id": "240319000123456",
+    "status": "success"
+  }
+}

@@ -1,0 +1,159 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "algoid": "openalgo",
+        "amoorder": "N",
+        "buyorsell": "BUY",
+        "disclosedquantity": 0,
+        "exchange": "NSE",
+        "goodtilldate": "",
+        "orderduration": "DAY",
+        "ordertype": "MARKET",
+        "participantcode": "",
+        "price": 0.0,
+        "producttype": "DELIVERY",
+        "quantityinlot": 10,
+        "symboltoken": "12345",
+        "tag": "openalgo",
+        "triggerprice": 0.0
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "algoid": "openalgo",
+        "amoorder": "N",
+        "buyorsell": "BUY",
+        "disclosedquantity": 0,
+        "exchange": "NSE",
+        "goodtilldate": "",
+        "orderduration": "DAY",
+        "ordertype": "LIMIT",
+        "participantcode": "",
+        "price": 2950.5,
+        "producttype": "VALUEPLUS",
+        "quantityinlot": 5,
+        "symboltoken": "12345",
+        "tag": "openalgo",
+        "triggerprice": 0.0
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "algoid": "openalgo",
+        "amoorder": "N",
+        "buyorsell": "SELL",
+        "disclosedquantity": 0,
+        "exchange": "NSEFO",
+        "goodtilldate": "",
+        "orderduration": "DAY",
+        "ordertype": "LIMIT",
+        "participantcode": "",
+        "price": 200.0,
+        "producttype": "NORMAL",
+        "quantityinlot": 15,
+        "symboltoken": "12345",
+        "tag": "openalgo",
+        "triggerprice": 0.0
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "algoid": "openalgo",
+        "amoorder": "N",
+        "buyorsell": "BUY",
+        "disclosedquantity": 0,
+        "exchange": "NSE",
+        "goodtilldate": "",
+        "orderduration": "DAY",
+        "ordertype": "STOPLOSS",
+        "participantcode": "",
+        "price": 1500.0,
+        "producttype": "VALUEPLUS",
+        "quantityinlot": 20,
+        "symboltoken": "12345",
+        "tag": "openalgo",
+        "triggerprice": 1495.0
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "algoid": "openalgo",
+        "amoorder": "N",
+        "buyorsell": "SELL",
+        "disclosedquantity": 0,
+        "exchange": "NSE",
+        "goodtilldate": "",
+        "orderduration": "DAY",
+        "ordertype": "STOPLOSS",
+        "participantcode": "",
+        "price": 0.0,
+        "producttype": "VALUEPLUS",
+        "quantityinlot": 5,
+        "symboltoken": "12345",
+        "tag": "openalgo",
+        "triggerprice": 3800.0
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "algoid": "openalgo",
+        "amoorder": "N",
+        "buyorsell": "BUY",
+        "disclosedquantity": 0,
+        "exchange": "NSE",
+        "goodtilldate": "",
+        "orderduration": "IOC",
+        "ordertype": "MARKET",
+        "participantcode": "",
+        "price": 0.0,
+        "producttype": "DELIVERY",
+        "quantityinlot": 1,
+        "symboltoken": "12345",
+        "tag": "openalgo",
+        "triggerprice": 0.0
+      }
+    }
+  ],
+  "broker_code": "motilal",
+  "harness": "parity_v2_motilal_india",
+  "rejected": [
+    {
+      "broker_code": "motilal",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "motilal",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "motilal",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "data": {
+        "uniqueorderid": "240319000123456"
+      },
+      "status": "SUCCESS"
+    },
+    "order_id": "240319000123456",
+    "status": "SUCCESS"
+  }
+}

@@ -1,0 +1,141 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "amo": false,
+        "exchange": "nse",
+        "instrumentToken": "12345",
+        "orderType": "market",
+        "price": 0.0,
+        "product": "delivery",
+        "qty": 10,
+        "side": "buy",
+        "tag": "openalgo",
+        "tradingSymbol": "SBIN",
+        "triggerPrice": 0.0,
+        "validity": "day"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "amo": false,
+        "exchange": "nse",
+        "instrumentToken": "12345",
+        "orderType": "limit",
+        "price": 2950.5,
+        "product": "intraday",
+        "qty": 5,
+        "side": "buy",
+        "tag": "openalgo",
+        "tradingSymbol": "RELIANCE",
+        "triggerPrice": 0.0,
+        "validity": "day"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "amo": false,
+        "exchange": "nfo",
+        "instrumentToken": "12345",
+        "orderType": "limit",
+        "price": 200.0,
+        "product": "normal",
+        "qty": 15,
+        "side": "sell",
+        "tag": "openalgo",
+        "tradingSymbol": "BANKNIFTY24APR2447500CE",
+        "triggerPrice": 0.0,
+        "validity": "day"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "amo": false,
+        "exchange": "nse",
+        "instrumentToken": "12345",
+        "orderType": "stoplimit",
+        "price": 1500.0,
+        "product": "intraday",
+        "qty": 20,
+        "side": "buy",
+        "tag": "openalgo",
+        "tradingSymbol": "INFY",
+        "triggerPrice": 1495.0,
+        "validity": "day"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "amo": false,
+        "exchange": "nse",
+        "instrumentToken": "12345",
+        "orderType": "stopmarket",
+        "price": 0.0,
+        "product": "intraday",
+        "qty": 5,
+        "side": "sell",
+        "tag": "openalgo",
+        "tradingSymbol": "TCS",
+        "triggerPrice": 3800.0,
+        "validity": "day"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "amo": false,
+        "exchange": "nse",
+        "instrumentToken": "12345",
+        "orderType": "market",
+        "price": 0.0,
+        "product": "delivery",
+        "qty": 1,
+        "side": "buy",
+        "tag": "openalgo",
+        "tradingSymbol": "HDFCBANK",
+        "triggerPrice": 0.0,
+        "validity": "ioc"
+      }
+    }
+  ],
+  "broker_code": "tradejini",
+  "harness": "parity_v2_tradejini_india",
+  "rejected": [
+    {
+      "broker_code": "tradejini",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "tradejini",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "tradejini",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "data": {
+        "orderId": "240319000123456"
+      },
+      "status": "OK"
+    },
+    "order_id": "240319000123456",
+    "status": "OK"
+  }
+}

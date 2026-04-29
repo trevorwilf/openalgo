@@ -1,0 +1,133 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "afterMarketOrderFlag": "NO",
+        "disclosedQuantity": "0",
+        "exchange": "NSE",
+        "orderType": "MKT",
+        "orderValidity": "DAY",
+        "price": "0",
+        "productType": "CNC",
+        "quantity": "10",
+        "tradingSymbol": "SBIN",
+        "transactionType": "BUY",
+        "triggerPrice": "0"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "afterMarketOrderFlag": "NO",
+        "disclosedQuantity": "0",
+        "exchange": "NSE",
+        "orderType": "L",
+        "orderValidity": "DAY",
+        "price": "2950.50",
+        "productType": "MIS",
+        "quantity": "5",
+        "tradingSymbol": "RELIANCE",
+        "transactionType": "BUY",
+        "triggerPrice": "0"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "afterMarketOrderFlag": "NO",
+        "disclosedQuantity": "0",
+        "exchange": "NFO",
+        "orderType": "L",
+        "orderValidity": "DAY",
+        "price": "200.00",
+        "productType": "NRML",
+        "quantity": "15",
+        "tradingSymbol": "BANKNIFTY24APR2447500CE",
+        "transactionType": "SELL",
+        "triggerPrice": "0"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "afterMarketOrderFlag": "NO",
+        "disclosedQuantity": "0",
+        "exchange": "NSE",
+        "orderType": "SL",
+        "orderValidity": "DAY",
+        "price": "1500.00",
+        "productType": "MIS",
+        "quantity": "20",
+        "tradingSymbol": "INFY",
+        "transactionType": "BUY",
+        "triggerPrice": "1495.00"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "afterMarketOrderFlag": "NO",
+        "disclosedQuantity": "0",
+        "exchange": "NSE",
+        "orderType": "SL-M",
+        "orderValidity": "DAY",
+        "price": "0",
+        "productType": "MIS",
+        "quantity": "5",
+        "tradingSymbol": "TCS",
+        "transactionType": "SELL",
+        "triggerPrice": "3800.00"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "afterMarketOrderFlag": "NO",
+        "disclosedQuantity": "0",
+        "exchange": "NSE",
+        "orderType": "MKT",
+        "orderValidity": "IOC",
+        "price": "0",
+        "productType": "CNC",
+        "quantity": "1",
+        "tradingSymbol": "HDFCBANK",
+        "transactionType": "BUY",
+        "triggerPrice": "0"
+      }
+    }
+  ],
+  "broker_code": "samco",
+  "harness": "parity_v2_samco_india",
+  "rejected": [
+    {
+      "broker_code": "samco",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "samco",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "samco",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "orderNumber": "240319000123456",
+      "status": "PENDING"
+    },
+    "order_id": "240319000123456",
+    "status": "PENDING"
+  }
+}

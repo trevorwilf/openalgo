@@ -68,6 +68,20 @@ HARNESSES = [
     "parity_v2_iifl_india",
     "parity_v2_iiflcapital_india",
     "parity_v2_indmoney_india",
+    # v6 Phase 7 — alpha batch 2 — closes the 30-broker India v2 set.
+    "parity_v2_jainamxts_india",
+    "parity_v2_kotak_india",
+    "parity_v2_motilal_india",
+    "parity_v2_mstock_india",
+    "parity_v2_nubra_india",
+    "parity_v2_paytm_india",
+    "parity_v2_pocketful_india",
+    "parity_v2_rmoney_india",
+    "parity_v2_samco_india",
+    "parity_v2_shoonya_india",
+    "parity_v2_tradejini_india",
+    "parity_v2_wisdom_india",
+    "parity_v2_zebu_india",
 ]
 
 

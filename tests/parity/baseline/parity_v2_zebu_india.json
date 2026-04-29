@@ -1,0 +1,139 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "actid": "zebu-test-account",
+        "exch": "NSE",
+        "prc": "0",
+        "prctyp": "MKT",
+        "prd": "C",
+        "qty": "10",
+        "remarks": "openalgo",
+        "ret": "DAY",
+        "trantype": "B",
+        "trgprc": "0",
+        "tsym": "SBIN",
+        "uid": "zebu-test-account"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "actid": "zebu-test-account",
+        "exch": "NSE",
+        "prc": "2950.50",
+        "prctyp": "LMT",
+        "prd": "I",
+        "qty": "5",
+        "remarks": "openalgo",
+        "ret": "DAY",
+        "trantype": "B",
+        "trgprc": "0",
+        "tsym": "RELIANCE",
+        "uid": "zebu-test-account"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "actid": "zebu-test-account",
+        "exch": "NFO",
+        "prc": "200.00",
+        "prctyp": "LMT",
+        "prd": "M",
+        "qty": "15",
+        "remarks": "openalgo",
+        "ret": "DAY",
+        "trantype": "S",
+        "trgprc": "0",
+        "tsym": "BANKNIFTY24APR2447500CE",
+        "uid": "zebu-test-account"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "actid": "zebu-test-account",
+        "exch": "NSE",
+        "prc": "1500.00",
+        "prctyp": "SL-LMT",
+        "prd": "I",
+        "qty": "20",
+        "remarks": "openalgo",
+        "ret": "DAY",
+        "trantype": "B",
+        "trgprc": "1495.00",
+        "tsym": "INFY",
+        "uid": "zebu-test-account"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "actid": "zebu-test-account",
+        "exch": "NSE",
+        "prc": "0",
+        "prctyp": "SL-MKT",
+        "prd": "I",
+        "qty": "5",
+        "remarks": "openalgo",
+        "ret": "DAY",
+        "trantype": "S",
+        "trgprc": "3800.00",
+        "tsym": "TCS",
+        "uid": "zebu-test-account"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "actid": "zebu-test-account",
+        "exch": "NSE",
+        "prc": "0",
+        "prctyp": "MKT",
+        "prd": "C",
+        "qty": "1",
+        "remarks": "openalgo",
+        "ret": "IOC",
+        "trantype": "B",
+        "trgprc": "0",
+        "tsym": "HDFCBANK",
+        "uid": "zebu-test-account"
+      }
+    }
+  ],
+  "broker_code": "zebu",
+  "harness": "parity_v2_zebu_india",
+  "rejected": [
+    {
+      "broker_code": "zebu",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "zebu",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "zebu",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "norenordno": "240319000123456",
+      "stat": "Ok"
+    },
+    "order_id": "240319000123456",
+    "status": "Ok"
+  }
+}
