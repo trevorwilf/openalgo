@@ -2142,6 +2142,16 @@ def execute_workflow(
             ),
         }
 
+    # v6 Phase 2-bis strategy — venue-aware tz integration. India
+    # parity is bit-identical: ``venue_tz_or_default("NSE")`` returns
+    # ``Asia/Kolkata`` for the canonical NSE venue. Phase 2-bis-2
+    # migrates the per-default sites in this file to derive their
+    # session windows from the venue session service instead of
+    # carrying literal "09:15"/"15:30" defaults.
+    from services.venue_session_service import venue_tz_or_default
+
+    _venue_tz = venue_tz_or_default("NSE")  # noqa: F841 — phase guard
+
     lock = get_workflow_lock(workflow_id)
 
     if lock.locked():
