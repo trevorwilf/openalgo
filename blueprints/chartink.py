@@ -805,6 +805,28 @@ def webhook(webhook_id):
 
         logger.info(f"Received webhook data: {data}")
 
+        # v6 Phase 2-bis screener — dispatcher integration. The
+        # Chartink screener provider is registered at app startup;
+        # resolving it here surfaces a structured 503 if the registry
+        # is broken (defensive — should never fire in production).
+        # India parity: the legacy webhook parser below produces the
+        # same orders the Chartink provider would; Phase 2-bis-2
+        # migrates the parser into ``provider.validate_webhook_payload``.
+        from services.screeners.dispatcher import (
+            ScreenerProviderNotRegistered,
+            get_screener_provider,
+        )
+
+        try:
+            get_screener_provider("chartink")
+        except ScreenerProviderNotRegistered:
+            logger.error("Chartink screener provider not registered")
+            return jsonify({
+                "status": "error",
+                "code": "screener_provider_not_registered",
+                "error": "Chartink screener provider not registered.",
+            }), 503
+
         # Determine action from scan name first to apply correct time checks
         scan_name = data.get("scan_name", "").upper()
         if "BUY" in scan_name:
