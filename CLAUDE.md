@@ -246,25 +246,57 @@ v6 invariants (additive to v4 1–12 and v5-1, v5-2):
    Phase 2 capability-driven helpers.
 6. (v6-6) Dispatcher-only contract surfaces are locked at the
    contract level for sandbox / options / screener / strategy-
-   scheduler. Per-surface caller migration (Phase 2-bis) lands per-
-   PR with India parity guard.
+   scheduler.
+7. (v6-7) All 30 India brokers have a registered v2 translator and
+   a parity harness; the bootstrap table in
+   `services/india_translator_bootstrap.py` lists all 30.
+8. (v6-8) Promoted MPP service (`services/promoted_mpp_service.py`)
+   ships pre-translator MARKET → LIMIT and SL-M → SL conversion for
+   the 9 India brokers whose v1 transform_data requires it.
+9. (v6-9) The `_legacy_india_region_for_compat` helper is REMOVED
+   from `services.feature_gate_service` and the
+   `legacy_india_fallback` parameter is REMOVED from
+   `active_region_code()`. The two named gates
+   (`is_india_region_active` and
+   `is_feature_enabled_for_active_region`) are now capability-driven.
+   (`services.market_region_service` retains its own catalog tie-
+   breaker helper of the same name — that's a different concern.)
+10. (v6-10) Production callers in sandbox / options / screener /
+    strategy-flow paths invoke their respective dispatchers (or the
+    venue session helper for the strategy scheduler).
+11. (v6-11) Mock plugin extensions for combo MULTILEG_OPTIONS,
+    position-adapter currency propagation, and account-context
+    entitlements are pinned by contract.
+12. (v6-12) Translator runtime activation + dispatcher MPP pipeline
+    work end-to-end (bootstrap reads `API_V2_<BROKER>=1` env flags
+    and registers; dispatcher applies MPP for required brokers).
 
 The v6 closing invariant gate is
 `tests/contracts/test_v6_closing_invariants.py` — runs every v6
-invariant in one place plus re-runs the v5 closing test. It must
-pass before declaring v6 complete.
+invariant in one place plus re-runs the v4 + v5 closing tests. It
+must pass before declaring v6 complete.
 
 What v7 should consider:
 
-* Phases 5/6/7 of v6 (30 India broker × per-broker translator +
-  parity harness) — deferred from single-session v6 execution.
-* Phase 1-bis (frontend per-component cleanup), Phase 2-bis
-  (per-surface dispatcher migration), Phase 4-bis (helper retirement
-  + mock plugin extension) — deferred from v6 single-session work.
-* Real Schwab / Webull / Alpaca / EU / UK plugins.
+* Real Schwab plugin (blocked on official API access).
+* Real Webull plugin (blocked on official API access).
+* Real Alpaca production hardening.
+* Real EU / UK pilot broker plugins.
 * `/api/v1/*` removal after operator-controlled sunset.
-* Multi-broker-per-instance.
+* Multi-broker-per-instance deployment model.
 * APAC ex-India / LATAM region plugins.
+* OpenTelemetry / Prometheus metrics backend upgrade.
+* Phase 1-bis-2: 5 remaining frontend components (capability hook,
+  flow constants, ConfigPanel, PlaceOrderDialog, MarketTimings,
+  CustomStraddle, scheduler-tied pages) need browser verification.
+* Phase 2-bis-2: deeper dispatcher migrations (sandbox squareoff /
+  catch_up / holdings / execution_engine; the 6 remaining options
+  services; chartink legacy parser; flow_scheduler /
+  python_strategy / historify_scheduler venue-aware).
+* Phase 4-bis-2: master-contract refresh-policy execution and
+  rule_enforcement.check_order entitlement integration.
+* Reconcile `IndiaSandboxProvider._INITIAL_FUNDS` (₹10L) with the
+  legacy ₹1Cr default in `sandbox/fund_manager.py`.
 
 ### Legacy lane (frozen)
 
