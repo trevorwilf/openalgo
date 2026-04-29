@@ -577,6 +577,26 @@ def get_option_greeks(
             },
             422,
         )
+
+    # v6 Phase 2-bis options — dispatcher integration. India provider
+    # is the home for Greeks math on Phase 2-bis-2.
+    from services.options.dispatcher import (
+        OptionsProviderNotRegistered,
+        get_options_provider,
+    )
+    try:
+        get_options_provider("india")
+    except OptionsProviderNotRegistered:
+        return (
+            False,
+            {
+                "status": "error",
+                "code": ErrorCode.OPTIONS_PROVIDER_NOT_REGISTERED,
+                "message": "India options provider not registered.",
+            },
+            503,
+        )
+
     try:
         # Import here to avoid circular dependency
         from services.quotes_service import get_quotes

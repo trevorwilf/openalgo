@@ -616,6 +616,25 @@ def place_options_multiorder(
             },
             422,
         )
+
+    # v6 Phase 2-bis options — dispatcher integration.
+    from services.options.dispatcher import (
+        OptionsProviderNotRegistered,
+        get_options_provider,
+    )
+    try:
+        get_options_provider("india")
+    except OptionsProviderNotRegistered:
+        return (
+            False,
+            {
+                "status": "error",
+                "code": ErrorCode.OPTIONS_PROVIDER_NOT_REGISTERED,
+                "message": "India options provider not registered.",
+            },
+            503,
+        )
+
     original_data = copy.deepcopy(multiorder_data)
     if api_key:
         original_data["apikey"] = api_key
