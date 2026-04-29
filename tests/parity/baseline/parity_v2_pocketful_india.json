@@ -1,0 +1,147 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "client_id": "pocketful-test-account",
+        "disclosed_quantity": "0",
+        "exchange": "NSE",
+        "instrument_token": "12345",
+        "order_type": "MARKET",
+        "price": "0",
+        "product": "CNC",
+        "quantity": 10,
+        "tag": "openalgo",
+        "trading_symbol": "SBIN",
+        "transaction_type": "BUY",
+        "trigger_price": "0",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "client_id": "pocketful-test-account",
+        "disclosed_quantity": "0",
+        "exchange": "NSE",
+        "instrument_token": "12345",
+        "order_type": "LIMIT",
+        "price": "2950.50",
+        "product": "MIS",
+        "quantity": 5,
+        "tag": "openalgo",
+        "trading_symbol": "RELIANCE",
+        "transaction_type": "BUY",
+        "trigger_price": "0",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "client_id": "pocketful-test-account",
+        "disclosed_quantity": "0",
+        "exchange": "NFO",
+        "instrument_token": "12345",
+        "order_type": "LIMIT",
+        "price": "200.00",
+        "product": "NRML",
+        "quantity": 15,
+        "tag": "openalgo",
+        "trading_symbol": "BANKNIFTY24APR2447500CE",
+        "transaction_type": "SELL",
+        "trigger_price": "0",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "client_id": "pocketful-test-account",
+        "disclosed_quantity": "0",
+        "exchange": "NSE",
+        "instrument_token": "12345",
+        "order_type": "SL",
+        "price": "1500.00",
+        "product": "MIS",
+        "quantity": 20,
+        "tag": "openalgo",
+        "trading_symbol": "INFY",
+        "transaction_type": "BUY",
+        "trigger_price": "1495.00",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "client_id": "pocketful-test-account",
+        "disclosed_quantity": "0",
+        "exchange": "NSE",
+        "instrument_token": "12345",
+        "order_type": "SLM",
+        "price": "0",
+        "product": "MIS",
+        "quantity": 5,
+        "tag": "openalgo",
+        "trading_symbol": "TCS",
+        "transaction_type": "SELL",
+        "trigger_price": "3800.00",
+        "validity": "DAY"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "client_id": "pocketful-test-account",
+        "disclosed_quantity": "0",
+        "exchange": "NSE",
+        "instrument_token": "12345",
+        "order_type": "MARKET",
+        "price": "0",
+        "product": "CNC",
+        "quantity": 1,
+        "tag": "openalgo",
+        "trading_symbol": "HDFCBANK",
+        "transaction_type": "BUY",
+        "trigger_price": "0",
+        "validity": "IOC"
+      }
+    }
+  ],
+  "broker_code": "pocketful",
+  "harness": "parity_v2_pocketful_india",
+  "rejected": [
+    {
+      "broker_code": "pocketful",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "pocketful",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "pocketful",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "data": {
+        "oms_order_id": "240319000123456"
+      },
+      "status": "success"
+    },
+    "order_id": "240319000123456",
+    "status": "success"
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "accepted": [
+    {
+      "label": "market_buy_equity_cnc_default",
+      "native": {
+        "am": "NO",
+        "dq": "0",
+        "es": "nse_cm",
+        "mp": "0",
+        "pc": "CNC",
+        "pr": "0",
+        "pt": "MKT",
+        "qt": "10",
+        "rt": "DAY",
+        "tk": "12345",
+        "tp": "0",
+        "ts": "SBIN",
+        "tt": "B"
+      }
+    },
+    {
+      "label": "limit_buy_equity_mis_via_reduce_only",
+      "native": {
+        "am": "NO",
+        "dq": "0",
+        "es": "nse_cm",
+        "mp": "0",
+        "pc": "MIS",
+        "pr": "2950.50",
+        "pt": "L",
+        "qt": "5",
+        "rt": "DAY",
+        "tk": "12345",
+        "tp": "0",
+        "ts": "RELIANCE",
+        "tt": "B"
+      }
+    },
+    {
+      "label": "limit_sell_fno_nrml_hint",
+      "native": {
+        "am": "NO",
+        "dq": "0",
+        "es": "nfo_cm",
+        "mp": "0",
+        "pc": "NRML",
+        "pr": "200.00",
+        "pt": "L",
+        "qt": "15",
+        "rt": "DAY",
+        "tk": "12345",
+        "tp": "0",
+        "ts": "BANKNIFTY24APR2447500CE",
+        "tt": "S"
+      }
+    },
+    {
+      "label": "stop_limit_buy_equity",
+      "native": {
+        "am": "NO",
+        "dq": "0",
+        "es": "nse_cm",
+        "mp": "0",
+        "pc": "MIS",
+        "pr": "1500.00",
+        "pt": "SL",
+        "qt": "20",
+        "rt": "DAY",
+        "tk": "12345",
+        "tp": "1495.00",
+        "ts": "INFY",
+        "tt": "B"
+      }
+    },
+    {
+      "label": "stop_market_sell_equity",
+      "native": {
+        "am": "NO",
+        "dq": "0",
+        "es": "nse_cm",
+        "mp": "0",
+        "pc": "MIS",
+        "pr": "0",
+        "pt": "SL-M",
+        "qt": "5",
+        "rt": "DAY",
+        "tk": "12345",
+        "tp": "3800.00",
+        "ts": "TCS",
+        "tt": "S"
+      }
+    },
+    {
+      "label": "ioc_market_buy",
+      "native": {
+        "am": "NO",
+        "dq": "0",
+        "es": "nse_cm",
+        "mp": "0",
+        "pc": "CNC",
+        "pr": "0",
+        "pt": "MKT",
+        "qt": "1",
+        "rt": "IOC",
+        "tk": "12345",
+        "tp": "0",
+        "ts": "HDFCBANK",
+        "tt": "B"
+      }
+    }
+  ],
+  "broker_code": "kotak",
+  "harness": "parity_v2_kotak_india",
+  "rejected": [
+    {
+      "broker_code": "kotak",
+      "capability_name": "tif",
+      "expected_dimension": "tif",
+      "label": "fok_tif_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "kotak",
+      "capability_name": "session",
+      "expected_dimension": "session",
+      "label": "pre_market_session_unsupported",
+      "raised": true
+    },
+    {
+      "broker_code": "kotak",
+      "capability_name": "quantity_unit",
+      "expected_dimension": "quantity_unit",
+      "label": "fractional_unsupported",
+      "raised": true
+    }
+  ],
+  "response_round_trip": {
+    "native": {
+      "nOrdNo": "240319000123456",
+      "stat": "Ok"
+    },
+    "order_id": "240319000123456",
+    "status": "Ok"
+  }
+}

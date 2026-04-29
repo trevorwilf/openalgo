@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **864**.
+Total classified files: **877**.
 
 Classification semantics:
 
@@ -333,7 +333,7 @@ Classification semantics:
 - `services/screeners/providers/uk/__init__.py`
 - `services/screeners/providers/us/__init__.py`
 
-## BROKER_PLUGIN (551 files)
+## BROKER_PLUGIN (564 files)
 
 - `broker/__init__.py`
 - `broker/_mock_schwab_like/__init__.py`
@@ -668,6 +668,7 @@ Classification semantics:
 - `broker/jainamxts/streaming/jainamxts_adapter.py`
 - `broker/jainamxts/streaming/jainamxts_mapping.py`
 - `broker/jainamxts/streaming/jainamxts_websocket.py`
+- `broker/jainamxts/translator.py`
 - `broker/kotak/__init__.py`
 - `broker/kotak/api/__init__.py`
 - `broker/kotak/api/auth_api.py`
@@ -684,6 +685,7 @@ Classification semantics:
 - `broker/kotak/streaming/kotak_adapter.py`
 - `broker/kotak/streaming/kotak_mapping.py`
 - `broker/kotak/streaming/kotak_websocket.py`
+- `broker/kotak/translator.py`
 - `broker/motilal/__init__.py`
 - `broker/motilal/api/__init__.py`
 - `broker/motilal/api/auth_api.py`
@@ -699,6 +701,7 @@ Classification semantics:
 - `broker/motilal/streaming/__init__.py`
 - `broker/motilal/streaming/motilal_adapter.py`
 - `broker/motilal/streaming/motilal_mapping.py`
+- `broker/motilal/translator.py`
 - `broker/mstock/__init__.py`
 - `broker/mstock/api/__init__.py`
 - `broker/mstock/api/auth_api.py`
@@ -714,6 +717,7 @@ Classification semantics:
 - `broker/mstock/streaming/__init__.py`
 - `broker/mstock/streaming/mstock_adapter.py`
 - `broker/mstock/streaming/mstock_mapping.py`
+- `broker/mstock/translator.py`
 - `broker/nubra/__init__.py`
 - `broker/nubra/api/__init__.py`
 - `broker/nubra/api/auth_api.py`
@@ -733,6 +737,7 @@ Classification semantics:
 - `broker/nubra/streaming/__init__.py`
 - `broker/nubra/streaming/nubra_adapter.py`
 - `broker/nubra/streaming/nubra_mapping.py`
+- `broker/nubra/translator.py`
 - `broker/paytm/api/__init__.py`
 - `broker/paytm/api/auth_api.py`
 - `broker/paytm/api/data.py`
@@ -747,6 +752,7 @@ Classification semantics:
 - `broker/paytm/streaming/paytm_adapter.py`
 - `broker/paytm/streaming/paytm_mapping.py`
 - `broker/paytm/streaming/paytm_websocket.py`
+- `broker/paytm/translator.py`
 - `broker/pocketful/api/__init__.py`
 - `broker/pocketful/api/auth_api.py`
 - `broker/pocketful/api/data.py`
@@ -762,6 +768,7 @@ Classification semantics:
 - `broker/pocketful/streaming/__init__.py`
 - `broker/pocketful/streaming/pocketful_adapter.py`
 - `broker/pocketful/streaming/pocketful_mapping.py`
+- `broker/pocketful/translator.py`
 - `broker/rmoney/api/__init__.py`
 - `broker/rmoney/api/auth_api.py`
 - `broker/rmoney/api/data.py`
@@ -777,6 +784,7 @@ Classification semantics:
 - `broker/rmoney/streaming/rmoney_adapter.py`
 - `broker/rmoney/streaming/rmoney_mapping.py`
 - `broker/rmoney/streaming/rmoney_websocket.py`
+- `broker/rmoney/translator.py`
 - `broker/samco/__init__.py`
 - `broker/samco/api/__init__.py`
 - `broker/samco/api/auth_api.py`
@@ -794,6 +802,7 @@ Classification semantics:
 - `broker/samco/streaming/samcoWebSocket.py`
 - `broker/samco/streaming/samco_adapter.py`
 - `broker/samco/streaming/samco_mapping.py`
+- `broker/samco/translator.py`
 - `broker/shoonya/__init__.py`
 - `broker/shoonya/api/__init__.py`
 - `broker/shoonya/api/auth_api.py`
@@ -809,6 +818,7 @@ Classification semantics:
 - `broker/shoonya/streaming/shoonya_adapter.py`
 - `broker/shoonya/streaming/shoonya_mapping.py`
 - `broker/shoonya/streaming/shoonya_websocket.py`
+- `broker/shoonya/translator.py`
 - `broker/tradejini/__init__.py`
 - `broker/tradejini/api/__init__.py`
 - `broker/tradejini/api/auth_api.py`
@@ -825,6 +835,7 @@ Classification semantics:
 - `broker/tradejini/streaming/nxtradstream.py`
 - `broker/tradejini/streaming/tradejini_adapter.py`
 - `broker/tradejini/streaming/tradejini_mapping.py`
+- `broker/tradejini/translator.py`
 - `broker/upstox/__init__.py`
 - `broker/upstox/api/__init__.py`
 - `broker/upstox/api/auth_api.py`
@@ -856,6 +867,7 @@ Classification semantics:
 - `broker/wisdom/streaming/wisdom_adapter.py`
 - `broker/wisdom/streaming/wisdom_mapping.py`
 - `broker/wisdom/streaming/wisdom_websocket.py`
+- `broker/wisdom/translator.py`
 - `broker/zebu/__init__.py`
 - `broker/zebu/api/__init__.py`
 - `broker/zebu/api/auth_api.py`
@@ -871,6 +883,7 @@ Classification semantics:
 - `broker/zebu/streaming/zebu_adapter.py`
 - `broker/zebu/streaming/zebu_mapping.py`
 - `broker/zebu/streaming/zebu_websocket.py`
+- `broker/zebu/translator.py`
 - `broker/zerodha/api/__init__.py`
 - `broker/zerodha/api/auth_api.py`
 - `broker/zerodha/api/data.py`
