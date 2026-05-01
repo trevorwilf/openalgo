@@ -24,6 +24,8 @@ config.ini
 *_claude_code_prompt.md
 expert 1*
 expert 2*
+expert 3*
+expert 4*
 
 #DB Files, CSV Files and Log/Tmp Files
 
