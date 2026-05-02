@@ -35,7 +35,7 @@ import {
   OPTION_STRATEGIES,
   INDEX_SYMBOLS,
   EXPIRY_TYPES,
-} from '@/lib/flow/constants'
+} from '@/india_legacy/lib/flow/constants'
 import { cn } from '@/lib/utils'
 
 // ===== LOCAL CONSTANTS =====
