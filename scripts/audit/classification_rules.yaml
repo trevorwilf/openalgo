@@ -105,6 +105,27 @@ rules:
     classification: PROMOTED_CORE
   - path: services/promoted_mpp_service.py
     classification: PROMOTED_CORE
+  # Phase 3 (T-20) — 8 critical service entry points migrated from
+  # ``utils.constants.VALID_*`` imports to region-aware vocabulary
+  # lookups via services.market_region_service. They still serve the
+  # v1 lane (which is India-only by ADR 0005) but their *code* no
+  # longer hard-codes India, so they're region-neutral by classification.
+  - path: services/place_order_service.py
+    classification: PROMOTED_CORE
+  - path: services/place_smart_order_service.py
+    classification: PROMOTED_CORE
+  - path: services/quotes_service.py
+    classification: PROMOTED_CORE
+  - path: services/history_service.py
+    classification: PROMOTED_CORE
+  - path: services/depth_service.py
+    classification: PROMOTED_CORE
+  - path: services/margin_service.py
+    classification: PROMOTED_CORE
+  - path: services/basket_order_service.py
+    classification: PROMOTED_CORE
+  - path: services/split_order_service.py
+    classification: PROMOTED_CORE
 
   # ---------------- PROMOTED_CORE — utils explicitly clean ----------------
   - path: utils/__init__.py

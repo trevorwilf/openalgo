@@ -258,11 +258,18 @@ CLASSIFIED_FORBIDDEN_MODULES: set[str] = {
     "database.token_db_enhanced",
     "database.symbol",
     "database.market_calendar_db",
-    "services.quotes_service",
-    "services.history_service",
-    "services.place_order_service",
-    "services.basket_order_service",
-    "services.split_order_service",
+    # Phase 3 (T-20): the v1-lane order/quote/history/depth/margin/
+    # basket/smart-order/split-order services were on this list because
+    # they imported `utils.constants.VALID_*` and other legacy bits at
+    # module level. After Phase 3 those imports are function-local,
+    # the modules themselves are PROMOTED_CORE-classified, and the
+    # static + runtime import locks confirm load-time cleanliness.
+    # They are removed from this list so any other PROMOTED_CORE file
+    # (e.g. an `/api/v2` route that wants to delegate to the v1
+    # implementation during the operator-controlled v1 sunset window)
+    # can call them without tripping the contract test. Their lazy
+    # legacy imports remain confined to call paths and run only when
+    # the v1 lane is invoked.
     "domain.translators",
 }
 

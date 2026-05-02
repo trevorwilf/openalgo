@@ -7,15 +7,18 @@ from typing import Any, Dict, List, Optional, Tuple
 from database.auth_db import get_auth_token_broker
 from database.settings_db import get_analyze_mode
 from events import AnalyzerErrorEvent, OrderFailedEvent, SplitCompletedEvent
-from utils.constants import (
-    REQUIRED_ORDER_FIELDS,
-    VALID_ACTIONS,
-    VALID_EXCHANGES,
-    VALID_PRICE_TYPES,
-    VALID_PRODUCT_TYPES,
-)
+# Phase 3 (T-20) — VALID_ACTIONS / VALID_EXCHANGES / VALID_PRICE_TYPES /
+# VALID_PRODUCT_TYPES were imported here but never used. Removed as part of
+# the lane-isolation migration; downstream callers (place_order_service,
+# basket_order_service) own their own region-aware validation.
+# REQUIRED_ORDER_FIELDS inlined to drop the legacy utils.constants import.
 from utils.event_bus import bus
 from utils.logging import get_logger
+
+# Phase 3 (T-20) — required-fields list inlined; see place_order_service.py.
+_REQUIRED_ORDER_FIELDS: tuple[str, ...] = (
+    "apikey", "strategy", "symbol", "exchange", "action", "quantity",
+)
 
 # Initialize logger
 logger = get_logger(__name__)

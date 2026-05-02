@@ -4,7 +4,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from database.apilog_db import async_log_order, executor
 from database.auth_db import get_auth_token_broker
-from utils.constants import VALID_ACTIONS, VALID_EXCHANGES, VALID_PRICE_TYPES, VALID_PRODUCT_TYPES
+from domain.errors import MissingRegionContext
+from services.market_region_service import (
+    get_allowed_action_codes_for_active_region,
+    get_allowed_price_type_codes_for_active_region,
+    get_allowed_product_codes_for_active_region,
+    get_allowed_venue_codes_for_active_region,
+)
 from utils.logging import get_logger
 
 # Initialize logger
@@ -54,34 +60,44 @@ def validate_position(position: dict[str, Any], position_index: int) -> tuple[bo
             f"Position {position_index}: Missing mandatory field(s): {', '.join(missing_fields)}",
         )
 
+    # Phase 3 (T-20) — region-aware vocabulary lookup; replaces
+    # ``utils.constants.VALID_*`` imports.
+    try:
+        valid_exchanges = get_allowed_venue_codes_for_active_region()
+        valid_actions = get_allowed_action_codes_for_active_region()
+        valid_price_types = get_allowed_price_type_codes_for_active_region()
+        valid_product_types = get_allowed_product_codes_for_active_region()
+    except MissingRegionContext as exc:
+        return False, f"Position {position_index}: Cannot validate margin: {exc}"
+
     # Validate exchange
-    if position.get("exchange") not in VALID_EXCHANGES:
+    if position.get("exchange") not in valid_exchanges:
         return (
             False,
-            f"Position {position_index}: Invalid exchange. Must be one of: {', '.join(VALID_EXCHANGES)}",
+            f"Position {position_index}: Invalid exchange. Must be one of: {', '.join(valid_exchanges)}",
         )
 
     # Convert action to uppercase and validate
     if "action" in position:
         position["action"] = position["action"].upper()
-        if position["action"] not in VALID_ACTIONS:
+        if position["action"] not in valid_actions:
             return (
                 False,
-                f"Position {position_index}: Invalid action. Must be one of: {', '.join(VALID_ACTIONS)}",
+                f"Position {position_index}: Invalid action. Must be one of: {', '.join(valid_actions)}",
             )
 
     # Validate price type
-    if position.get("pricetype") not in VALID_PRICE_TYPES:
+    if position.get("pricetype") not in valid_price_types:
         return (
             False,
-            f"Position {position_index}: Invalid price type. Must be one of: {', '.join(VALID_PRICE_TYPES)}",
+            f"Position {position_index}: Invalid price type. Must be one of: {', '.join(valid_price_types)}",
         )
 
     # Validate product type
-    if position.get("product") not in VALID_PRODUCT_TYPES:
+    if position.get("product") not in valid_product_types:
         return (
             False,
-            f"Position {position_index}: Invalid product type. Must be one of: {', '.join(VALID_PRODUCT_TYPES)}",
+            f"Position {position_index}: Invalid product type. Must be one of: {', '.join(valid_product_types)}",
         )
 
     # Validate quantity is a positive number

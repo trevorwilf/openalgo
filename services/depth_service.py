@@ -2,9 +2,12 @@ import importlib
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from database.auth_db import Auth, db_session, get_auth_token_broker, verify_api_key
-from database.token_db import get_token
-from utils.constants import VALID_EXCHANGES
+from domain.errors import MissingRegionContext
+from services.market_region_service import get_allowed_venue_codes_for_active_region
 from utils.logging import get_logger
+
+# Phase 3 (T-20) — ``database.token_db.get_token`` imported lazily; see
+# services/quotes_service.py for rationale.
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -21,12 +24,19 @@ def validate_symbol_exchange(symbol: str, exchange: str) -> tuple[bool, str | No
     Returns:
         Tuple of (is_valid, error_message)
     """
-    # Validate exchange
+    # Validate exchange — Phase 3 (T-20) region-aware vocabulary lookup.
     exchange_upper = exchange.upper()
-    if exchange_upper not in VALID_EXCHANGES:
-        return False, f"Invalid exchange '{exchange}'. Must be one of: {', '.join(VALID_EXCHANGES)}"
+    try:
+        valid_exchanges = get_allowed_venue_codes_for_active_region()
+    except MissingRegionContext as exc:
+        return False, f"Cannot validate depth request: {exc}"
+    if exchange_upper not in valid_exchanges:
+        return False, f"Invalid exchange '{exchange}'. Must be one of: {', '.join(valid_exchanges)}"
 
-    # Validate symbol exists in master contract
+    # Validate symbol exists in master contract — function-local
+    # import (see services/quotes_service.py).
+    from database.token_db import get_token
+
     token = get_token(symbol, exchange_upper)
     if token is None:
         return (

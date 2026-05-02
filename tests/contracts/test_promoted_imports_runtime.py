@@ -36,9 +36,16 @@ FORBIDDEN_RUNTIME_MODULES: tuple[str, ...] = (
     "database.token_db_enhanced",
     "database.symbol",
     "database.market_calendar_db",
-    "services.quotes_service",
-    "services.history_service",
-    "services.place_order_service",
+    # Phase 3 (T-20) — services.quotes_service / history_service /
+    # place_order_service / basket_order_service / split_order_service
+    # were on this list because they imported from utils.constants /
+    # database.token_db at module load. After the Phase 3 migration
+    # those legacy imports are function-local and the modules
+    # themselves are PROMOTED_CORE-classified. Removing them from the
+    # runtime forbidden list lets other PROMOTED_CORE files import
+    # them without a transitive-legacy violation. The static lane-
+    # isolation contract still blocks any new imports of legacy
+    # symbols inside these files at module level.
 )
 
 

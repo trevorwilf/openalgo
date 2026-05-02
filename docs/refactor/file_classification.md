@@ -18,7 +18,7 @@ Classification semantics:
 | `BROKER_PLUGIN` | Under `broker/*` — broker facts only. |
 | `COMPATIBILITY_SHIM` | Explicit bridge between lanes (e.g. `domain/translators.py`). |
 
-## PROMOTED_CORE (76 files)
+## PROMOTED_CORE (84 files)
 
 - `__init__.py`
 - `conftest.py`
@@ -60,20 +60,27 @@ Classification semantics:
 - `restx_api/v2/regions.py`
 - `restx_api/v2/venues.py`
 - `services/account_context_service.py`
+- `services/basket_order_service.py`
 - `services/broker_market_data_registry.py`
 - `services/broker_streaming_registry.py`
 - `services/broker_translator_registry.py`
+- `services/depth_service.py`
 - `services/feature_gate_service.py`
+- `services/history_service.py`
 - `services/india_translator_bootstrap.py`
 - `services/instrument_resolution.py`
 - `services/instrument_sync_adapters/__init__.py`
 - `services/instrument_sync_service.py`
+- `services/margin_service.py`
 - `services/market_region_service.py`
 - `services/options/__init__.py`
 - `services/options/dispatcher.py`
 - `services/options/providers/__init__.py`
 - `services/options/providers/base.py`
+- `services/place_order_service.py`
+- `services/place_smart_order_service.py`
 - `services/promoted_mpp_service.py`
+- `services/quotes_service.py`
 - `services/rule_enforcement.py`
 - `services/sandbox/__init__.py`
 - `services/sandbox/dispatcher.py`
@@ -83,6 +90,7 @@ Classification semantics:
 - `services/screeners/dispatcher.py`
 - `services/screeners/providers/__init__.py`
 - `services/screeners/providers/base.py`
+- `services/split_order_service.py`
 - `utils/__init__.py`
 - `utils/broker_context.py`
 - `utils/capability_guards.py`
@@ -97,7 +105,7 @@ Classification semantics:
 - `utils/region_loader.py`
 - `utils/version.py`
 
-## LEGACY_INDIA (219 files)
+## LEGACY_INDIA (211 files)
 
 - `app.py`
 - `blueprints/__init__.py`
@@ -233,13 +241,11 @@ Classification semantics:
 - `sandbox/websocket_execution_engine.py`
 - `services/action_center_service.py`
 - `services/analyzer_service.py`
-- `services/basket_order_service.py`
 - `services/cancel_all_order_service.py`
 - `services/cancel_order_service.py`
 - `services/chart_service.py`
 - `services/close_position_service.py`
 - `services/custom_straddle_service.py`
-- `services/depth_service.py`
 - `services/expiry_service.py`
 - `services/flow_executor_service.py`
 - `services/flow_openalgo_client.py`
@@ -249,7 +255,6 @@ Classification semantics:
 - `services/gex_service.py`
 - `services/historify_scheduler_service.py`
 - `services/historify_service.py`
-- `services/history_service.py`
 - `services/holdings_service.py`
 - `services/instrument_sync_adapters/delta_adapter.py`
 - `services/instrument_sync_adapters/zerodha_adapter.py`
@@ -257,7 +262,6 @@ Classification semantics:
 - `services/intervals_service.py`
 - `services/iv_chart_service.py`
 - `services/iv_smile_service.py`
-- `services/margin_service.py`
 - `services/market_calendar_service.py`
 - `services/market_data_service.py`
 - `services/modify_order_service.py`
@@ -273,13 +277,9 @@ Classification semantics:
 - `services/pending_order_execution_service.py`
 - `services/ping_service.py`
 - `services/place_options_order_service.py`
-- `services/place_order_service.py`
-- `services/place_smart_order_service.py`
 - `services/positionbook_service.py`
-- `services/quotes_service.py`
 - `services/sandbox_service.py`
 - `services/search_service.py`
-- `services/split_order_service.py`
 - `services/straddle_chart_service.py`
 - `services/symbol_service.py`
 - `services/synthetic_future_service.py`
