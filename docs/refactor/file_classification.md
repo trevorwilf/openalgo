@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **898**.
+Total classified files: **904**.
 
 Classification semantics:
 
@@ -320,11 +320,17 @@ Classification semantics:
 - `websocket_proxy/port_check.py`
 - `websocket_proxy/server.py`
 
-## REGION_PLUGIN (31 files)
+## REGION_PLUGIN (37 files)
 
 - `market_regions/india/__init__.py`
 - `market_regions/india/holidays.py`
 - `market_regions/india/legacy_v1/__init__.py`
+- `market_regions/india/legacy_v1/constants.py`
+- `market_regions/india/legacy_v1/restx_api/__init__.py`
+- `market_regions/india/legacy_v1/restx_api/account_schema.py`
+- `market_regions/india/legacy_v1/restx_api/data_schemas.py`
+- `market_regions/india/legacy_v1/restx_api/schemas.py`
+- `market_regions/india/legacy_v1/translators.py`
 - `market_regions/india/locale.py`
 - `market_regions/india/options_grammar.py`
 - `market_regions/india/plugin.py`
