@@ -258,20 +258,62 @@ def get_all_freeze_qty(exchange: str = None) -> dict[str, int]:
 
 
 def ensure_qty_freeze_tables_exists():
-    """Wrapper function for parallel initialization"""
+    """Wrapper function for parallel initialization.
+
+    Phase 2-bis-1 (T-12 wiring): the seed-source path is read from
+    :data:`market_regions.india.qty_freeze.QUANTITY_FREEZE_RULES`
+    when available. The region plugin's NFO entry carries
+    ``csv_source: "data/qtyfreeze.csv"``; other India venues (BFO /
+    CDS / MCX) intentionally have no rule, matching the legacy
+    "default to 1" behavior in :func:`get_freeze_qty`.
+    """
     init_db()
 
     # Auto-load from CSV if table is empty
     try:
         count = QtyFreeze.query.count()
         if count == 0:
-            # Try to load from default CSV location
-            csv_path = os.path.join(os.path.dirname(__file__), "..", "data", "qtyfreeze.csv")
-            if os.path.exists(csv_path):
-                logger.info(f"Qty Freeze DB: Loading freeze quantities from {csv_path}")
-                load_freeze_qty_from_csv(csv_path, "NFO")
-            else:
-                logger.debug("Qty Freeze DB: No CSV file found, table remains empty")
+            seed_sources: list[tuple[str, str]] = []
+            try:
+                from market_regions.india.qty_freeze import QUANTITY_FREEZE_RULES
+
+                repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                for rule in QUANTITY_FREEZE_RULES:
+                    src = rule.get("csv_source")
+                    venue = rule.get("venue")
+                    if not src or not venue:
+                        continue
+                    abs_path = os.path.normpath(os.path.join(repo_root, src))
+                    seed_sources.append((str(venue), abs_path))
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug(
+                    "Qty Freeze DB: region-plugin lookup failed (%s); "
+                    "falling back to legacy hardcoded path", exc,
+                )
+                seed_sources = [(
+                    "NFO",
+                    os.path.join(os.path.dirname(__file__), "..", "data", "qtyfreeze.csv"),
+                )]
+
+            if not seed_sources:
+                # Region plugin had no rules; fall back to legacy default.
+                seed_sources = [(
+                    "NFO",
+                    os.path.join(os.path.dirname(__file__), "..", "data", "qtyfreeze.csv"),
+                )]
+
+            for venue, csv_path in seed_sources:
+                if os.path.exists(csv_path):
+                    logger.info(
+                        f"Qty Freeze DB: Loading freeze quantities from {csv_path} "
+                        f"(venue={venue})"
+                    )
+                    load_freeze_qty_from_csv(csv_path, venue)
+                else:
+                    logger.debug(
+                        f"Qty Freeze DB: CSV {csv_path} not found for venue {venue}; "
+                        "skipping"
+                    )
     except Exception as e:
         logger.debug(f"Qty Freeze DB: Auto-load may have race condition: {e}")
 
