@@ -11,15 +11,57 @@ from typing import Any, Dict, Optional, Tuple
 
 from database.auth_db import verify_api_key
 from database.settings_db import get_analyze_mode
-from sandbox.fund_manager import FundManager, get_user_funds
-from sandbox.holdings_manager import HoldingsManager
-
-# Import sandbox managers
-from sandbox.order_manager import OrderManager
-from sandbox.position_manager import PositionManager
+# Phase 2-bis-3-2 (T-13 consumer-side) — sandbox manager classes are
+# now resolved through the IndiaSandboxProvider's manager_classes()
+# handle. ``get_user_funds`` is a module-level helper that doesn't
+# fit the manager-class shape; it stays imported directly. The
+# manager classes themselves are pulled lazily by
+# :func:`_india_sandbox_managers` so future regions with their own
+# sandbox engine can supply different classes without service-level
+# rewiring.
+from sandbox.fund_manager import get_user_funds
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+_DISPATCHER_REGION = "india"
+
+
+def _india_sandbox_managers() -> dict[str, type]:
+    """Resolve the sandbox manager classes via the dispatcher.
+
+    Phase 2-bis-3-2: replaces module-level ``from sandbox.* import``
+    with a call to
+    ``services.sandbox.dispatcher.get_sandbox_provider("india").manager_classes()``.
+    """
+    from services.sandbox.dispatcher import get_sandbox_provider
+
+    return get_sandbox_provider(_DISPATCHER_REGION).manager_classes()
+
+
+def OrderManager(*args, **kwargs):  # noqa: N802 — preserve legacy callable name
+    """Phase 2-bis-3-2 thin shim — preserves the legacy
+    ``OrderManager(user_id)`` call site shape while dispatching the
+    actual instantiation through the India sandbox provider's
+    ``manager_classes()['order']``."""
+    cls = _india_sandbox_managers()["order"]
+    return cls(*args, **kwargs)
+
+
+def PositionManager(*args, **kwargs):  # noqa: N802
+    cls = _india_sandbox_managers()["position"]
+    return cls(*args, **kwargs)
+
+
+def FundManager(*args, **kwargs):  # noqa: N802
+    cls = _india_sandbox_managers()["fund"]
+    return cls(*args, **kwargs)
+
+
+def HoldingsManager(*args, **kwargs):  # noqa: N802
+    cls = _india_sandbox_managers()["holdings"]
+    return cls(*args, **kwargs)
 
 
 def is_sandbox_mode() -> bool:
