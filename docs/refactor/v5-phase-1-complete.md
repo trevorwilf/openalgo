@@ -59,7 +59,7 @@ Defines:
 * Defensive `assert_complete()` + warning when
   `legacy_lane=True` + `route="v2"`.
 
-### `docs/api/v2_errors.md` — new
+### `docs/api/v2/v2_errors.md` — new
 
 Full taxonomy with per-code response shape, when emitted, and what
 the client should do. Existing v3/v4 codes preserved alongside.
@@ -114,7 +114,7 @@ All gates pass. Zero xfails added.
 * **2 new ADRs** (0029, 0030).
 * **23 new tests** (Phase 1).
 * **1 new utility module** (`utils/observability.py`).
-* **2 new docs** (`docs/api/v2_errors.md`,
+* **2 new docs** (`docs/api/v2/v2_errors.md`,
   `docs/observability/promoted_request_labels.md`).
 * **2057 backend tests** total (was 2033 at v4 close; +24 net).
 * **0 PROMOTED_LEAK rows** in SymToken caller audit.
