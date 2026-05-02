@@ -13,6 +13,7 @@ path and ultimately drop this shim.
 from __future__ import annotations
 
 from market_regions.india.legacy_v1.restx_api.data_schemas import (  # noqa: F401
+    LEGACY_INDIA_COMPATIBILITY,
     DepthSchema,
     ExpirySchema,
     HistorySchema,
