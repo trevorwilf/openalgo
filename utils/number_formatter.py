@@ -23,42 +23,16 @@ LEGACY_INDIA_COMPATIBILITY = True
 
 # ---------------------------------------------------------------------------
 # Legacy India helpers — kept for the legacy India lane.
+# Phase 2 T-15: implementation relocated to
+# ``market_regions.india.locale``; this module re-exports the
+# symbols so the existing 6+ legacy India callers continue to
+# import them from utils.number_formatter without code changes.
 # ---------------------------------------------------------------------------
 
-
-def format_indian_number(value: Any) -> str:
-    """Format number in Indian format with Cr/L suffixes.
-
-    Examples::
-
-        10000000.0 -> "1.00Cr"
-        9978000.0  -> "99.78L"
-        10000.0    -> "10000.00"
-        -5000000.0 -> "-50.00L"
-
-    Legacy India helper. Promoted code uses
-    :func:`format_currency_amount` instead.
-    """
-    try:
-        num = float(value)
-        is_negative = num < 0
-        num = abs(num)
-        if num >= 10000000:
-            formatted = f"{num / 10000000:.2f}Cr"
-        elif num >= 100000:
-            formatted = f"{num / 100000:.2f}L"
-        else:
-            formatted = f"{num:.2f}"
-        if is_negative:
-            formatted = f"-{formatted}"
-        return formatted
-    except (ValueError, TypeError):
-        return str(value)
-
-
-def format_indian_currency(value: Any) -> str:
-    """Format number as Indian currency (₹). Legacy India helper."""
-    return f"₹{format_indian_number(value)}"
+from market_regions.india.locale import (  # noqa: E402,F401
+    format_indian_currency,
+    format_indian_number,
+)
 
 
 # ---------------------------------------------------------------------------

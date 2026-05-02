@@ -32,7 +32,11 @@ logger = get_logger(__name__)
 # `master_contract_refresh_policy` block. Operators that want a
 # non-default tz set the policy in plugin.json or use the per-broker
 # environment knobs.
-IST = pytz.timezone("Asia/Kolkata")
+# Phase 2 T-10: IST source of truth relocated to
+# market_regions.india.sessions; this module continues to expose
+# the legacy ``IST`` symbol via re-export.
+from market_regions.india.sessions import IST  # noqa: E402,F401
+
 UTC = pytz.utc
 
 
