@@ -15,7 +15,11 @@ api = Api(
 # Every /api/v1/* request runs through this guard. India brokers
 # proceed unchanged; non-India brokers receive a structured 410 Gone
 # with code v1_unavailable_for_non_india_broker.
-from ._v1_lane_guard import enforce_india_only as _v1_enforce_india_only
+# Phase 9-bis-physical (T-23 Group D) — guard relocated to
+# market_regions.india.legacy_v1.restx_api._v1_lane_guard.
+from market_regions.india.legacy_v1.restx_api._v1_lane_guard import (
+    enforce_india_only as _v1_enforce_india_only,
+)
 
 
 # v5 Phase 8 (D-1) — v1 deprecation announcement via response headers.

@@ -64,7 +64,17 @@ def test_invariant_5_v1_lane_blocks_non_india_brokers():
 
     # Cannot directly invoke the test here because it depends on a
     # pytest fixture. Instead assert the guard module exists.
-    guard = REPO_ROOT / "restx_api" / "_v1_lane_guard.py"
+    # Phase 9-bis-physical (T-23 Group D) — guard relocated to
+    # market_regions/india/legacy_v1/restx_api/_v1_lane_guard.py;
+    # restx_api/__init__.py imports it from the new location.
+    guard = (
+        REPO_ROOT
+        / "market_regions"
+        / "india"
+        / "legacy_v1"
+        / "restx_api"
+        / "_v1_lane_guard.py"
+    )
     assert guard.is_file(), (
         f"missing {guard.relative_to(REPO_ROOT).as_posix()} — "
         "v4 Phase 2 ships the v1 hard-block guard."

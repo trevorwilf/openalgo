@@ -29,9 +29,19 @@ compatibility_shims:
   - services/instrument_resolver.py
   - services/venue_session_service.py
   - services/order_router_service.py
-  - restx_api/_v1_lane_guard.py
   - database/venue_offset.py
   - utils/venue_local_time.py
+  # Phase 9-bis-physical (T-23) — re-export shims at the original
+  # paths after the v1 lane code physically relocated under
+  # market_regions/india/legacy_v1/. Each shim does
+  # ``from market_regions.india.legacy_v1.<sub> import *`` so legacy
+  # ``from restx_api.schemas import ...`` / ``from utils.constants
+  # import ...`` / ``from domain.translators import ...`` continue
+  # to resolve without per-callsite changes.
+  - restx_api/schemas.py
+  - restx_api/data_schemas.py
+  - restx_api/account_schema.py
+  - utils/constants.py
 
 # Rules processed in order. First match wins.
 rules:
@@ -44,9 +54,18 @@ rules:
     classification: COMPATIBILITY_SHIM
   - path: services/order_router_service.py
     classification: COMPATIBILITY_SHIM
-  - path: restx_api/_v1_lane_guard.py
-    classification: COMPATIBILITY_SHIM
   - path: database/venue_offset.py
+    classification: COMPATIBILITY_SHIM
+  # Phase 9-bis-physical (T-23) — re-export shims for the relocated
+  # v1 lane modules. The actual code lives under
+  # market_regions/india/legacy_v1/.
+  - path: restx_api/schemas.py
+    classification: COMPATIBILITY_SHIM
+  - path: restx_api/data_schemas.py
+    classification: COMPATIBILITY_SHIM
+  - path: restx_api/account_schema.py
+    classification: COMPATIBILITY_SHIM
+  - path: utils/constants.py
     classification: COMPATIBILITY_SHIM
 
   # ---------------- REGION_PLUGIN ----------------

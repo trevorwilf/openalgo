@@ -100,8 +100,21 @@ def test_make_format_currency_is_gone():
 
 
 def test_v1_lane_guard_still_present():
-    """v1 lane guard remains in place during the sunset period."""
-    p = REPO_ROOT / "restx_api" / "_v1_lane_guard.py"
+    """v1 lane guard remains in place during the sunset period.
+
+    Phase 9-bis-physical (T-23 Group D) relocated the guard to
+    market_regions/india/legacy_v1/restx_api/_v1_lane_guard.py;
+    restx_api/__init__.py imports `enforce_india_only` from the new
+    location and wires it into the api_v1_bp `before_request` hook.
+    """
+    p = (
+        REPO_ROOT
+        / "market_regions"
+        / "india"
+        / "legacy_v1"
+        / "restx_api"
+        / "_v1_lane_guard.py"
+    )
     assert p.is_file()
     text = p.read_text(encoding="utf-8")
     assert "enforce_india_only" in text

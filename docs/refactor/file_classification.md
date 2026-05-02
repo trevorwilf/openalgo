@@ -106,7 +106,7 @@ Classification semantics:
 - `utils/region_loader.py`
 - `utils/version.py`
 
-## LEGACY_INDIA (171 files)
+## LEGACY_INDIA (167 files)
 
 - `app.py`
 - `blueprints/__init__.py`
@@ -186,9 +186,6 @@ Classification semantics:
 - `database/user_db.py`
 - `mcp/mcpserver.py`
 - `restx_api/__init__.py`
-- `restx_api/account_schema.py`
-- `restx_api/data_schemas.py`
-- `restx_api/schemas.py`
 - `sandbox/__init__.py`
 - `sandbox/catch_up_processor.py`
 - `sandbox/execution_engine.py`
@@ -255,7 +252,6 @@ Classification semantics:
 - `utils.py`
 - `utils/api_analyzer.py`
 - `utils/auth_utils.py`
-- `utils/constants.py`
 - `utils/email_debug.py`
 - `utils/email_utils.py`
 - `utils/env_check.py`
@@ -280,13 +276,14 @@ Classification semantics:
 - `websocket_proxy/port_check.py`
 - `websocket_proxy/server.py`
 
-## REGION_PLUGIN (77 files)
+## REGION_PLUGIN (78 files)
 
 - `market_regions/india/__init__.py`
 - `market_regions/india/holidays.py`
 - `market_regions/india/legacy_v1/__init__.py`
 - `market_regions/india/legacy_v1/constants.py`
 - `market_regions/india/legacy_v1/restx_api/__init__.py`
+- `market_regions/india/legacy_v1/restx_api/_v1_lane_guard.py`
 - `market_regions/india/legacy_v1/restx_api/account_schema.py`
 - `market_regions/india/legacy_v1/restx_api/analyzer.py`
 - `market_regions/india/legacy_v1/restx_api/basket_order.py`
@@ -927,13 +924,16 @@ Classification semantics:
 - `broker/zerodha/streaming/zerodha_websocket.py`
 - `broker/zerodha/translator.py`
 
-## COMPATIBILITY_SHIM (7 files)
+## COMPATIBILITY_SHIM (10 files)
 
 - `database/venue_offset.py`
 - `domain/translators.py`
-- `restx_api/_v1_lane_guard.py`
+- `restx_api/account_schema.py`
+- `restx_api/data_schemas.py`
+- `restx_api/schemas.py`
 - `services/instrument_resolver.py`
 - `services/order_router_service.py`
 - `services/venue_session_service.py`
+- `utils/constants.py`
 - `utils/venue_local_time.py`
 
