@@ -1,4 +1,4 @@
-from flask import Blueprint
+from flask import Blueprint, jsonify, request
 from flask_restx import Api
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
@@ -18,18 +18,13 @@ api = Api(
 from ._v1_lane_guard import enforce_india_only as _v1_enforce_india_only
 
 
-@api_v1_bp.before_request
-def _v1_block_non_india_brokers():
-    return _v1_enforce_india_only()
-
-
 # v5 Phase 8 (D-1) — v1 deprecation announcement via response headers.
 # Every /api/v1/* response carries `Deprecation: true` and a `Sunset`
 # date. Operators control the actual sunset via the env var
 # OPENALGO_V1_SUNSET_DATE (ISO 8601). The default is `now + 180 days`
 # so a fresh deployment always advertises an explicit sunset date.
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 
 def _v1_sunset_date_iso() -> str:
@@ -37,6 +32,53 @@ def _v1_sunset_date_iso() -> str:
     if raw:
         return raw.strip()
     return (datetime.now(timezone.utc) + timedelta(days=180)).date().isoformat()
+
+
+def _v1_explicitly_sunset_date() -> "date | None":
+    """Phase 9 (T-33) — return the operator-configured sunset date or
+    ``None``. The env var is the operator's actual cutover date; when
+    it is unset the v1 lane stays alive indefinitely (the
+    ``Sunset:`` header still advertises a default 180-day window per
+    v5 Phase 8, but no enforcement happens). When set, requests after
+    that date receive a 410 Gone for every region (including India).
+    """
+    raw = os.getenv("OPENALGO_V1_SUNSET_DATE")
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw.strip())
+    except ValueError:
+        return None
+
+
+@api_v1_bp.before_request
+def _v1_block_non_india_brokers_or_sunset():
+    # Phase 9 (T-33) — operator-controlled hard sunset. If the env
+    # var is set and today is past that date, every /api/v1/* request
+    # returns 410 Gone with code ``v1_sunset_passed`` regardless of
+    # broker region. Skipping for swagger / openapi documentation
+    # endpoints — they are introspection routes that don't carry
+    # trading semantics.
+    sunset = _v1_explicitly_sunset_date()
+    if sunset is not None and datetime.now(timezone.utc).date() >= sunset:
+        path = (request.path or "")
+        if not (path.endswith("/swagger.json") or path.endswith("/swaggerui")):
+            payload = {
+                "status": "error",
+                "code": "v1_sunset_passed",
+                "message": (
+                    f"/api/v1/* was sunset on {sunset.isoformat()}; the "
+                    "endpoint is no longer available. Migrate to "
+                    "/api/v2/*. See https://docs.openalgo.in/migration/v1-to-v2."
+                ),
+                "sunset_date": sunset.isoformat(),
+            }
+            return jsonify(payload), 410
+    # Phase 2 v4 (ADR 0023, invariant 5) — v1 hard-block for non-India
+    # brokers. India brokers proceed unchanged; non-India brokers
+    # receive a structured 410 Gone with code
+    # ``v1_unavailable_for_non_india_broker``.
+    return _v1_enforce_india_only()
 
 
 @api_v1_bp.after_request
