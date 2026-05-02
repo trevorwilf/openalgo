@@ -54,35 +54,52 @@ mutate.
 | Market-agnostic T-28 (region-aware examples) | Phase 8-bis | `--region` arg added |
 | Market-agnostic C-P2-027 (label India examples) | Phase 8-bis | docs/api/README.md region note |
 
-## Bucket: Still deferred with owner (v9-bis future engagement)
+## Bucket: Implemented (Phase bis additions, 2026-05-02)
+
+The following deferred items were closed in the bis-phase pass on
+2026-05-02:
+
+| Deferred item | Closed by | Notes |
+|---|---|---|
+| T-27 — `download/sqlite_downloader.py` venue-tz | Phase 8-bis | `DOWNLOAD_VENUE_TZ` env var; `pandas.tz_convert` |
+| T-28 — region-aware examples | Phase 8-bis | `--region` + `--venue-tz` CLI args on both straddle examples |
+| C-P2-027 — label India examples in docs | Phase 8-bis | `docs/api/README.md` region note |
+| C-P2-028 — refactor disposition doc | Phase 8-bis | this file |
+| T-11 wiring — `sandbox/squareoff_manager.py` reads region defaults | Phase 2-bis-1 | `MANDATORY_CLOSE_RULES` lookup |
+| T-12 wiring — `database/qty_freeze_db.py` reads region csv_source | Phase 2-bis-1 | `QUANTITY_FREEZE_RULES` lookup |
+| T-15 schema — `database/sandbox_db.py:208-209` removes default=10000000 | Phase 2-bis-2 | + `upgrade/migrate_sandbox_funds_starting_capital_default.py` backfill |
+| T-15 caller audit | Phase 2-bis-2 | confirmed: zero PROMOTED_CORE callers of `format_indian_*`; sandbox/* uses are LEGACY_INDIA-classified |
+| T-16 lib formatters — `lib/utils.ts` + `lib/format/currency.ts` consolidated | Phase 4-bis-1 | `CURRENCY_LOCALE_MAP` + `CURRENCY_SYMBOL_MAP` exported from `useRegionCapabilities`; both files dropped from allowlist |
+| T-19 partial 2 — Historify + SandboxPnL IST labels | Phase 4-bis-1 | `region.timezoneLabel ?? 'UTC'` used in user-facing schedule strings |
+| T-13 / T-14 dispatcher wiring (provider-side) | Phase 2-bis-3 | `IndiaSandboxProvider.manager_classes()` + `IndiaOptionsProvider.service_modules()` expose legacy engines via dispatcher; per-callsite migration is v9-bis-2 |
+| T-24 partial — `docs/api/v1/README.md` scaffold + two-lane top-nav | Phase 8-bis-2 | full physical doc relocation is v9-bis-2 |
+
+## Bucket: Still deferred with owner (v9-bis-2 future engagement)
 
 | Deferred item | Owner / future engagement | Notes |
 |---|---|---|
-| Market-agnostic T-13 (sandbox dispatcher consumer wiring) | v9-bis Phase 2-bis-3 | `blueprints/sandbox.py` still bypasses `services.sandbox.dispatcher`; data layer fully relocated |
-| Market-agnostic T-14 (options dispatcher consumer wiring) | v9-bis Phase 2-bis-3 | `services/option_*_service.py` still inline |
-| Market-agnostic T-15 partial (per-caller switch to format_currency_amount) | v9-bis Phase 2-bis-2 | re-export bridge keeps callers working today |
-| `database/sandbox_db.py:299` schema change to `DEFAULT NULL` | v9-bis Phase 2-bis-2 | `Decimal("1000000.00")` provider seed exists in IndiaSandboxProvider |
-| Market-agnostic T-16 partial (lib/utils.ts + lib/format/currency.ts inline INR/JPY chain) | v9-bis Phase 4-bis-1 | `useRegionCapabilities` hook is the foundation |
-| Market-agnostic T-17 (Flow constants + 14 flow nodes) | v9-bis Phase 4-bis-2 | per-component UX work |
-| Market-agnostic T-18 (strategyMath.ts type-system migration) | v9-bis Phase 4-bis-2 | OptionType union → OptionRight enum |
-| Market-agnostic T-19 partial (Historify + SandboxPnL IST schedule labels) | v9-bis Phase 4-bis-1 | UX redesign |
-| Market-agnostic T-23 physical relocation (37 files into market_regions/india/legacy_v1/) | v9-bis Phase 9 | Logical conditional mount in Phase 9 delivers same operator semantic |
-| Market-agnostic T-24 (docs/api split into v1/v2) | v9-bis Phase 8-bis-2 | mechanical doc reorg |
-| Market-agnostic T-34 (drain frontend allowlist 78 → ≤ 2) | v9-bis Phase 4-bis-2 | helper script `find_stale_allowlist.mjs` ships in Phase 4 |
-| Market-agnostic T-35 partial (LEGACY_INDIA bucket < 50) | v9-bis Phase 9 | depends on T-23 physical relocation |
-| Phase 4-bis-2 — capability hook, flow constants, ConfigPanel, PlaceOrderDialog, MarketTimings, CustomStraddle, scheduler-tied pages | v9-bis Phase 4-bis-2 | Browser-verified per-component migration |
-| Phase 2-bis-2 — sandbox squareoff/catch_up/holdings/execution_engine; 6 remaining options services; chartink legacy parser; flow_scheduler/python_strategy/historify_scheduler venue-aware | v9-bis Phase 2-bis-2 | deeper dispatcher migrations beyond the 4 covered in v6 Phase 2-bis-options |
-| Phase 4-bis-2 — master-contract refresh-policy execution + rule_enforcement.check_order entitlement integration | v9-bis Phase 4-bis-2 | broker-side runtime work |
-| `IndiaSandboxProvider._INITIAL_FUNDS` (₹10L) vs `sandbox/fund_manager.py` (₹1Cr) reconciliation | v9-bis Phase 2-bis-2 | known discrepancy |
-| EU + UK Python `RegionPlugin` implementations | v9-bis Phase 7-bis | Manifests + stub providers ship; Python plugin classes are future work |
-| Real Schwab plugin | v9-bis (blocked on official API access) | Out of every market-agnostic phase |
-| Real Webull plugin | v9-bis (blocked on official API access) | Out of every market-agnostic phase |
-| Real Alpaca production hardening | v9-bis | Out of every market-agnostic phase |
-| Real EU / UK pilot broker plugins | v9-bis | Out of every market-agnostic phase |
-| `/api/v1/*` removal after operator-controlled sunset | v9-bis | Phase 9 ships the machinery; the actual cutover is a deployment decision |
-| Multi-broker-per-instance deployment | v9-bis (out of v6 scope) | ADR 0001 invariant |
-| APAC ex-India / LATAM region plugins | v9-bis (future engagement) | not in any phase's scope |
-| OpenTelemetry / Prometheus metrics backend upgrade | v9-bis (out of v6 scope) | telemetry follow-up |
+| T-13 / T-14 *consumer-side* migration (`services/sandbox_service.py`, `services/analyzer_service.py`, `restx_api/option_*.py`) | v9-bis-2 Phase 2-bis-3-2 | dispatcher route is now available (Phase 2-bis-3) — the per-callsite switch is mechanical |
+| T-15 *per-caller* migration to `format_currency_amount` in PROMOTED_CORE | n/a — audit found no such callers | re-export bridge in `utils/number_formatter.py` keeps the legacy import path live for completeness |
+| `IndiaSandboxProvider._INITIAL_FUNDS` (₹10L) vs `sandbox/fund_manager.py` (₹1Cr) reconciliation | v9-bis-2 Phase 2-bis-2 | known discrepancy; current default = ₹1Cr per legacy parity |
+| T-17 (Flow constants + 14 flow nodes) | v9-bis-2 Phase 4-bis-2 | per-component UX work |
+| T-18 (strategyMath.ts type-system migration) | v9-bis-2 Phase 4-bis-2 | OptionType union → OptionRight enum + DTE math |
+| T-19 partial 3 — `Historify.tsx` exchange-state default; `SandboxPnL.tsx` MIS Badge comparison | v9-bis-2 Phase 4-bis-2 | India-shaped UI surfaces |
+| T-23 physical relocation (37 files into `market_regions/india/legacy_v1/`) | v9-bis-2 Phase 9 | Phase 9 logical conditional mount delivers same operator semantic; physical move is code-quality follow-up |
+| T-24 full — relocate per-section endpoint pages under `docs/api/v1/<section>/` | v9-bis-2 Phase 8-bis-2 | external integrations have deep links into the existing top-level paths; physical move requires redirect strategy |
+| T-34 (drain frontend allowlist 76 → ≤ 2) | v9-bis-2 Phase 4-bis-2 | helper `frontend/scripts/find_stale_allowlist.mjs` ships in Phase 4 |
+| T-35 (LEGACY_INDIA bucket < 50) | v9-bis-2 Phase 9 | depends on T-23 physical relocation |
+| Phase 4-bis-2 — ConfigPanel, PlaceOrderDialog, MarketTimings, CustomStraddle, scheduler-tied pages | v9-bis-2 Phase 4-bis-2 | Browser-verified per-component migration |
+| Phase 2-bis-2 — sandbox catch_up/holdings/execution_engine; 6 remaining options services; chartink legacy parser; flow_scheduler/python_strategy/historify_scheduler venue-aware | v9-bis-2 Phase 2-bis-2 | deeper dispatcher migrations |
+| Phase 4-bis-2 — master-contract refresh-policy execution + rule_enforcement.check_order entitlement integration | v9-bis-2 Phase 4-bis-2 | broker-side runtime work |
+| EU + UK Python `RegionPlugin` implementations | v9-bis-2 Phase 7-bis | Manifests + stub providers ship; Python plugin classes are future work |
+| Real Schwab plugin | v9-bis-2 (blocked on official API access) | Out of every market-agnostic phase |
+| Real Webull plugin | v9-bis-2 (blocked on official API access) | Out of every market-agnostic phase |
+| Real Alpaca production hardening | v9-bis-2 | Out of every market-agnostic phase |
+| Real EU / UK pilot broker plugins | v9-bis-2 | Out of every market-agnostic phase |
+| `/api/v1/*` removal after operator-controlled sunset | v9-bis-2 | Phase 9 ships the machinery; the actual cutover is a deployment decision |
+| Multi-broker-per-instance deployment | v9-bis-2 (out of v6 scope) | ADR 0001 invariant |
+| APAC ex-India / LATAM region plugins | v9-bis-2 (future engagement) | not in any phase's scope |
+| OpenTelemetry / Prometheus metrics backend upgrade | v9-bis-2 (out of v6 scope) | telemetry follow-up |
 
 ## Bucket: Intentionally India-only (no closing date)
 
