@@ -75,18 +75,18 @@ const ViewStrategy = lazy(() => import('@/pages/strategy/ViewStrategy'))
 const ConfigureSymbols = lazy(() => import('@/pages/strategy/ConfigureSymbols'))
 
 // Python Strategy pages
-const PythonStrategyIndex = lazy(() => import('@/pages/python-strategy/PythonStrategyIndex'))
-const NewPythonStrategy = lazy(() => import('@/pages/python-strategy/NewPythonStrategy'))
-const EditPythonStrategy = lazy(() => import('@/pages/python-strategy/EditPythonStrategy'))
-const PythonStrategyLogs = lazy(() => import('@/pages/python-strategy/PythonStrategyLogs'))
-const SchedulePythonStrategy = lazy(() => import('@/pages/python-strategy/SchedulePythonStrategy'))
-const PythonStrategyGuide = lazy(() => import('@/pages/python-strategy/PythonStrategyGuide'))
+const PythonStrategyIndex = lazy(() => import('@/india_legacy/pages/python-strategy/PythonStrategyIndex'))
+const NewPythonStrategy = lazy(() => import('@/india_legacy/pages/python-strategy/NewPythonStrategy'))
+const EditPythonStrategy = lazy(() => import('@/india_legacy/pages/python-strategy/EditPythonStrategy'))
+const PythonStrategyLogs = lazy(() => import('@/india_legacy/pages/python-strategy/PythonStrategyLogs'))
+const SchedulePythonStrategy = lazy(() => import('@/india_legacy/pages/python-strategy/SchedulePythonStrategy'))
+const PythonStrategyGuide = lazy(() => import('@/india_legacy/pages/python-strategy/PythonStrategyGuide'))
 
 // Chartink pages
-const ChartinkIndex = lazy(() => import('@/pages/chartink/ChartinkIndex'))
-const NewChartinkStrategy = lazy(() => import('@/pages/chartink/NewChartinkStrategy'))
-const ViewChartinkStrategy = lazy(() => import('@/pages/chartink/ViewChartinkStrategy'))
-const ConfigureChartinkSymbols = lazy(() => import('@/pages/chartink/ConfigureChartinkSymbols'))
+const ChartinkIndex = lazy(() => import('@/india_legacy/pages/chartink/ChartinkIndex'))
+const NewChartinkStrategy = lazy(() => import('@/india_legacy/pages/chartink/NewChartinkStrategy'))
+const ViewChartinkStrategy = lazy(() => import('@/india_legacy/pages/chartink/ViewChartinkStrategy'))
+const ConfigureChartinkSymbols = lazy(() => import('@/india_legacy/pages/chartink/ConfigureChartinkSymbols'))
 
 // Flow pages
 const FlowIndex = lazy(() => import('@/pages/flow/FlowIndex'))
