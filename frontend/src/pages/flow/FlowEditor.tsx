@@ -46,7 +46,7 @@ import {
   flowQueryKeys,
 } from '@/api/flow'
 import { useFlowWorkflowStore } from '@/stores/flowWorkflowStore'
-import { DEFAULT_NODE_DATA } from '@/lib/flow/constants'
+import { DEFAULT_NODE_DATA } from '@/india_legacy/lib/flow/constants'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -64,9 +64,9 @@ import { useThemeStore } from '@/stores/themeStore'
 import { LogoutConfirmDialog } from '@/components/auth/LogoutConfirmDialog'
 
 // Import Flow components
-import { nodeTypes } from '@/components/flow/nodes'
-import { edgeTypes } from '@/components/flow/edges'
-import { NodePalette, ConfigPanel, ExecutionLogPanel, type LogEntry } from '@/components/flow/panels'
+import { nodeTypes } from '@/india_legacy/components/flow/nodes'
+import { edgeTypes } from '@/india_legacy/components/flow/edges'
+import { NodePalette, ConfigPanel, ExecutionLogPanel, type LogEntry } from '@/india_legacy/components/flow/panels'
 
 let nodeId = 0
 const getNodeId = () => `node_${nodeId++}`

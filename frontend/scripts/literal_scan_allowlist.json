@@ -11,86 +11,6 @@
       "reason": "Multi-region currency / locale / symbol lookup table. India is one row in a 13-currency table; the hook itself never assumes India and the table is ALSO the source of truth for USD/EUR/GBP/JPY/etc. mappings."
     },
     {
-      "path": "src/components/flow/nodes/ExpiryNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/GetDepthNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/GetQuoteNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/HistoryNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/MultiQuotesNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/OpenPositionNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/OptionChainNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/OptionsMultiOrderNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/OptionsOrderNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/OptionSymbolNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/PlaceOrderNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/PriceAlertNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/SmartOrderNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/SplitOrderNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/SubscribeDepthNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/SubscribeLTPNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/SubscribeQuoteNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/SymbolNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/nodes/SyntheticFutureNode.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/flow/panels/ConfigPanel.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
       "path": "src/components/option-chain/ColumnReorderPanel.tsx",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
@@ -128,10 +48,6 @@
     },
     {
       "path": "src/hooks/useSupportedExchanges.ts",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/lib/flow/constants.ts",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {

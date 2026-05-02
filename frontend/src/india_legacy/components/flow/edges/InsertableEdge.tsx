@@ -10,7 +10,7 @@ import {
 } from '@xyflow/react'
 import { Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { DEFAULT_NODE_DATA } from '@/lib/flow/constants'
+import { DEFAULT_NODE_DATA } from '@/india_legacy/lib/flow/constants'
 import {
   DropdownMenu,
   DropdownMenuContent,
