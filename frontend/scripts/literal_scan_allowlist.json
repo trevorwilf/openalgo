@@ -11,22 +11,6 @@
       "reason": "Multi-region currency / locale / symbol lookup table. India is one row in a 13-currency table; the hook itself never assumes India and the table is ALSO the source of truth for USD/EUR/GBP/JPY/etc. mappings."
     },
     {
-      "path": "src/api/chartink.ts",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/api/iv-chart.ts",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/api/python-strategy.ts",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/api/strategy-portfolio.ts",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
       "path": "src/components/flow/nodes/ExpiryNode.tsx",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },

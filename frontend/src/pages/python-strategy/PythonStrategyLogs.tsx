@@ -2,7 +2,7 @@ import { ArrowLeft, Clock, Copy, Download, FileText, HardDrive, RefreshCw, Scrol
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { showToast } from '@/utils/toast'
-import { pythonStrategyApi } from '@/api/python-strategy'
+import { pythonStrategyApi } from '@/india_legacy/api/python-strategy'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'

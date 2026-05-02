@@ -2,7 +2,7 @@ import { ArrowLeft, FileText, Plus, RefreshCw, Search, Trash2, Upload } from 'lu
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { showToast } from '@/utils/toast'
-import { chartinkApi } from '@/api/chartink'
+import { chartinkApi } from '@/india_legacy/api/chartink'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'

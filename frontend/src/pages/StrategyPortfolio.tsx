@@ -29,7 +29,7 @@ import {
   type PortfolioEntry,
   type PortfolioLeg,
   type Watchlist,
-} from '@/api/strategy-portfolio'
+} from '@/india_legacy/api/strategy-portfolio'
 
 // Map a portfolio entry's `exchange` (which may be NSE_INDEX / BSE_INDEX etc.
 // since it's the index underlying's exchange) to the F&O exchange that the

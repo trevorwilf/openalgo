@@ -17,7 +17,7 @@ import {
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { showToast } from '@/utils/toast'
-import { pythonStrategyApi } from '@/api/python-strategy'
+import { pythonStrategyApi } from '@/india_legacy/api/python-strategy'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

@@ -8,7 +8,7 @@ import {
   strategyPortfolioApi,
   type PortfolioEntry,
   type Watchlist,
-} from '@/api/strategy-portfolio'
+} from '@/india_legacy/api/strategy-portfolio'
 import { EditLegDialog } from '@/components/strategy-builder/EditLegDialog'
 import { GreeksTab, type LegGreeks } from '@/components/strategy-builder/GreeksTab'
 import { type LegDraft, ManualLegBuilder } from '@/components/strategy-builder/ManualLegBuilder'
