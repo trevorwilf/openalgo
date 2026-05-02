@@ -26,7 +26,7 @@ import {
 import { TemplateGrid } from '@/india_legacy/components/strategy-builder/TemplateGrid'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
+import { useSupportedExchanges } from '@/india_legacy/hooks/useSupportedExchanges'
 import {
   buildFutureSymbol,
   buildOptionSymbol,

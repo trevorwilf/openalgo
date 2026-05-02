@@ -1,4 +1,4 @@
-import { AlertTriangle, BookOpen, Copy, ExternalLink, RefreshCw } from 'lucide-react'
+import { AlertTriangle, BookOpen, Copy, ExternalLink, Info, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { showToast } from '@/utils/toast'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -13,9 +13,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { JsonEditor } from '@/components/ui/json-editor'
-import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
+import { useSupportedExchanges } from '@/india_legacy/hooks/useSupportedExchanges'
 
 interface SearchResult {
   symbol: string
@@ -24,7 +23,7 @@ interface SearchResult {
   token: string
 }
 
-// EXCHANGES and PRODUCTS are now dynamic — provided by useSupportedExchanges() hook
+// EXCHANGES is now dynamic — provided by useSupportedExchanges() hook
 
 const PRODUCTS = [
   { value: 'MIS', label: 'MIS - Intraday' },
@@ -32,11 +31,10 @@ const PRODUCTS = [
   { value: 'CNC', label: 'CNC - Delivery' },
 ]
 
-export default function TradingView() {
+export default function GoCharting() {
   const { tradingExchanges, defaultExchange, isCrypto } = useSupportedExchanges()
 
   // Form state
-  const [alertMode, setAlertMode] = useState<'strategy' | 'line'>('strategy')
   const [symbol, setSymbol] = useState(isCrypto ? 'BTCUSDFUT' : 'NHPC')
   const [exchange, setExchange] = useState(defaultExchange)
   const [product, setProduct] = useState(isCrypto ? 'NRML' : 'MIS')
@@ -98,8 +96,7 @@ export default function TradingView() {
   }, [])
 
   // Get webhook URL from host config or fallback to window.location.origin
-  const endpoint = alertMode === 'strategy' ? '/api/v1/placesmartorder' : '/api/v1/placeorder'
-  const webhookUrl = hostConfig ? `${hostConfig.host_server}${endpoint}` : `${window.location.origin}${endpoint}`
+  const webhookUrl = hostConfig ? `${hostConfig.host_server}/api/v1/placeorder` : `${window.location.origin}/api/v1/placeorder`
 
   // Debounced search
   const performSearch = useCallback(
@@ -160,38 +157,20 @@ export default function TradingView() {
   const generateJson = (showError = true) => {
     if (!symbol || !exchange) {
       if (showError) {
-        showToast.error('Please select a symbol and exchange', 'clipboard')
+        showToast.error('Please select a symbol and exchange', 'system')
       }
       return
     }
 
-    let json: Record<string, unknown>
-
-    if (alertMode === 'strategy') {
-      // Strategy Alert mode - uses {{strategy.order.action}} placeholder
-      json = {
-        apikey: apiKey || 'YOUR_API_KEY',
-        strategy: 'TradingView Strategy',
-        symbol: symbol,
-        exchange: exchange,
-        action: '{{strategy.order.action}}',
-        product: product,
-        pricetype: 'MARKET',
-        quantity: '{{strategy.order.contracts}}',
-        position_size: '{{strategy.position_size}}',
-      }
-    } else {
-      // Line Alert mode - uses fixed action and quantity
-      json = {
-        apikey: apiKey || 'YOUR_API_KEY',
-        strategy: 'TradingView Line Alert',
-        symbol: symbol,
-        exchange: exchange,
-        action: action,
-        product: product,
-        pricetype: 'MARKET',
-        quantity: quantity,
-      }
+    const json = {
+      apikey: apiKey || 'YOUR_API_KEY',
+      strategy: 'GoCharting Alert',
+      symbol: symbol,
+      exchange: exchange,
+      action: action,
+      product: product,
+      pricetype: 'MARKET',
+      quantity: quantity,
     }
 
     setGeneratedJson(JSON.stringify(json, null, 2))
@@ -207,7 +186,7 @@ export default function TradingView() {
       await navigator.clipboard.writeText(text)
       showToast.success(`${label} copied to clipboard`, 'clipboard')
     } catch {
-      showToast.error('Copy failed - please copy manually', 'clipboard')
+      showToast.error('Copy failed - please copy manually', 'system')
     }
   }
 
@@ -215,9 +194,9 @@ export default function TradingView() {
     <div className="container mx-auto py-6 px-4 max-w-6xl">
       {/* Header */}
       <div className="text-center mb-8">
-        <h1 className="text-3xl font-bold">TradingView Configuration</h1>
+        <h1 className="text-3xl font-bold">GoCharting Configuration</h1>
         <p className="text-muted-foreground mt-2">
-          Generate webhook configuration for TradingView strategy alerts
+          Generate webhook configuration for GoCharting strategy alerts
         </p>
       </div>
 
@@ -226,8 +205,8 @@ export default function TradingView() {
         <Alert variant="destructive" className="mb-8">
           <AlertTriangle className="h-5 w-5" />
           <AlertDescription className="ml-2">
-            <strong>Webhook URL not accessible!</strong> TradingView cannot send alerts to
-            localhost. Use <strong>ngrok</strong>, <strong>Cloudflare Tunnel</strong>,{' '}
+            <strong>Webhook URL not accessible!</strong> GoCharting cannot send alerts to localhost.
+            Use <strong>ngrok</strong>, <strong>Cloudflare Tunnel</strong>,{' '}
             <strong>VS Code Dev Tunnel</strong>, or a <strong>custom domain</strong> to expose your
             OpenAlgo instance to the internet. Update <code>HOST_SERVER</code> in your <code>.env</code> file with your external URL.
           </AlertDescription>
@@ -241,7 +220,7 @@ export default function TradingView() {
           <Card>
             <CardHeader>
               <CardTitle className="text-primary">Webhook URL</CardTitle>
-              <CardDescription>Use this URL in your TradingView alerts</CardDescription>
+              <CardDescription>Use this URL in your GoCharting alerts</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
@@ -266,14 +245,6 @@ export default function TradingView() {
               <CardTitle>Configuration</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Mode Selector */}
-              <Tabs value={alertMode} onValueChange={(v) => setAlertMode(v as 'strategy' | 'line')}>
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="strategy">Strategy Alert</TabsTrigger>
-                  <TabsTrigger value="line">Line Alert</TabsTrigger>
-                </TabsList>
-              </Tabs>
-
               {/* Symbol Search */}
               <div className="space-y-2">
                 <Label htmlFor="symbol">Symbol</Label>
@@ -356,35 +327,32 @@ export default function TradingView() {
                 </div>
               )}
 
-              {/* Line Alert Mode Fields */}
-              {alertMode === 'line' && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="action">Action</Label>
-                    <Select value={action} onValueChange={setAction}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="BUY">BUY</SelectItem>
-                        <SelectItem value="SELL">SELL</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+              {/* Action */}
+              <div className="space-y-2">
+                <Label htmlFor="action">Action</Label>
+                <Select value={action} onValueChange={setAction}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="BUY">BUY</SelectItem>
+                    <SelectItem value="SELL">SELL</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="quantity">Quantity</Label>
-                    <Input
-                      id="quantity"
-                      type="number"
-                      min="1"
-                      value={quantity}
-                      onChange={(e) => setQuantity(e.target.value)}
-                      placeholder="Enter quantity"
-                    />
-                  </div>
-                </>
-              )}
+              {/* Quantity */}
+              <div className="space-y-2">
+                <Label htmlFor="quantity">Quantity</Label>
+                <Input
+                  id="quantity"
+                  type="number"
+                  min="1"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  placeholder="Enter quantity"
+                />
+              </div>
 
               {/* Generate Button */}
               <Button onClick={() => generateJson()} className="w-full">
@@ -436,19 +404,35 @@ export default function TradingView() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p>
-                Learn how to set up automated trading using TradingView webhooks with our
-                step-by-step guide.
+                Learn how to set up automated trading using GoCharting webhooks with our
+                comprehensive step-by-step guide.
               </p>
-              <Button asChild variant="default">
-                <a
-                  href="https://docs.openalgo.in/trading-platform/tradingview"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  View Documentation
-                  <ExternalLink className="h-4 w-4 ml-2" />
-                </a>
-              </Button>
+
+              {/* Premium Notice */}
+              <Alert className="bg-blue-500/10 border-blue-500">
+                <Info className="h-4 w-4 text-blue-500" />
+                <AlertDescription className="ml-2 text-sm">
+                  <strong>Premium Required:</strong> Webhook alerts require GoCharting Premium Plan.
+                </AlertDescription>
+              </Alert>
+
+              <div className="flex gap-3">
+                <Button asChild variant="outline" size="sm">
+                  <a href="/docs/gocharting_webhook_setup.md" download>
+                    Download Guide
+                  </a>
+                </Button>
+                <Button asChild variant="default" size="sm">
+                  <a
+                    href="https://docs.openalgo.in/trading-platform/gocharting"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Online Docs
+                    <ExternalLink className="h-4 w-4 ml-2" />
+                  </a>
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>

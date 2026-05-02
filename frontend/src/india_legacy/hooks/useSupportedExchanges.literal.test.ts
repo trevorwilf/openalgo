@@ -2,7 +2,7 @@ import { renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { useBrokerStore } from '@/stores/brokerStore'
 import type { BrokerCapabilities } from '@/types/capabilities'
-import { INDIA_LEGACY_FALLBACK_EXCHANGES } from '@/lib/india_legacy/legacy_fallback_exchanges'
+import { INDIA_LEGACY_FALLBACK_EXCHANGES } from '@/india_legacy/lib/legacy_fallback_exchanges'
 import { useSupportedExchanges } from './useSupportedExchanges'
 
 // Phase 1 v3 (ADR 0017) — verify the literal containment refactor

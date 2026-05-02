@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useBrokerStore } from '@/stores/brokerStore'
-import { INDIA_LEGACY_FALLBACK_EXCHANGES } from '@/lib/india_legacy/legacy_fallback_exchanges'
+import { INDIA_LEGACY_FALLBACK_EXCHANGES } from '@/india_legacy/lib/legacy_fallback_exchanges'
 
 /** Exchange option for dropdowns */
 export interface ExchangeOption {

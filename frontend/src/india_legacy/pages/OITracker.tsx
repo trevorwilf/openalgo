@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronsUpDown } from 'lucide-react'
 import type * as PlotlyTypes from 'plotly.js'
-import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
+import { useSupportedExchanges } from '@/india_legacy/hooks/useSupportedExchanges'
 import { useThemeStore } from '@/stores/themeStore'
 import { oiTrackerApi, type OIDataResponse } from '@/api/oi-tracker'
 import { Card, CardContent } from '@/components/ui/card'

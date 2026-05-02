@@ -3,84 +3,12 @@
   "_schema": "{ allowlist: [{ path: string, reason: string }] }",
   "allowlist": [
     {
-      "path": "src/lib/india_legacy/legacy_fallback_exchanges.ts",
-      "reason": "Last-resort India fallback list; gated behind India region check at the call site."
-    },
-    {
       "path": "src/hooks/useRegionCapabilities.ts",
       "reason": "Multi-region currency / locale / symbol lookup table. India is one row in a 13-currency table; the hook itself never assumes India and the table is ALSO the source of truth for USD/EUR/GBP/JPY/etc. mappings."
     },
     {
-      "path": "src/components/playground/MessageComposer.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/trading/PlaceOrderDialog.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/trading/QuoteHeader.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/hooks/useSupportedExchanges.ts",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
       "path": "src/lib/format/timezone.ts",
       "reason": "v5 Phase 2 — multi-region timezone display helper; Asia/Kolkata + IST appear only as one of N entries in the IANA-to-short-label dispatch table."
-    },
-    {
-      "path": "src/pages/ActionCenter.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/admin/AdminIndex.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/Faq.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/GoCharting.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/Historify.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/HistorifyCharts.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/OrderBook.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/Positions.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/telegram/TelegramConfig.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/Token.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/Tools.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/TradeBook.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/TradingView.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     }
   ]
 }

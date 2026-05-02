@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/select'
 import { Send, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
+import { useSupportedExchanges } from '@/india_legacy/hooks/useSupportedExchanges'
 import type { MessageTemplate } from '@/types/websocket'
 
 // Extended template type with category

@@ -23,7 +23,7 @@ import {
   ZapOff,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
+import { useSupportedExchanges } from '@/india_legacy/hooks/useSupportedExchanges'
 import { showToast } from '@/utils/toast'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

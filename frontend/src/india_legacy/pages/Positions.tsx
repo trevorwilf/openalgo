@@ -56,7 +56,7 @@ import { usePageVisibility } from '@/hooks/usePageVisibility'
 import { useFormatCurrency } from '@/lib/format/currency'
 import { cn, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
-import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
+import { useSupportedExchanges } from '@/india_legacy/hooks/useSupportedExchanges'
 import { onModeChange } from '@/stores/themeStore'
 import type { Position } from '@/types/trading'
 
