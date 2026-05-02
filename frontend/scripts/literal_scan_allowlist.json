@@ -167,22 +167,6 @@
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {
-      "path": "src/pages/chartink/ChartinkIndex.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/chartink/ConfigureChartinkSymbols.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/chartink/NewChartinkStrategy.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/chartink/ViewChartinkStrategy.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
       "path": "src/pages/CustomStraddle.tsx",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
@@ -228,22 +212,6 @@
     },
     {
       "path": "src/pages/Positions.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/python-strategy/NewPythonStrategy.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/python-strategy/PythonStrategyGuide.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/python-strategy/PythonStrategyIndex.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/python-strategy/SchedulePythonStrategy.tsx",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {
