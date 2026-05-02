@@ -1,8 +1,32 @@
+# Phase 8 (T-28) / C-P2-027 — region-aware example.
+#
+# *This example uses India-specific values* (NIFTY index option,
+# NSE_INDEX venue, NRML product, IST schedule).  Pass ``--region us``
+# (or any non-India region) once a US options chain provider ships;
+# until then this script exits early on non-India regions.
+
+import argparse
 import time
 
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from openalgo import api
+
+
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="India NIFTY straddle scheduler example")
+    p.add_argument("--region", default="india")
+    p.add_argument("--venue-tz", default="Asia/Kolkata")
+    return p.parse_args()
+
+
+_ARGS = _parse_args() if __name__ == "__main__" else argparse.Namespace(region="india", venue_tz="Asia/Kolkata")
+if str(_ARGS.region).lower() != "india":
+    raise SystemExit(
+        f"This example covers India-only flows; got --region={_ARGS.region!r}. "
+        "See docs/refactor/future-broker-onboarding-checklist.md for the "
+        "US/EU/UK roadmap."
+    )
 
 print("🔁 OpenAlgo Python Bot is running.")
 
@@ -63,9 +87,10 @@ def place_nifty_straddle_0920():
 # Schedule the Job at 09:20 IST
 # ===============================
 def schedule_straddle():
-    ist = pytz.timezone("Asia/Kolkata")
-
-    scheduler = BackgroundScheduler(timezone=ist)
+    # Phase 8 (T-28) — venue tz from ``--venue-tz``; default
+    # Asia/Kolkata for backward compatibility.
+    venue_tz = pytz.timezone(_ARGS.venue_tz)
+    scheduler = BackgroundScheduler(timezone=venue_tz)
 
     scheduler.add_job(
         place_nifty_straddle_0920,
