@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta
 
 import pandas as pd
+import pytz
 from dotenv import load_dotenv
 from openalgo import api
 from sqlalchemy import MetaData, create_engine
@@ -18,6 +19,22 @@ HOST = os.getenv("HOST", "http://127.0.0.1:5000")
 MAX_RPS = int(os.getenv("MAX_REQUESTS_PER_SECOND", 10))
 POLL_INTERVAL = int(os.getenv("POLLING_INTERVAL_SECONDS", 5))
 INITIAL_DAYS = int(os.getenv("INITIAL_DAYS", 30))
+
+# Phase 8 (T-27) — venue-tz-driven UTC→local conversion. Operators
+# select the venue's IANA timezone via DOWNLOAD_VENUE_TZ. Defaults
+# to Asia/Kolkata for backward compatibility with the legacy India
+# default; US deployments set DOWNLOAD_VENUE_TZ=America/New_York,
+# UK to Europe/London, etc. The downloader no longer hardcodes a
+# 5:30-hour subtraction.
+DOWNLOAD_VENUE_TZ = os.getenv("DOWNLOAD_VENUE_TZ", "Asia/Kolkata")
+try:
+    _VENUE_TZ = pytz.timezone(DOWNLOAD_VENUE_TZ)
+except pytz.UnknownTimeZoneError:
+    print(
+        f"[WARN] DOWNLOAD_VENUE_TZ={DOWNLOAD_VENUE_TZ!r} is not a valid "
+        "IANA timezone; falling back to Asia/Kolkata."
+    )
+    _VENUE_TZ = pytz.timezone("Asia/Kolkata")
 
 # Paths
 DB_FOLDER = os.path.join("..", "db")
@@ -75,11 +92,19 @@ def fetch_and_store(symbol):
         print(f"[{symbol}] No new rows after filtering.")
         return
 
-    # Convert timestamps from UTC to IST (subtract 5:30 hours)
-    ist_timestamps = df.index - timedelta(hours=5, minutes=30)
+    # Phase 8 (T-27) — convert timestamps from UTC to the venue's
+    # local time. Replaces the legacy hardcoded "subtract 5:30
+    # hours". The venue tz comes from DOWNLOAD_VENUE_TZ (default
+    # Asia/Kolkata for India backward compatibility). pandas
+    # tz_localize+tz_convert handles DST correctly for US/EU venues.
+    if df.index.tz is None:
+        utc_index = df.index.tz_localize("UTC")
+    else:
+        utc_index = df.index.tz_convert("UTC")
+    venue_local = utc_index.tz_convert(_VENUE_TZ).tz_localize(None)
 
     df["SYMBOL"] = symbol
-    df["DATE"] = ist_timestamps.strftime("%Y-%m-%d %H:%M:%S")
+    df["DATE"] = venue_local.strftime("%Y-%m-%d %H:%M:%S")
     df = df[["SYMBOL", "DATE", "open", "high", "low", "close", "volume"]]
     df.columns = ["SYMBOL", "DATE", "OPEN", "HIGH", "LOW", "CLOSE", "VOLUME"]
 
