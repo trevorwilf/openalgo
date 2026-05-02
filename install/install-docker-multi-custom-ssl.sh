@@ -124,16 +124,21 @@ apt-get install -y \
     python3-pip
 check_status "Package installation failed"
 
-# Host Timezone Check
-log "Checking Host Timezone..." "$YELLOW"
+# Host Timezone Check — Phase 8 (T-26): operator-controlled deploy
+# timezone via $OPENALGO_DEPLOY_TZ. Default is Asia/Kolkata for
+# backward compatibility with existing India deployments. Set
+# OPENALGO_DEPLOY_TZ to UTC / America/New_York / Europe/London / etc.
+# for non-India deployments.
+DEPLOY_TZ="${OPENALGO_DEPLOY_TZ:-Asia/Kolkata}"
+log "Checking Host Timezone (target: $DEPLOY_TZ)..." "$YELLOW"
 CURRENT_TZ=$(timedatectl show --property=Timezone --value 2>/dev/null || cat /etc/timezone)
-if [[ "$CURRENT_TZ" != *"Asia/Kolkata"* ]]; then
-    log "Setting Host Timezone to Asia/Kolkata..." "$YELLOW"
-    timedatectl set-timezone Asia/Kolkata
+if [[ "$CURRENT_TZ" != *"$DEPLOY_TZ"* ]]; then
+    log "Setting Host Timezone to $DEPLOY_TZ..." "$YELLOW"
+    timedatectl set-timezone "$DEPLOY_TZ"
     check_status "Failed to set timezone"
-    log "Timezone set to Asia/Kolkata" "$GREEN"
+    log "Timezone set to $DEPLOY_TZ" "$GREEN"
 else
-    log "Host Timezone is already Asia/Kolkata." "$GREEN"
+    log "Host Timezone is already $DEPLOY_TZ." "$GREEN"
 fi
 
 # Install Docker
@@ -880,7 +885,7 @@ services:
       - FLASK_ENV=production
       - FLASK_DEBUG=0
       - APP_MODE=standalone
-      - TZ=Asia/Kolkata
+      - TZ=${OPENALGO_DEPLOY_TZ:-Asia/Kolkata}
       # Resource limits auto-calculated for multi-instance deployment
       # See: https://github.com/marketcalls/openalgo/issues/822
       - OPENBLAS_NUM_THREADS=${THREAD_LIMIT}

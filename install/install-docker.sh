@@ -357,7 +357,7 @@ services:
       - FLASK_ENV=production
       - FLASK_DEBUG=0
       - APP_MODE=standalone
-      - TZ=Asia/Kolkata
+      - TZ=${OPENALGO_DEPLOY_TZ:-Asia/Kolkata}
       # Resource limits auto-calculated based on system specs
       # See: https://github.com/marketcalls/openalgo/issues/822
       - OPENBLAS_NUM_THREADS=${THREAD_LIMIT}
