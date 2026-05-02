@@ -10,15 +10,21 @@ from events import (
     OrderPlacedEvent,
     SmartOrderNoActionEvent,
 )
-from utils.constants import (
-    REQUIRED_SMART_ORDER_FIELDS,
-    VALID_ACTIONS,
-    VALID_EXCHANGES,
-    VALID_PRICE_TYPES,
-    VALID_PRODUCT_TYPES,
+from domain.errors import MissingRegionContext
+from services.market_region_service import (
+    get_allowed_action_codes_for_active_region,
+    get_allowed_price_type_codes_for_active_region,
+    get_allowed_product_codes_for_active_region,
+    get_allowed_venue_codes_for_active_region,
 )
 from utils.event_bus import bus
 from utils.logging import get_logger
+
+# Phase 3 (T-20) — required-fields list inlined; see place_order_service.py.
+_REQUIRED_SMART_ORDER_FIELDS: tuple[str, ...] = (
+    "apikey", "strategy", "symbol", "exchange", "action", "quantity",
+    "position_size",
+)
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -77,30 +83,40 @@ def validate_smart_order(order_data: dict[str, Any]) -> tuple[bool, str | None]:
         - Error message (str) or None if validation succeeded
     """
     # Check for missing mandatory fields
-    missing_fields = [field for field in REQUIRED_SMART_ORDER_FIELDS if field not in order_data]
+    missing_fields = [field for field in _REQUIRED_SMART_ORDER_FIELDS if field not in order_data]
     if missing_fields:
         return False, f"Missing mandatory field(s): {', '.join(missing_fields)}"
 
+    # Phase 3 (T-20) — region-aware vocabulary lookup; replaces
+    # ``utils.constants.VALID_*`` imports.
+    try:
+        valid_exchanges = get_allowed_venue_codes_for_active_region()
+        valid_actions = get_allowed_action_codes_for_active_region()
+        valid_price_types = get_allowed_price_type_codes_for_active_region()
+        valid_product_types = get_allowed_product_codes_for_active_region()
+    except MissingRegionContext as exc:
+        return False, f"Cannot validate smart order: {exc}"
+
     # Validate exchange
-    if "exchange" in order_data and order_data["exchange"] not in VALID_EXCHANGES:
-        return False, f"Invalid exchange. Must be one of: {', '.join(VALID_EXCHANGES)}"
+    if "exchange" in order_data and order_data["exchange"] not in valid_exchanges:
+        return False, f"Invalid exchange. Must be one of: {', '.join(valid_exchanges)}"
 
     # Convert action to uppercase and validate
     if "action" in order_data:
         order_data["action"] = order_data["action"].upper()
-        if order_data["action"] not in VALID_ACTIONS:
+        if order_data["action"] not in valid_actions:
             return (
                 False,
-                f"Invalid action. Must be one of: {', '.join(VALID_ACTIONS)} (case insensitive)",
+                f"Invalid action. Must be one of: {', '.join(valid_actions)} (case insensitive)",
             )
 
     # Validate price type if provided
-    if "price_type" in order_data and order_data["price_type"] not in VALID_PRICE_TYPES:
-        return False, f"Invalid price type. Must be one of: {', '.join(VALID_PRICE_TYPES)}"
+    if "price_type" in order_data and order_data["price_type"] not in valid_price_types:
+        return False, f"Invalid price type. Must be one of: {', '.join(valid_price_types)}"
 
     # Validate product type if provided
-    if "product_type" in order_data and order_data["product_type"] not in VALID_PRODUCT_TYPES:
-        return False, f"Invalid product type. Must be one of: {', '.join(VALID_PRODUCT_TYPES)}"
+    if "product_type" in order_data and order_data["product_type"] not in valid_product_types:
+        return False, f"Invalid product type. Must be one of: {', '.join(valid_product_types)}"
 
     return True, None
 

@@ -169,7 +169,151 @@ def is_region_feature_enabled(
     return region.is_feature_enabled(flag, default=default)
 
 
+# ---------------------------------------------------------------------------
+# Phase 3 (T-20) — region-aware vocabulary helpers.
+#
+# Replace promoted-lane consumers of ``utils.constants.VALID_EXCHANGES``
+# / ``VALID_PRODUCT_TYPES`` / ``VALID_PRICE_TYPES`` with a single
+# region-aware lookup. Each helper resolves the active region via
+# :mod:`services.feature_gate_service` and reads from the manifest's
+# venues / product_vocabulary / price_type_vocabulary fields (Phase 0
+# T-01 schema). The active broker's region is the source of truth; no
+# legacy India-fallback default. ADR 0006 invariant 5.
+# ---------------------------------------------------------------------------
+
+
+def _resolve_active_market_region():
+    """Return the active region's :class:`MarketRegion` instance.
+
+    Raises :class:`domain.errors.MissingRegionContext` when nothing
+    resolvable is available — never silently defaults to India.
+    """
+    from domain.errors import MissingRegionContext, RegionResolutionError
+    from services.feature_gate_service import active_region_code
+
+    try:
+        code = active_region_code()
+    except RegionResolutionError as exc:
+        raise MissingRegionContext(
+            "active region could not be resolved; configure the broker "
+            "session region or set settings.default_market_region",
+            attempted_sources=getattr(exc, "attempted_sources", None) or [],
+        ) from exc
+
+    region = get_market_region(code)
+    if region is None:
+        # Lazy-load: in worker / CLI contexts the region cache may not
+        # have been warmed by app startup. Re-scan once before failing.
+        load_market_regions()
+        region = get_market_region(code)
+    if region is None:
+        raise MissingRegionContext(
+            f"active region {code!r} is not registered as a market "
+            "region plugin; install the corresponding "
+            "market_regions/<code>/ package",
+            attempted_sources=[f"market_regions/{code}"],
+        )
+    return region
+
+
+def get_allowed_venue_codes_for_active_region() -> list[str]:
+    """Return the venue codes the active region accepts.
+
+    Reads the union of:
+
+    * Each :class:`VenueSeed` in ``region.venues``.
+    * Any extra codes carried in
+      ``region.legacy_compat_shim["valid_exchanges"]`` (for India
+      compat: ``CRYPTO`` is not a real venue but a legacy classifier).
+
+    The returned list preserves the order declared in
+    ``legacy_compat_shim.valid_exchanges`` if present (so error
+    messages list the venues in the same order they appeared in the
+    legacy ``VALID_EXCHANGES`` list, keeping parity bit-identical with
+    pre-Phase-3 messages).
+    """
+    region = _resolve_active_market_region()
+    shim = region.legacy_compat_shim or {}
+    declared_order = list(shim.get("valid_exchanges") or [])
+    if declared_order:
+        return declared_order
+    # No legacy_compat_shim → derive from venues alone.
+    return [v.venue_code for v in region.venues]
+
+
+def get_allowed_product_codes_for_active_region() -> list[str]:
+    """Return the union of all product codes across asset classes
+    declared in the active region's ``product_vocabulary`` (Phase 0
+    T-01 schema field). The ``ALL`` key is preferred as the canonical
+    flat list when present; otherwise the union of every value list."""
+    from domain.errors import MissingRegionContext
+
+    region = _resolve_active_market_region()
+    vocab = region.product_vocabulary or {}
+    if "ALL" in vocab:
+        return list(vocab["ALL"])
+    if not vocab:
+        raise MissingRegionContext(
+            f"region {region.region_code!r} has no product_vocabulary "
+            "declared; the manifest must populate "
+            "product_vocabulary.ALL or per-asset-class lists before "
+            "promoted-lane order services can validate against it",
+            attempted_sources=[f"market_regions/{region.region_code}/plugin.json"],
+        )
+    seen: list[str] = []
+    for values in vocab.values():
+        for v in values or ():
+            if v not in seen:
+                seen.append(v)
+    return seen
+
+
+def get_allowed_price_type_codes_for_active_region() -> list[str]:
+    """Return the union of all price-type codes declared in the active
+    region's ``price_type_vocabulary``. ``ALL`` key takes precedence."""
+    from domain.errors import MissingRegionContext
+
+    region = _resolve_active_market_region()
+    vocab = region.price_type_vocabulary or {}
+    if "ALL" in vocab:
+        return list(vocab["ALL"])
+    if not vocab:
+        raise MissingRegionContext(
+            f"region {region.region_code!r} has no price_type_vocabulary "
+            "declared; the manifest must populate "
+            "price_type_vocabulary.ALL or per-asset-class lists before "
+            "promoted-lane order services can validate against it",
+            attempted_sources=[f"market_regions/{region.region_code}/plugin.json"],
+        )
+    seen: list[str] = []
+    for values in vocab.values():
+        for v in values or ():
+            if v not in seen:
+                seen.append(v)
+    return seen
+
+
+def get_allowed_action_codes_for_active_region() -> list[str]:
+    """Return the action codes (BUY/SELL) the active region accepts.
+
+    Currently sourced from ``legacy_compat_shim.valid_actions``;
+    long-term this becomes a first-class ``MarketRegion.action_vocabulary``
+    field. The compat-shim location keeps Phase 3 a pure migration from
+    ``utils.constants.VALID_ACTIONS`` without a second schema change.
+    """
+    region = _resolve_active_market_region()
+    shim = region.legacy_compat_shim or {}
+    actions = list(shim.get("valid_actions") or [])
+    if actions:
+        return actions
+    return ["BUY", "SELL"]
+
+
 __all__ = [
+    "get_allowed_action_codes_for_active_region",
+    "get_allowed_price_type_codes_for_active_region",
+    "get_allowed_product_codes_for_active_region",
+    "get_allowed_venue_codes_for_active_region",
     "get_default_market_region_details",
     "get_market_region_catalog",
     "get_session_templates",

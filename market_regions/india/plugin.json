@@ -80,6 +80,50 @@
       "market_family": "COMMODITY",
       "settlement_template": "T+1",
       "session_model": "REGULAR_ONLY"
+    },
+    {
+      "venue_code": "BCD",
+      "display_name": "BSE Currency Derivatives",
+      "mic_code": "XBOM",
+      "country_code": "IN",
+      "timezone_name": "Asia/Kolkata",
+      "base_currency": "INR",
+      "market_family": "FX",
+      "settlement_template": "T+1",
+      "session_model": "REGULAR_ONLY"
+    },
+    {
+      "venue_code": "NCDEX",
+      "display_name": "National Commodity & Derivatives Exchange",
+      "mic_code": "NCDX",
+      "country_code": "IN",
+      "timezone_name": "Asia/Kolkata",
+      "base_currency": "INR",
+      "market_family": "COMMODITY",
+      "settlement_template": "T+1",
+      "session_model": "REGULAR_ONLY"
+    },
+    {
+      "venue_code": "NSE_INDEX",
+      "display_name": "NSE Indices",
+      "mic_code": "XNSE",
+      "country_code": "IN",
+      "timezone_name": "Asia/Kolkata",
+      "base_currency": "INR",
+      "market_family": "IN_STOCK",
+      "settlement_template": "T+1",
+      "session_model": "REGULAR_ONLY"
+    },
+    {
+      "venue_code": "BSE_INDEX",
+      "display_name": "BSE Indices",
+      "mic_code": "XBOM",
+      "country_code": "IN",
+      "timezone_name": "Asia/Kolkata",
+      "base_currency": "INR",
+      "market_family": "IN_STOCK",
+      "settlement_template": "T+1",
+      "session_model": "REGULAR_ONLY"
     }
   ],
   "session_templates": [
@@ -130,5 +174,30 @@
     "sandbox_enabled": true,
     "analyzer_enabled": true,
     "flow_templates_enabled": true
+  },
+  "product_vocabulary": {
+    "EQUITY": ["CNC", "MIS"],
+    "DERIVATIVES": ["NRML", "MIS"],
+    "ALL": ["CNC", "NRML", "MIS"]
+  },
+  "price_type_vocabulary": {
+    "ALL": ["MARKET", "LIMIT", "SL", "SL-M"]
+  },
+  "legacy_compat_shim": {
+    "valid_exchanges": [
+      "NSE",
+      "NFO",
+      "CDS",
+      "BSE",
+      "BFO",
+      "BCD",
+      "MCX",
+      "NCDEX",
+      "NSE_INDEX",
+      "BSE_INDEX",
+      "CRYPTO"
+    ],
+    "valid_actions": ["BUY", "SELL"],
+    "valid_time_in_force": ["DAY", "IOC"]
   }
 }

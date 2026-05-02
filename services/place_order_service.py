@@ -4,23 +4,42 @@ from typing import Any, Dict, Optional, Tuple
 
 from database.auth_db import get_auth_token_broker
 from database.settings_db import get_analyze_mode
+from domain.errors import MissingRegionContext
 from events import AnalyzerErrorEvent, OrderFailedEvent, OrderPlacedEvent
-from restx_api.schemas import OrderSchema
-from utils.constants import (
-    REQUIRED_ORDER_FIELDS,
-    VALID_ACTIONS,
-    VALID_EXCHANGES,
-    VALID_PRICE_TYPES,
-    VALID_PRODUCT_TYPES,
+from services.market_region_service import (
+    get_allowed_action_codes_for_active_region,
+    get_allowed_price_type_codes_for_active_region,
+    get_allowed_product_codes_for_active_region,
+    get_allowed_venue_codes_for_active_region,
 )
 from utils.event_bus import bus
 from utils.logging import get_logger
 
+# Phase 3 (T-20) — required-fields list is structural API contract, not
+# a regional vocabulary. Inlined here so this module no longer imports
+# from utils.constants and can move to PROMOTED_CORE.
+_REQUIRED_ORDER_FIELDS: tuple[str, ...] = (
+    "apikey", "strategy", "symbol", "exchange", "action", "quantity",
+)
+
+# Phase 3 (T-20) — ``restx_api.schemas`` is LEGACY_INDIA-classified;
+# the OrderSchema instance is built lazily inside the validator so
+# the module-level import surface stays clean. The OrderSchema is
+# used only to coerce field types; its India-shaped venue / product
+# enums are NOT relied on (Phase 3 added explicit region-aware
+# validators above).
+_order_schema_cached = None
+
+
+def _get_order_schema():
+    global _order_schema_cached
+    if _order_schema_cached is None:
+        from restx_api.schemas import OrderSchema as _OrderSchema
+        _order_schema_cached = _OrderSchema()
+    return _order_schema_cached
+
 # Initialize logger
 logger = get_logger(__name__)
-
-# Initialize schema
-order_schema = OrderSchema()
 
 
 def import_broker_module(broker_name: str) -> Any | None:
@@ -76,39 +95,53 @@ def validate_order_data(data: dict[str, Any]) -> tuple[bool, dict[str, Any] | No
         - Error message (str) or None if validation succeeded
     """
     # Check for missing mandatory fields
-    missing_fields = [field for field in REQUIRED_ORDER_FIELDS if field not in data]
+    missing_fields = [field for field in _REQUIRED_ORDER_FIELDS if field not in data]
     if missing_fields:
         return False, None, f"Missing mandatory field(s): {', '.join(missing_fields)}"
 
+    # Phase 3 (T-20) — region-aware vocabulary lookup. Replaces the
+    # legacy ``utils.constants.VALID_*`` imports; the active region's
+    # manifest is the source of truth. India brokers continue to see
+    # the same 11-venue / 3-product / 4-price-type set bit-identically;
+    # non-India brokers (which never reach this v1 service per the
+    # _v1_lane_guard) would see their own vocabulary.
+    try:
+        valid_exchanges = get_allowed_venue_codes_for_active_region()
+        valid_actions = get_allowed_action_codes_for_active_region()
+        valid_price_types = get_allowed_price_type_codes_for_active_region()
+        valid_product_types = get_allowed_product_codes_for_active_region()
+    except MissingRegionContext as exc:
+        return False, None, f"Cannot validate order: {exc}"
+
     # Validate exchange
-    if "exchange" in data and data["exchange"] not in VALID_EXCHANGES:
-        return False, None, f"Invalid exchange. Must be one of: {', '.join(VALID_EXCHANGES)}"
+    if "exchange" in data and data["exchange"] not in valid_exchanges:
+        return False, None, f"Invalid exchange. Must be one of: {', '.join(valid_exchanges)}"
 
     # Convert action to uppercase and validate
     if "action" in data:
         data["action"] = data["action"].upper()
-        if data["action"] not in VALID_ACTIONS:
+        if data["action"] not in valid_actions:
             return (
                 False,
                 None,
-                f"Invalid action. Must be one of: {', '.join(VALID_ACTIONS)} (case insensitive)",
+                f"Invalid action. Must be one of: {', '.join(valid_actions)} (case insensitive)",
             )
 
     # Validate price type if provided
-    if "price_type" in data and data["price_type"] not in VALID_PRICE_TYPES:
-        return False, None, f"Invalid price type. Must be one of: {', '.join(VALID_PRICE_TYPES)}"
+    if "price_type" in data and data["price_type"] not in valid_price_types:
+        return False, None, f"Invalid price type. Must be one of: {', '.join(valid_price_types)}"
 
     # Validate product type if provided
-    if "product_type" in data and data["product_type"] not in VALID_PRODUCT_TYPES:
+    if "product_type" in data and data["product_type"] not in valid_product_types:
         return (
             False,
             None,
-            f"Invalid product type. Must be one of: {', '.join(VALID_PRODUCT_TYPES)}",
+            f"Invalid product type. Must be one of: {', '.join(valid_product_types)}",
         )
 
     # Validate and deserialize input
     try:
-        order_data = order_schema.load(data)
+        order_data = _get_order_schema().load(data)
         return True, order_data, None
     except Exception as err:
         return False, None, str(err)

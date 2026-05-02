@@ -2,10 +2,19 @@ import importlib
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from database.auth_db import get_auth_token_broker
-from database.token_db import get_token
-from utils.constants import VALID_EXCHANGES
+from domain.errors import MissingRegionContext
+from services.market_region_service import get_allowed_venue_codes_for_active_region
 from utils.feature_flags import is_enabled
 from utils.logging import get_logger
+
+# Phase 3 (T-20) — ``database.token_db.get_token`` is a LEGACY_INDIA
+# primitive forbidden in PROMOTED_CORE. Imported lazily inside
+# :func:`validate_symbol_exchange` so the module-level import surface
+# stays clean while the legacy v1-lane fallback continues to work
+# bit-identically. ADR 0016 / ADR 0019 — the canonical resolver lives
+# at ``services.instrument_resolution.resolve_instrument``; promoted
+# (v2) routes already use it. The v1 services keep ``get_token`` for
+# parity until Phase 9 physically relocates the v1 lane.
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -71,12 +80,20 @@ def validate_symbol_exchange(symbol: str, exchange: str) -> tuple[bool, str | No
     Returns:
         Tuple of (is_valid, error_message)
     """
-    # Validate exchange
+    # Validate exchange — Phase 3 (T-20) region-aware vocabulary lookup.
     exchange_upper = exchange.upper()
-    if exchange_upper not in VALID_EXCHANGES:
-        return False, f"Invalid exchange '{exchange}'. Must be one of: {', '.join(VALID_EXCHANGES)}"
+    try:
+        valid_exchanges = get_allowed_venue_codes_for_active_region()
+    except MissingRegionContext as exc:
+        return False, f"Cannot validate quote: {exc}"
+    if exchange_upper not in valid_exchanges:
+        return False, f"Invalid exchange '{exchange}'. Must be one of: {', '.join(valid_exchanges)}"
 
-    # Validate symbol exists in master contract
+    # Validate symbol exists in master contract — Phase 3 keeps the
+    # legacy ``get_token`` lookup function-local so PROMOTED_CORE
+    # module-level import lock stays clean.
+    from database.token_db import get_token
+
     token = get_token(symbol, exchange_upper)
     if token is None:
         return (

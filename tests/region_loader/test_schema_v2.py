@@ -144,16 +144,30 @@ def test_shipped_india_plugin_validates_v2(chdir) -> None:
     assert region_loader.detect_schema_version(payload) == "v2"
     region = MarketRegion(**payload)
     assert region.region_code == "india"
+    # Phase 3 (T-20) — venue catalog expanded to include the full
+    # legacy VALID_EXCHANGES set so the region's venues field can
+    # back the promoted-lane venue allow-list. CRYPTO is intentionally
+    # NOT a venue (it's a broker-side classifier carried by
+    # ``legacy_compat_shim.valid_exchanges``).
     assert {v.venue_code for v in region.venues} == {
         "NSE",
         "BSE",
         "NFO",
         "BFO",
         "CDS",
+        "BCD",
         "MCX",
+        "NCDEX",
+        "NSE_INDEX",
+        "BSE_INDEX",
     }
     assert region.symbol_display.date_format == "DDMMMYY"
     assert region.is_feature_enabled("option_chain_enabled") is True
+    # Phase 3 (T-20) — vocabulary fields populated so the migrated
+    # service helpers can consume them.
+    assert region.product_vocabulary.get("ALL") == ["CNC", "NRML", "MIS"]
+    assert region.price_type_vocabulary.get("ALL") == ["MARKET", "LIMIT", "SL", "SL-M"]
+    assert "CRYPTO" in (region.legacy_compat_shim or {}).get("valid_exchanges", [])
 
 
 def test_shipped_us_plugin_validates_v2() -> None:

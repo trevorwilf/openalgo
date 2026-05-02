@@ -33,10 +33,14 @@ def _fake_get_token(symbol: str, exchange: str):
 
 
 def generate() -> Dict[str, Any]:
+    import os
+    os.environ.setdefault("MARKET_REGION_FOR_TESTS", "india")
+
     from services import history_service  # noqa: E402
 
+    # Phase 3 (T-20): patch source module — see parity_quote.py.
     results = []
-    with mock.patch.object(history_service, "get_token", side_effect=_fake_get_token):
+    with mock.patch("database.token_db.get_token", side_effect=_fake_get_token):
         for case in CASES:
             ok, err = history_service.validate_symbol_exchange(case["symbol"], case["exchange"])
             results.append({"input": case, "ok": ok, "error": err})

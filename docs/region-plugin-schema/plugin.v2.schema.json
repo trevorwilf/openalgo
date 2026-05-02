@@ -210,6 +210,71 @@
       "type": "object",
       "description": "Region-scoped feature toggles. Booleans only; default-off semantics. Phase 6 reads these in services/feature_gate_service.py.",
       "additionalProperties": { "type": "boolean" }
+    },
+    "product_vocabulary": {
+      "type": "object",
+      "description": "Phase 3 (T-20) — region-aware product code vocabulary by asset class. Reserved key `ALL` is the canonical flat list consumed by promoted-lane order services in lieu of utils.constants.VALID_PRODUCT_TYPES.",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "price_type_vocabulary": {
+      "type": "object",
+      "description": "Phase 3 (T-20) — region-aware price-type code vocabulary by asset class. Reserved key `ALL` is the canonical flat list.",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "mandatory_close_rules": {
+      "type": "array",
+      "description": "Phase 0 (T-01) schema field — region's mandatory-close (auto-square-off) rules per venue. Phase 2 (T-11) populates the India entries; legacy sandbox/squareoff_manager.py consumes the same data.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "quantity_freeze_rules": {
+      "type": "array",
+      "description": "Phase 0 (T-01) schema field — region's qty-freeze rules per (venue, instrument family). Phase 2 (T-12) populates the NFO entry.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "currency_locale": {
+      "type": "object",
+      "description": "Phase 0 (T-01) schema field — per-currency BCP-47 locale tag, e.g. {INR: en-IN, USD: en-US}.",
+      "additionalProperties": { "type": "string" }
+    },
+    "option_grammar": {
+      "type": "object",
+      "description": "Phase 0 (T-01) schema field — option-symbol grammar (date format, right codes, parsing regex hint). Phase 2 (T-14) populates the India entries from market_regions.india.options_grammar.",
+      "additionalProperties": true
+    },
+    "index_classification": {
+      "type": "object",
+      "description": "Phase 0 (T-01) schema field — venue → list of index venue codes mapping (e.g. {NSE: [NSE_INDEX]}).",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "legacy_compat_shim": {
+      "type": "object",
+      "description": "Phase 0 (T-01) schema field — opaque marker for India v1 lane attachment. Phase 3 (T-20) uses `valid_exchanges` and `valid_actions` keys to carry the India compat list (CRYPTO is in the legacy VALID_EXCHANGES list but is not a venue, so it lives here).",
+      "additionalProperties": true
+    },
+    "screener_providers": {
+      "type": "array",
+      "description": "Phase 0 (T-01) schema field — provider codes registered for this region.",
+      "items": { "type": "string" }
+    },
+    "master_contract_refresh_policy": {
+      "type": "object",
+      "description": "Phase 0 (T-01) schema field — refresh cadence/strategy for the broker's master contract, consumed by the per-broker master-contract refresh policy in BrokerCapabilities.",
+      "additionalProperties": true
     }
   }
 }

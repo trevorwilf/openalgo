@@ -40,10 +40,21 @@ def _fake_get_token(symbol: str, exchange: str):
 
 
 def generate() -> Dict[str, Any]:
+    import os
+    # Phase 3 (T-20) — quotes_service is now PROMOTED_CORE and uses
+    # the active region's vocabulary. Force India for parity so the
+    # validation surface matches the legacy (pre-Phase-3) behavior.
+    os.environ.setdefault("MARKET_REGION_FOR_TESTS", "india")
+
     from services import quotes_service  # noqa: E402
 
+    # Patch the SOURCE module — Phase 3 made the import in
+    # quotes_service function-local (per the lane-isolation contract),
+    # so patching the attribute on quotes_service no longer works.
+    # database.token_db.get_token is the canonical lookup; both pre-
+    # and post-Phase-3 code paths resolve it the same way.
     results = []
-    with mock.patch.object(quotes_service, "get_token", side_effect=_fake_get_token):
+    with mock.patch("database.token_db.get_token", side_effect=_fake_get_token):
         for case in CASES:
             ok, err = quotes_service.validate_symbol_exchange(case["symbol"], case["exchange"])
             results.append({"input": case, "ok": ok, "error": err})
