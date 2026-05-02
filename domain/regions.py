@@ -185,6 +185,22 @@ class MarketRegion(BaseModel):
     symbol_display: SymbolDisplay = Field(default_factory=SymbolDisplay)
     feature_flags: RegionFeatureFlags = Field(default_factory=RegionFeatureFlags)
 
+    # --- schema v3 (Phase 0 / T-01, all optional, default empty) ---
+    # Surfaces consumed by Phases 3-7. No live consumer reads these in
+    # Phase 0 — they are added now so later phases have a place to put
+    # the relocated India data and the new US/EU/UK data without a
+    # second schema migration.
+    product_vocabulary: dict[str, list[str]] = Field(default_factory=dict)
+    price_type_vocabulary: dict[str, list[str]] = Field(default_factory=dict)
+    mandatory_close_rules: list[dict[str, Any]] = Field(default_factory=list)
+    quantity_freeze_rules: list[dict[str, Any]] = Field(default_factory=list)
+    currency_locale: dict[str, str] = Field(default_factory=dict)
+    option_grammar: dict[str, Any] = Field(default_factory=dict)
+    index_classification: dict[str, list[str]] = Field(default_factory=dict)
+    legacy_compat_shim: dict[str, Any] = Field(default_factory=dict)
+    screener_providers: list[str] = Field(default_factory=list)
+    master_contract_refresh_policy: dict[str, Any] = Field(default_factory=dict)
+
     @field_validator("region_code", mode="before")
     @classmethod
     def _normalize_region_code(cls, value: Any) -> str:
