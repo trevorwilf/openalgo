@@ -26,6 +26,71 @@ from .port_check import find_available_port, is_port_in_use
 logger = get_logger("websocket_proxy")
 
 
+# ---------------------------------------------------------------------------
+# Phase 5 (T-21) — capability-driven topic parsing.
+#
+# Pre-Phase-5 the router hardcoded ``NSE_INDEX`` / ``BSE_INDEX`` as the
+# only multi-segment venue codes. Phase 5 reads the venue catalog from
+# the loaded region plugins and identifies any venue_code that contains
+# an underscore as a multi-segment venue. Adding a new multi-segment
+# venue (e.g. for a new region or a new index venue) is now a
+# plugin.json edit rather than a router edit.
+# ---------------------------------------------------------------------------
+
+
+_MULTI_SEG_VENUES_CACHE: tuple[str, ...] | None = None
+
+
+def _multi_segment_venue_codes() -> tuple[str, ...]:
+    """Return the tuple of venue codes that contain an underscore.
+
+    Lazily loads the region catalog. Returns the codes sorted by
+    length descending so the longest-prefix match wins (e.g. the
+    hypothetical ``NSE_INDEX_FUT`` would match before ``NSE_INDEX``).
+    """
+    global _MULTI_SEG_VENUES_CACHE
+    if _MULTI_SEG_VENUES_CACHE is not None:
+        return _MULTI_SEG_VENUES_CACHE
+    try:
+        from utils.region_loader import list_market_regions, load_market_regions
+
+        if not list_market_regions():
+            load_market_regions()
+        codes: set[str] = set()
+        for region in list_market_regions().values():
+            for venue in region.venues:
+                if "_" in venue.venue_code:
+                    codes.add(venue.venue_code)
+        _MULTI_SEG_VENUES_CACHE = tuple(sorted(codes, key=lambda c: -len(c)))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("multi-segment venue cache load failed: %s", exc)
+        _MULTI_SEG_VENUES_CACHE = ()
+    return _MULTI_SEG_VENUES_CACHE
+
+
+def _split_topic_venue_and_symbol(remaining: list[str]) -> tuple[str, str]:
+    """Split ``EXCHANGE_SYMBOL`` segments into (exchange, symbol).
+
+    Tries each registered multi-segment venue prefix first; falls
+    through to the default 1-segment split. Bit-identical behavior
+    for India venues (NSE_INDEX, BSE_INDEX) because those venues are
+    declared in the India region plugin.
+    """
+    for venue_code in _multi_segment_venue_codes():
+        venue_parts = venue_code.split("_")
+        if len(remaining) >= len(venue_parts) + 1 and remaining[: len(venue_parts)] == venue_parts:
+            return venue_code, "_".join(remaining[len(venue_parts):])
+    return remaining[0], "_".join(remaining[1:])
+
+
+def _reset_topic_format_cache_for_tests() -> None:
+    """Test hook — re-loads the multi-segment venue cache after a
+    region-loader reset. Keep this lightweight; the topic parser is
+    on the WS hot path."""
+    global _MULTI_SEG_VENUES_CACHE
+    _MULTI_SEG_VENUES_CACHE = None
+
+
 class WebSocketProxy:
     """
     WebSocket Proxy Server that handles client connections and authentication,
@@ -1501,10 +1566,18 @@ class WebSocketProxy:
                 # Extract topic components from ZMQ topic string.
                 # All adapters publish: EXCHANGE_SYMBOL_MODE
                 # Mode (LTP/QUOTE/DEPTH) is always the LAST segment.
-                # Exchange is the first segment (NSE, BSE, NFO, MCX, CRYPTO, …)
-                #   except NSE_INDEX / BSE_INDEX which span two segments.
-                # Symbol is everything between exchange and mode — may contain
-                # underscores for crypto spot pairs (e.g. CRYPTO_SOL_INR_LTP).
+                # Exchange is the first segment(s); symbol is the remainder.
+                #
+                # Phase 5 (T-21) — multi-segment venue codes (e.g.
+                # ``NSE_INDEX``, ``BSE_INDEX``) are no longer hardcoded.
+                # The router queries the loaded market-region plugins
+                # for any ``venue_code`` containing an underscore and
+                # treats those as multi-segment venues. New regions
+                # adding their own multi-segment venues need only
+                # declare them in their ``plugin.json``; no router
+                # edit required. India brokers see bit-identical
+                # behavior because the region plugin's venues already
+                # carry NSE_INDEX / BSE_INDEX.
                 parts = topic_str.split("_")
 
                 if len(parts) < 3:
@@ -1517,13 +1590,7 @@ class WebSocketProxy:
                 mode_str = parts[-1]
                 remaining = parts[:-1]  # everything except mode
 
-                # Detect NSE_INDEX / BSE_INDEX exchange prefix (two segments)
-                if len(remaining) >= 2 and remaining[0] in ("NSE", "BSE") and remaining[1] == "INDEX":
-                    exchange = f"{remaining[0]}_{remaining[1]}"
-                    symbol = "_".join(remaining[2:])
-                else:
-                    exchange = remaining[0]
-                    symbol = "_".join(remaining[1:])
+                exchange, symbol = _split_topic_venue_and_symbol(remaining)
 
                 if not symbol:
                     logger.warning(f"Invalid topic format (no symbol): {topic_str}")

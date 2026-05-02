@@ -54,10 +54,19 @@ def _mocked_broker_module():
 
 def _call_service(monkeypatch) -> tuple[bool, dict, int]:
     """Run `get_quotes_with_auth` with every external dependency mocked."""
+    import os
+
+    # Phase 3 (T-20) — quotes_service is now PROMOTED_CORE and uses
+    # the active region's vocabulary; force India for parity testing.
+    monkeypatch.setenv("MARKET_REGION_FOR_TESTS", "india")
+
     from services import quotes_service
 
-    # Patch get_token so validate_symbol_exchange passes.
-    monkeypatch.setattr(quotes_service, "get_token", lambda s, e: "TOKEN-1")
+    # Phase 3 (T-20): patch the source module — `get_token` is now
+    # imported lazily inside validate_symbol_exchange.
+    import database.token_db as _token_db
+
+    monkeypatch.setattr(_token_db, "get_token", lambda s, e: "TOKEN-1")
     monkeypatch.setattr(
         quotes_service, "import_broker_module",
         lambda name: _mocked_broker_module(),

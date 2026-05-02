@@ -39,8 +39,21 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Brokers whose v1 transform_data converts MARKET → LIMIT via LTP+slab.
-BROKERS_REQUIRING_MPP_MARKET: frozenset[str] = frozenset(
+# Phase 5 (T-22) — capability-driven MPP eligibility.
+#
+# Pre-Phase-5 the eligibility was a hardcoded broker-name frozenset.
+# Phase 5 moves the truth to each broker plugin's
+# ``requires_market_price_protection`` /
+# ``requires_slm_to_sl_conversion`` capability flags (Phase 0 T-02
+# schema fields). The functions below now consult
+# :class:`domain.capabilities.BrokerCapabilities`; the frozensets
+# remain only as a documented historical inventory of the 9 + 2
+# India brokers that originally needed MPP. New brokers add the
+# capability flag in their ``plugin.json``; no Python edit required.
+
+# Historical inventory (do not consult at runtime — kept for the
+# release-gate dashboard and per-broker parity tests).
+LEGACY_INDIA_MPP_MARKET_BROKERS: frozenset[str] = frozenset(
     {
         "flattrade",
         "motilal",
@@ -54,8 +67,7 @@ BROKERS_REQUIRING_MPP_MARKET: frozenset[str] = frozenset(
     }
 )
 
-# Brokers whose v1 transform_data also converts SL-M → SL via trigger+slab.
-BROKERS_REQUIRING_MPP_SLM: frozenset[str] = frozenset(
+LEGACY_INDIA_MPP_SLM_BROKERS: frozenset[str] = frozenset(
     {
         "motilal",
         "samco",
@@ -63,14 +75,59 @@ BROKERS_REQUIRING_MPP_SLM: frozenset[str] = frozenset(
 )
 
 
+def _capability(broker_code: str):
+    """Return the broker's :class:`BrokerCapabilities` or ``None``.
+
+    Lazy-loads the broker plugin catalog if it hasn't been warmed yet
+    (CLI / worker / parity-test contexts that don't go through the
+    normal app-startup path).
+    """
+    if not broker_code:
+        return None
+    try:
+        from utils.plugin_loader import (
+            get_broker_capabilities,
+            load_broker_capabilities,
+        )
+
+        bc = broker_code.lower()
+        caps = get_broker_capabilities(bc)
+        if caps is None:
+            # Cold cache — load once, retry.
+            load_broker_capabilities()
+            caps = get_broker_capabilities(bc)
+        return caps
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("MPP: capability lookup failed for %s: %s", broker_code, exc)
+        return None
+
+
 def requires_mpp_market(broker_code: str) -> bool:
-    """True iff the broker needs MARKET → LIMIT MPP conversion."""
-    return (broker_code or "").lower() in BROKERS_REQUIRING_MPP_MARKET
+    """True iff the broker needs MARKET → LIMIT MPP conversion.
+
+    Phase 5 (T-22): reads the broker plugin's
+    ``requires_market_price_protection`` capability. India brokers
+    listed in :data:`LEGACY_INDIA_MPP_MARKET_BROKERS` declare
+    ``"requires_market_price_protection": true`` in their
+    ``plugin.json``; absence of the flag means MPP is off for that
+    broker.
+    """
+    caps = _capability(broker_code)
+    if caps is None:
+        return False
+    return bool(getattr(caps, "requires_market_price_protection", False))
 
 
 def requires_mpp_slm(broker_code: str) -> bool:
-    """True iff the broker needs SL-M → SL MPP conversion."""
-    return (broker_code or "").lower() in BROKERS_REQUIRING_MPP_SLM
+    """True iff the broker needs SL-M → SL MPP conversion.
+
+    Phase 5 (T-22): reads the broker plugin's
+    ``requires_slm_to_sl_conversion`` capability flag.
+    """
+    caps = _capability(broker_code)
+    if caps is None:
+        return False
+    return bool(getattr(caps, "requires_slm_to_sl_conversion", False))
 
 
 def _instrument_attr(instrument: Any, *attrs: str) -> Any:
@@ -163,10 +220,16 @@ def apply_mpp_if_required(
     Returns either the original ``order`` (no change) or a
     ``model_copy`` with order_type / price replaced.
 
-    No-ops for any broker not in
-    :data:`BROKERS_REQUIRING_MPP_MARKET` /
-    :data:`BROKERS_REQUIRING_MPP_SLM`. Also no-ops when:
+    Phase 5 (T-22): eligibility is now read from each broker plugin's
+    capability flags (``requires_market_price_protection`` /
+    ``requires_slm_to_sl_conversion``) instead of the hardcoded
+    frozensets. The list of India brokers that historically needed
+    this lives at :data:`LEGACY_INDIA_MPP_MARKET_BROKERS` /
+    :data:`LEGACY_INDIA_MPP_SLM_BROKERS` for documentation only.
 
+    No-ops when:
+
+    * the broker plugin doesn't declare the capability flag
     * the operator has disabled MPP via ``API_V2_MPP_<BROKER>=0``
     * ``auth_token`` is missing (cannot fetch quote)
     * the order is not MARKET (or STOP, for SL-M brokers)
@@ -185,8 +248,8 @@ def apply_mpp_if_required(
     symbol = _instrument_attr(instrument, "broker_symbol", "canonical_symbol", "symbol") or ""
     venue = _instrument_attr(instrument, "venue_code", "exchange", "brexchange") or ""
 
-    # MARKET → LIMIT
-    if order.order_type == OrderType.MARKET and bc in BROKERS_REQUIRING_MPP_MARKET:
+    # MARKET → LIMIT — capability-driven
+    if order.order_type == OrderType.MARKET and requires_mpp_market(bc):
         if not auth_token:
             logger.debug("MPP: skip (no auth_token) for %s MARKET", bc)
             return order
@@ -205,8 +268,8 @@ def apply_mpp_if_required(
             "price": Decimal(str(protected)),
         })
 
-    # SL-M → SL (uses trigger_price, no quote fetch)
-    if order.order_type == OrderType.STOP and bc in BROKERS_REQUIRING_MPP_SLM:
+    # SL-M → SL (uses trigger_price, no quote fetch) — capability-driven
+    if order.order_type == OrderType.STOP and requires_mpp_slm(bc):
         if order.trigger_price is None:
             return order
         trigger = float(order.trigger_price)
@@ -228,8 +291,8 @@ def apply_mpp_if_required(
 
 
 __all__ = [
-    "BROKERS_REQUIRING_MPP_MARKET",
-    "BROKERS_REQUIRING_MPP_SLM",
+    "LEGACY_INDIA_MPP_MARKET_BROKERS",
+    "LEGACY_INDIA_MPP_SLM_BROKERS",
     "apply_mpp_if_required",
     "requires_mpp_market",
     "requires_mpp_slm",

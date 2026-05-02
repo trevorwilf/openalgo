@@ -49,9 +49,16 @@ def _mocked_module():
 
 
 def _call_service(monkeypatch):
+    # Phase 3 (T-20) — history_service is PROMOTED_CORE; force India
+    # so the region-aware validator accepts NSE.
+    monkeypatch.setenv("MARKET_REGION_FOR_TESTS", "india")
+
     from services import history_service
 
-    monkeypatch.setattr(history_service, "get_token", lambda s, e: "TOKEN-1")
+    # Phase 3 (T-20): patch the source module — get_token is lazy.
+    import database.token_db as _token_db
+
+    monkeypatch.setattr(_token_db, "get_token", lambda s, e: "TOKEN-1")
     monkeypatch.setattr(
         history_service, "import_broker_module", lambda name: _mocked_module()
     )

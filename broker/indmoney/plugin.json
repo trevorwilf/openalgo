@@ -17,5 +17,6 @@
   "supported_regions": [
     "india"
   ],
-  "leverage_config": false
+  "leverage_config": false,
+  "requires_market_price_protection": true
 }
