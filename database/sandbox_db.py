@@ -205,8 +205,16 @@ class SandboxFunds(Base):
     user_id = Column(String(50), unique=True, nullable=False, index=True)
 
     # Fund balances
-    total_capital = Column(DECIMAL(15, 2), default=10000000.00)  # ₹1 Crore starting capital
-    available_balance = Column(DECIMAL(15, 2), default=10000000.00)  # Available for trading
+    # Phase 2-bis-2 (T-15) — schema-level default removed; the
+    # active sandbox provider seeds the starting capital on row
+    # creation. India sandbox seeds ₹10,000,000 (₹1 Crore) per
+    # IndiaSandboxProvider; future US/EU/UK sandboxes seed their
+    # own region-shaped values. The legacy 10000000.00 default
+    # would have silently nudged non-India deployments into an
+    # INR-shaped capital. Existing rows are backfilled by
+    # ``upgrade/migrate_sandbox_funds_starting_capital_default.py``.
+    total_capital = Column(DECIMAL(15, 2))  # Provider-seeded; nullable
+    available_balance = Column(DECIMAL(15, 2))  # Provider-seeded; nullable
     used_margin = Column(DECIMAL(15, 2), default=0.00)  # Margin blocked in positions
 
     # P&L tracking
