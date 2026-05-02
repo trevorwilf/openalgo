@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **887**.
+Total classified files: **897**.
 
 Classification semantics:
 
@@ -18,7 +18,7 @@ Classification semantics:
 | `BROKER_PLUGIN` | Under `broker/*` — broker facts only. |
 | `COMPATIBILITY_SHIM` | Explicit bridge between lanes (e.g. `domain/translators.py`). |
 
-## PROMOTED_CORE (84 files)
+## PROMOTED_CORE (85 files)
 
 - `__init__.py`
 - `conftest.py`
@@ -43,6 +43,7 @@ Classification semantics:
 - `domain/options.py`
 - `domain/options_math.py`
 - `domain/orders.py`
+- `domain/region_plugin.py`
 - `domain/regions.py`
 - `extensions.py`
 - `limiter.py`
@@ -319,15 +320,24 @@ Classification semantics:
 - `websocket_proxy/port_check.py`
 - `websocket_proxy/server.py`
 
-## REGION_PLUGIN (21 files)
+## REGION_PLUGIN (30 files)
 
 - `market_regions/india/__init__.py`
 - `market_regions/india/holidays.py`
 - `market_regions/india/locale.py`
 - `market_regions/india/options_grammar.py`
+- `market_regions/india/plugin.py`
 - `market_regions/india/qty_freeze.py`
 - `market_regions/india/sessions.py`
 - `market_regions/india/squareoff.py`
+- `market_regions/us/__init__.py`
+- `market_regions/us/holidays.py`
+- `market_regions/us/locale.py`
+- `market_regions/us/options_grammar.py`
+- `market_regions/us/plugin.py`
+- `market_regions/us/qty_freeze.py`
+- `market_regions/us/sessions.py`
+- `market_regions/us/settlement.py`
 - `market_regions/us/squareoff.py`
 - `services/options/providers/eu/__init__.py`
 - `services/options/providers/india/__init__.py`
