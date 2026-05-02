@@ -61,10 +61,16 @@ def test_live_allowlist_is_subset_of_baseline() -> None:
 
 def test_baseline_size_is_known() -> None:
     """Sanity check: the baseline size is the size we captured at the
-    start of v6 Phase 1 (84 entries). If this trips, somebody changed
-    the baseline fixture without updating this test — that almost
-    always indicates an accidental allowlist addition."""
+    start of v6 Phase 1 (84 entries) plus any explicitly-bumped Phase
+    4 additions. Phase 4 (T-16) bumped the baseline by 1 to
+    accommodate ``src/hooks/useRegionCapabilities.ts`` — a
+    multi-region helper that legitimately retains a labeled India
+    entry per the prompt's "≤2 entries reserved residue" allowance.
+    Total baseline: 85. If this trips, somebody changed the baseline
+    fixture without updating this test — that almost always indicates
+    an accidental allowlist addition.
+    """
     paths = _paths(BASELINE)
-    assert len(paths) == 84, (
-        f"baseline size changed unexpectedly; expected 84, got {len(paths)}"
+    assert len(paths) == 85, (
+        f"baseline size changed unexpectedly; expected 85, got {len(paths)}"
     )

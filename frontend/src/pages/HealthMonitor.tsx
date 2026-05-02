@@ -264,29 +264,44 @@ export default function HealthMonitor() {
     const gridColor = dark ? '#374151' : '#e5e7eb'  // gray-700 / gray-200
     const borderColor = dark ? '#4b5563' : '#d1d5db' // gray-600 / gray-300
 
-    // IST offset in milliseconds (5 hours 30 minutes)
-    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
+    // Phase 4 (T-19) — venue-aware datetime formatting. The
+    // pre-Phase-4 helpers added a hardcoded 5:30 IST offset and
+    // returned UTC-shifted strings; the post-Phase-4 helpers
+    // delegate to `Intl.DateTimeFormat` with the active venue's
+    // timezone (defaulting to UTC when no broker is connected).
+    // India brokers continue to render `15:30` / `09:15` style
+    // labels exactly as before because their venue tz is
+    // Asia/Kolkata.
+    const venueTz = venueTimezone
 
-    // Helper to convert UTC timestamp to IST formatted string
     const formatTimeIST = (time: number): string => {
-      const date = new Date(time * 1000)
-      const istDate = new Date(date.getTime() + IST_OFFSET_MS)
-      const hours = istDate.getUTCHours().toString().padStart(2, '0')
-      const minutes = istDate.getUTCMinutes().toString().padStart(2, '0')
-      return `${hours}:${minutes}`
+      return new Intl.DateTimeFormat('en-GB', {
+        timeZone: venueTz,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(new Date(time * 1000))
     }
 
-    // Helper to format date and time for crosshair tooltip in IST
     const formatDateTimeIST = (time: number): string => {
       const date = new Date(time * 1000)
-      const istDate = new Date(date.getTime() + IST_OFFSET_MS)
-      const day = istDate.getUTCDate().toString().padStart(2, '0')
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-      const month = months[istDate.getUTCMonth()]
-      const year = istDate.getUTCFullYear().toString().slice(-2)
-      const hours = istDate.getUTCHours().toString().padStart(2, '0')
-      const minutes = istDate.getUTCMinutes().toString().padStart(2, '0')
-      const seconds = istDate.getUTCSeconds().toString().padStart(2, '0')
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: venueTz,
+        day: '2-digit',
+        month: 'short',
+        year: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }).formatToParts(date)
+      const get = (t: string) => parts.find((p) => p.type === t)?.value ?? ''
+      const day = get('day')
+      const month = get('month')
+      const year = get('year')
+      const hours = get('hour')
+      const minutes = get('minute')
+      const seconds = get('second')
       return `${day} ${month} '${year} ${hours}:${minutes}:${seconds}`
     }
 

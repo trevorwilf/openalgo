@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useRegionCapabilities } from '@/hooks/useRegionCapabilities'
 
 async function fetchCSRFToken(): Promise<string> {
   const response = await fetch('/auth/csrf-token', {
@@ -70,13 +71,20 @@ interface CacheHealth {
   }
 }
 
-function formatDateTime(isoString: string | null): string {
+// Phase 4 (T-19) — venue-aware datetime formatter. Replaces the
+// hardcoded en-IN / Asia/Kolkata literals; the active region's
+// locale + timezone come from `useRegionCapabilities()`.
+function formatDateTime(
+  isoString: string | null,
+  locale: string | null,
+  timezone: string | null,
+): string {
   if (!isoString) return 'Never'
   const date = new Date(isoString)
-  return date.toLocaleString('en-IN', {
+  return date.toLocaleString(locale ?? 'en-US', {
     dateStyle: 'medium',
     timeStyle: 'short',
-    timeZone: 'Asia/Kolkata',
+    timeZone: timezone ?? 'UTC',
   })
 }
 
@@ -125,6 +133,10 @@ export default function MasterContract() {
   const [isDownloading, setIsDownloading] = useState(false)
   const [isReloadingCache, setIsReloadingCache] = useState(false)
   const [pollingInterval, setPollingInterval] = useState<ReturnType<typeof setInterval> | null>(null)
+  // Phase 4 (T-19) — region-aware locale + venue tz for the
+  // download-history datestamps. Replaces the hardcoded en-IN /
+  // Asia/Kolkata literals.
+  const region = useRegionCapabilities()
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -356,7 +368,7 @@ export default function MasterContract() {
 
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Last Updated</span>
-              <span className="text-sm">{formatDateTime(status?.last_updated || null)}</span>
+              <span className="text-sm">{formatDateTime(status?.last_updated || null, region.locale, region.timezone)}</span>
             </div>
 
             {status?.message && (
@@ -382,7 +394,7 @@ export default function MasterContract() {
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Last Download</span>
               <span className="text-sm">
-                {formatDateTime(status?.last_download_time || null)}
+                {formatDateTime(status?.last_download_time || null, region.locale, region.timezone)}
               </span>
             </div>
 
@@ -408,7 +420,7 @@ export default function MasterContract() {
               <p className="text-sm text-muted-foreground">
                 Downloads after{' '}
                 <span className="font-medium">
-                  {status?.smart_download?.cutoff_time || '08:00'} {status?.smart_download?.cutoff_timezone || 'IST'}
+                  {status?.smart_download?.cutoff_time || '08:00'} {status?.smart_download?.cutoff_timezone || region.timezoneLabel || 'UTC'}
                 </span>{' '}
                 are cached for the day. Login after cutoff reuses cached data.
               </p>
