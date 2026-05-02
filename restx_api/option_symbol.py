@@ -36,13 +36,23 @@ from flask_restx import Namespace, Resource
 from marshmallow import ValidationError
 
 from limiter import limiter
-from services.option_symbol_service import get_option_symbol
+from services.options.dispatcher import get_options_provider
 from utils.logging import get_logger
 
 from .data_schemas import OptionSymbolSchema
 
 # Initialize logger
 logger = get_logger(__name__)
+
+
+# Phase 2-bis-3-3 (T-13 / T-14) — dispatch through the options
+# provider so the v1 endpoint shares the provider contract with v2.
+# The India provider exposes the legacy India option services via
+# ``service_modules()``.
+def get_option_symbol(*args, **kwargs):
+    return get_options_provider("india").service_modules()["symbol"].get_option_symbol(
+        *args, **kwargs
+    )
 
 # Create namespace
 api = Namespace("optionsymbol", description="Get Option Symbol based on Underlying and Offset")

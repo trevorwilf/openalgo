@@ -73,6 +73,7 @@ The following deferred items were closed in the bis-phase pass on
 | T-19 partial 2 — Historify + SandboxPnL IST labels | Phase 4-bis-1 | `region.timezoneLabel ?? 'UTC'` used in user-facing schedule strings |
 | T-13 / T-14 dispatcher wiring (provider-side) | Phase 2-bis-3 | `IndiaSandboxProvider.manager_classes()` + `IndiaOptionsProvider.service_modules()` expose legacy engines via dispatcher |
 | T-13 consumer-side — `services/sandbox_service.py` | Phase 2-bis-3-2 | Module-level imports of OrderManager/PositionManager/FundManager/HoldingsManager replaced with thin shim functions that resolve via the dispatcher; 18 call sites unchanged |
+| T-13 / T-14 consumer-side remaining — `restx_api/option_chain.py`, `restx_api/option_symbol.py`, `restx_api/option_greeks.py`, `restx_api/options_multiorder.py`, `services/analyzer_service.py`, `services/sandbox_service.py:644+693` | Phase 2-bis-3-3 | Module-level shim functions resolve via `get_options_provider("india").service_modules()` / `get_sandbox_provider("india").service_modules()`; `IndiaSandboxProvider.service_modules()` extended to expose `execution_thread`, `squareoff_thread`, `position_manager`. Three pre-existing stale paths in `tests/contracts/test_v5_*` and `test_no_implicit_india_default.py` (left over from the v9-bis frontend relocation) corrected as part of the same branch. |
 | T-19 partial 3 — Historify exchange-state default + SandboxPnL MIS Badge variant | Phase 4-bis-2 (Historify branch) | `productBadgeVariant()` helper; exchanges state defaults to `[]` |
 | T-24 partial — `docs/api/v1/README.md` scaffold + two-lane top-nav | Phase 8-bis-2 | full physical doc relocation is v9-bis-2 |
 
@@ -86,7 +87,7 @@ can pick them up surgically.
 
 | Deferred item | Owner / future engagement | Notes |
 |---|---|---|
-| T-13 / T-14 *consumer-side*  — `services/analyzer_service.py`, `restx_api/option_*.py`, `services/option_*_service.py` | v9-bis-2 Phase 2-bis-3-3 | Phase 2-bis-3-2 migrated `services/sandbox_service.py`; the remaining call sites continue to import directly from `sandbox.*` / `services.option_*`. The dispatcher route is available — migration is mechanical. ~10 files. |
+| ~~T-13 / T-14 *consumer-side*  — `services/analyzer_service.py`, `restx_api/option_*.py`, `services/option_*_service.py`~~ | ~~v9-bis-2 Phase 2-bis-3-3~~ | **CLOSED 2026-05-02 (Phase 2-bis-3-3).** Moved to Implemented bucket above. |
 | T-15 *per-caller* migration to `format_currency_amount` in PROMOTED_CORE | n/a — audit found no such callers | re-export bridge in `utils/number_formatter.py` keeps the legacy import path live for completeness |
 | `IndiaSandboxProvider._INITIAL_FUNDS` (₹10L) vs `sandbox/fund_manager.py` (₹1Cr) reconciliation | v9-bis-2 Phase 2-bis-2 | known discrepancy; current default = ₹1Cr per legacy parity |
 | T-17 (Flow constants + 14 flow nodes) | v9-bis-2 Phase 4-bis-2 | `lib/flow/constants.ts` plus ExpiryNode, GetDepthNode, GetQuoteNode, HistoryNode, MultiQuotesNode, OpenPositionNode, OptionChainNode, OptionsMultiOrderNode, OptionsOrderNode, OptionSymbolNode, PlaceOrderNode, PriceAlertNode, SmartOrderNode, SplitOrderNode, SubscribeDepthNode, SubscribeLTPNode, SubscribeQuoteNode, SymbolNode, SyntheticFutureNode. Per-component UX work. |

@@ -158,8 +158,8 @@ def test_invariant_v5_removed_shims_stay_removed():
         REPO_ROOT
         / "frontend"
         / "src"
-        / "lib"
         / "india_legacy"
+        / "lib"
         / "legacy_fallback_exchanges.ts"
     ).read_text(encoding="utf-8")
     assert "export const LEGACY_FALLBACK_EXCHANGES" not in legacy_text
