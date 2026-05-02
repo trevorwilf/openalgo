@@ -8,7 +8,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useFormatCurrency } from '@/lib/format/currency'
-import type { StrategyLeg } from '@/lib/strategyMath'
+import type { StrategyLeg } from '@/india_legacy/lib/strategyMath'
 import { cn } from '@/lib/utils'
 
 export interface PnLTabProps {

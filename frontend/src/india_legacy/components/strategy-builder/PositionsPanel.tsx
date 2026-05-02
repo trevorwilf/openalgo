@@ -2,7 +2,7 @@ import { Pencil, RotateCw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useFormatCurrency } from '@/lib/format/currency'
-import type { StrategyLeg } from '@/lib/strategyMath'
+import type { StrategyLeg } from '@/india_legacy/lib/strategyMath'
 import { cn } from '@/lib/utils'
 
 export interface PositionsPanelProps {

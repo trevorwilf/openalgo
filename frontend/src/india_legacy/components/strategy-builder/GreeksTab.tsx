@@ -8,7 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import type { StrategyLeg } from '@/lib/strategyMath'
+import type { StrategyLeg } from '@/india_legacy/lib/strategyMath'
 
 export interface LegGreeks {
   legId: string
