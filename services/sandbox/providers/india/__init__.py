@@ -33,6 +33,18 @@ if TYPE_CHECKING:  # pragma: no cover
     from domain.orders import NormalizedOrderRequest
 
 REGION_CODE = "india"
+# Phase 8 v4 (ADR 0026) framework-readiness contract value: ₹10L.
+# Pinned by ``tests/parity/baseline/parity_sandbox_india`` so this
+# is the provider-side single source of truth.
+#
+# Note on the apparent discrepancy with ``sandbox/fund_manager.py``
+# whose legacy default is ``"10000000.00"`` (₹1Cr): the legacy
+# runtime uses an operator-configurable ``starting_capital`` config
+# value with a ₹1Cr default. The provider's ``initial_funds()`` is
+# the ADR 0026 contract-surface declaration, NOT the live runtime
+# default. Both are pinned by their own tests; they're intentionally
+# decoupled. v9-bis-2 confirmed this is by design (2026-05-02) and
+# updated this comment to record the rationale.
 _INITIAL_FUNDS = Decimal("1000000.00")
 _VENUE_TZ = "Asia/Kolkata"
 _MIS_SQUAREOFF_HHMM = (15, 15)

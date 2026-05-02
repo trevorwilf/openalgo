@@ -18,11 +18,14 @@ def _file_text(rel: str) -> str:
 # (2) calls `get_options_provider("india")` after passing the gate;
 # (3) emits `OPTIONS_PROVIDER_NOT_REGISTERED` 503 if the provider is
 #     not registered.
+# Phase 9-bis-2 final-cleanup (T-35 push) relocated these services
+# under market_regions/india/legacy_v1/services/; the original
+# services/<name>.py paths are sys.modules-aliasing shims.
 MIGRATED_SERVICES = [
-    "services/expiry_service.py",
-    "services/iv_chart_service.py",
-    "services/option_greeks_service.py",
-    "services/options_multiorder_service.py",
+    "market_regions/india/legacy_v1/services/expiry_service.py",
+    "market_regions/india/legacy_v1/services/iv_chart_service.py",
+    "market_regions/india/legacy_v1/services/option_greeks_service.py",
+    "market_regions/india/legacy_v1/services/options_multiorder_service.py",
 ]
 
 

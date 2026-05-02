@@ -15,7 +15,9 @@ def test_flow_executor_imports_venue_session_helper() -> None:
     """flow_executor_service imports the venue tz helper. Phase 2-bis
     landed the import; Phase 2-bis-2 migrates the per-default literal
     sites to use venue-derived timezone/sessions."""
-    text = _file_text("services/flow_executor_service.py")
+    text = _file_text(
+        "market_regions/india/legacy_v1/services/flow_executor_service.py"
+    )
     assert "from services.venue_session_service import venue_tz_or_default" in text
     assert "venue_tz_or_default(" in text
 

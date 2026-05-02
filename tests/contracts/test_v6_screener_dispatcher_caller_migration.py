@@ -12,13 +12,13 @@ def _file_text(rel: str) -> str:
 
 
 def test_chartink_blueprint_imports_screener_dispatcher() -> None:
-    text = _file_text("blueprints/chartink.py")
+    text = _file_text("market_regions/india/legacy_v1/blueprints/chartink.py")
     assert "from services.screeners.dispatcher import" in text
     assert 'get_screener_provider("chartink")' in text
 
 
 def test_chartink_blueprint_handles_screener_provider_not_registered() -> None:
-    text = _file_text("blueprints/chartink.py")
+    text = _file_text("market_regions/india/legacy_v1/blueprints/chartink.py")
     assert "ScreenerProviderNotRegistered" in text
     assert "screener_provider_not_registered" in text
 

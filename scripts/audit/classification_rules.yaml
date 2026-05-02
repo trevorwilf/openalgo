@@ -68,6 +68,176 @@ rules:
   - path: utils/constants.py
     classification: COMPATIBILITY_SHIM
 
+  # Phase 9-bis-2 final-cleanup (T-35 push) — sys.modules-aliasing
+  # shims for the relocated India-only sandbox engine + India-only
+  # service implementations + India-only blueprints + India-only
+  # database modules. Each shim is a 7-line file that imports the
+  # relocated module and replaces sys.modules[__name__] with it,
+  # preserving module identity (so module-level singletons stay
+  # singleton across both import paths).
+  - path: sandbox/__init__.py
+    classification: COMPATIBILITY_SHIM
+  - path: sandbox/catch_up_processor.py
+    classification: COMPATIBILITY_SHIM
+  - path: sandbox/execution_engine.py
+    classification: COMPATIBILITY_SHIM
+  - path: sandbox/execution_thread.py
+    classification: COMPATIBILITY_SHIM
+  - path: sandbox/fund_manager.py
+    classification: COMPATIBILITY_SHIM
+  - path: sandbox/holdings_manager.py
+    classification: COMPATIBILITY_SHIM
+  - path: sandbox/order_manager.py
+    classification: COMPATIBILITY_SHIM
+  - path: sandbox/position_manager.py
+    classification: COMPATIBILITY_SHIM
+  - path: sandbox/squareoff_manager.py
+    classification: COMPATIBILITY_SHIM
+  - path: sandbox/squareoff_thread.py
+    classification: COMPATIBILITY_SHIM
+  - path: sandbox/websocket_execution_engine.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/option_chain_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/option_greeks_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/option_symbol_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/options_multiorder_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/place_options_order_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/synthetic_future_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/iv_chart_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/iv_smile_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/oi_profile_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/oi_tracker_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/gex_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/vol_surface_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/custom_straddle_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/straddle_chart_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/expiry_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/market_calendar_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/flow_executor_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/flow_openalgo_client.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/flow_price_monitor_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/flow_scheduler_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/historify_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/historify_scheduler_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/sandbox_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/analyzer_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/telegram_alert_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/telegram_bot_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/telegram_bot_service_fixed.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/telegram_bot_service_v2.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/chart_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: services/pending_order_execution_service.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/chartink.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/custom_straddle.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/gex.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/historify.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/ivchart.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/ivsmile.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/oiprofile.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/oitracker.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/sandbox.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/straddle_chart.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/strategy.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/strategy_portfolio.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/python_strategy.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/flow.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/vol_surface.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/master_contract_status.py
+    classification: COMPATIBILITY_SHIM
+  - path: blueprints/telegram.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/chartink_db.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/qty_freeze_db.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/market_calendar_db.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/historify_db.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/sandbox_db.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/strategy_db.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/strategy_portfolio_db.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/master_contract_status_db.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/master_contract_cache_hook.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/flow_db.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/leverage_db.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/chart_prefs_db.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/tv_search.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/symbol.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/token_db.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/token_db_backup.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/token_db_enhanced.py
+    classification: COMPATIBILITY_SHIM
+  - path: database/telegram_db.py
+    classification: COMPATIBILITY_SHIM
+  - path: utils/mpp_slab.py
+    classification: COMPATIBILITY_SHIM
+  - path: utils/symbol_utils.py
+    classification: COMPATIBILITY_SHIM
+  - path: utils/auth_utils.py
+    classification: COMPATIBILITY_SHIM
+  - path: utils/api_analyzer.py
+    classification: COMPATIBILITY_SHIM
+  - path: utils/session.py
+    classification: COMPATIBILITY_SHIM
+
   # ---------------- REGION_PLUGIN ----------------
   - path_prefix: market_regions/
     classification: REGION_PLUGIN
@@ -145,6 +315,43 @@ rules:
     classification: PROMOTED_CORE
   - path: services/split_order_service.py
     classification: PROMOTED_CORE
+  # v9-bis-2 final-cleanup (T-35 push) — region-neutral service entry
+  # points (no India literals, no forbidden imports). They serve the
+  # v1 lane today but their logic is region-agnostic.
+  - path: services/cancel_order_service.py
+    classification: PROMOTED_CORE
+  - path: services/cancel_all_order_service.py
+    classification: PROMOTED_CORE
+  - path: services/close_position_service.py
+    classification: PROMOTED_CORE
+  - path: services/funds_service.py
+    classification: PROMOTED_CORE
+  - path: services/holdings_service.py
+    classification: PROMOTED_CORE
+  - path: services/intervals_service.py
+    classification: PROMOTED_CORE
+  - path: services/market_data_service.py
+    classification: PROMOTED_CORE
+  - path: services/modify_order_service.py
+    classification: PROMOTED_CORE
+  - path: services/openposition_service.py
+    classification: PROMOTED_CORE
+  - path: services/orderbook_service.py
+    classification: PROMOTED_CORE
+  - path: services/orderstatus_service.py
+    classification: PROMOTED_CORE
+  - path: services/ping_service.py
+    classification: PROMOTED_CORE
+  - path: services/positionbook_service.py
+    classification: PROMOTED_CORE
+  - path: services/tradebook_service.py
+    classification: PROMOTED_CORE
+  - path: services/websocket_client.py
+    classification: PROMOTED_CORE
+  - path: services/websocket_service.py
+    classification: PROMOTED_CORE
+  - path: services/action_center_service.py
+    classification: PROMOTED_CORE
 
   # ---------------- PROMOTED_CORE — utils explicitly clean ----------------
   - path: utils/__init__.py
@@ -179,6 +386,38 @@ rules:
   # short-circuit (parallel to database/venue_offset.py).
   - path: utils/venue_local_time.py
     classification: COMPATIBILITY_SHIM
+  # v9-bis-2 final-cleanup (T-35 push) — region-neutral utilities
+  # promoted to PROMOTED_CORE. None contain India literals or import
+  # forbidden legacy modules at load time.
+  - path: utils/event_bus.py
+    classification: PROMOTED_CORE
+  - path: utils/email_utils.py
+    classification: PROMOTED_CORE
+  - path: utils/email_debug.py
+    classification: PROMOTED_CORE
+  - path: utils/env_check.py
+    classification: PROMOTED_CORE
+  - path: utils/health_monitor.py
+    classification: PROMOTED_CORE
+  - path: utils/ip_helper.py
+    classification: PROMOTED_CORE
+  - path: utils/latency_monitor.py
+    classification: PROMOTED_CORE
+  - path: utils/ngrok_manager.py
+    classification: PROMOTED_CORE
+  - path: utils/security_middleware.py
+    classification: PROMOTED_CORE
+  - path: utils/socketio_error_handler.py
+    classification: PROMOTED_CORE
+  - path: utils/traffic_logger.py
+    classification: PROMOTED_CORE
+
+  # NOTE: websocket_proxy/* modules cannot be PROMOTED_CORE because
+  # the package __init__.py imports broker adapters which transitively
+  # pull legacy India code into sys.modules at module-load time.
+  # Even leaf modules like server.py / port_check.py inherit this
+  # because importing them forces __init__.py to run. They stay
+  # LEGACY_INDIA per the default rule.
 
   # ---------------- PROMOTED_CORE — database canonical repos ----------------
   - path: database/instruments_repo.py
@@ -189,6 +428,28 @@ rules:
     classification: PROMOTED_CORE
   # Phase 7 v4 — venue-aware UTC offset helper (region-neutral).
   - path: database/venue_offset.py
+    classification: PROMOTED_CORE
+  # v9-bis-2 final-cleanup (T-35 push) — region-neutral DB modules
+  # (no India literals, no forbidden imports). Logs / health /
+  # latency / settings / traffic / user / cache models are
+  # region-agnostic.
+  - path: database/__init__.py
+    classification: PROMOTED_CORE
+  - path: database/cache_invalidation.py
+    classification: PROMOTED_CORE
+  # cache_restoration.py imports database.token_db_enhanced (SymToken
+  # bridge) — keep as LEGACY_INDIA per the symtoken_callers audit.
+  - path: database/db_init_helper.py
+    classification: PROMOTED_CORE
+  - path: database/health_db.py
+    classification: PROMOTED_CORE
+  - path: database/latency_db.py
+    classification: PROMOTED_CORE
+  - path: database/settings_db.py
+    classification: PROMOTED_CORE
+  - path: database/traffic_db.py
+    classification: PROMOTED_CORE
+  - path: database/user_db.py
     classification: PROMOTED_CORE
 
   # ---------------- v4 advanced-feature provider contracts ----------------

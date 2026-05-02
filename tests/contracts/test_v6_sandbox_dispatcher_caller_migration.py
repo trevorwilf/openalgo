@@ -23,8 +23,16 @@ def _file_text(rel: str) -> str:
 
 def test_order_manager_validates_via_dispatcher_supported_products() -> None:
     """``sandbox/order_manager.py`` validates product against
-    ``provider.supported_products()`` (not a hardcoded list)."""
-    text = _file_text("sandbox/order_manager.py")
+    ``provider.supported_products()`` (not a hardcoded list).
+
+    Phase 9-bis-2 final-cleanup (T-35 push) relocated the module to
+    ``market_regions/india/legacy_v1/sandbox/order_manager.py``; the
+    original path is a sys.modules-aliasing shim. This contract
+    follows the move.
+    """
+    text = _file_text(
+        "market_regions/india/legacy_v1/sandbox/order_manager.py"
+    )
     assert "from services.sandbox.dispatcher import get_sandbox_provider" in text
     assert "supported_products()" in text
 
@@ -42,8 +50,14 @@ def test_india_sandbox_provider_supported_products_match_legacy_set() -> None:
 def test_fund_manager_default_capital_documents_provider_discrepancy() -> None:
     """``sandbox/fund_manager.py`` keeps the legacy ₹1Cr default but
     documents the discrepancy with the India provider's ₹10L
-    initial_funds(). Future Phase 2-bis-2 reconciles the two values."""
-    text = _file_text("sandbox/fund_manager.py")
+    initial_funds(). Future Phase 2-bis-2 reconciles the two values.
+
+    Phase 9-bis-2 final-cleanup (T-35 push) relocated the module to
+    ``market_regions/india/legacy_v1/sandbox/fund_manager.py``.
+    """
+    text = _file_text(
+        "market_regions/india/legacy_v1/sandbox/fund_manager.py"
+    )
     # The legacy default is preserved bit-identically.
     assert '"10000000.00"' in text
     # And the discrepancy is documented for future reconcile.

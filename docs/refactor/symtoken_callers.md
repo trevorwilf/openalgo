@@ -32,40 +32,16 @@ Total caller files: **39**.
 - `broker/motilal/api/data.py` — imports: database.symbol
 - `broker/mstock/mapping/transform_data.py` — imports: database.symbol
 
-## LEGACY_INDIA (33 files)
+## LEGACY_INDIA (9 files)
 
 - `app.py` — imports: database.symbol
-- `blueprints/chartink.py` — imports: database.symbol
-- `blueprints/custom_straddle.py` — imports: database.symbol
-- `blueprints/flow.py` — imports: database.symbol
 - `blueprints/gc_json.py` — imports: database.symbol
-- `blueprints/master_contract_status.py` — imports: database.token_db_enhanced
 - `blueprints/search.py` — imports: database.symbol, database.token_db_enhanced
-- `blueprints/strategy.py` — imports: database.symbol
 - `blueprints/tv_json.py` — imports: database.symbol
 - `database/cache_restoration.py` — imports: database.token_db_enhanced
-- `database/master_contract_cache_hook.py` — imports: database.token_db_enhanced
-- `database/token_db.py` — imports: database.token_db_enhanced
-- `database/token_db_backup.py` — imports: database.symbol
-- `database/token_db_enhanced.py` — imports: database.symbol
-- `database/tv_search.py` — imports: database.symbol
-- `sandbox/order_manager.py` — imports: database.symbol
-- `sandbox/position_manager.py` — imports: database.symbol
-- `services/custom_straddle_service.py` — imports: database.token_db_enhanced
-- `services/expiry_service.py` — imports: database.symbol
-- `services/historify_service.py` — imports: database.symbol, database.token_db_enhanced
 - `services/instruments_service.py` — imports: database.symbol
-- `services/iv_chart_service.py` — imports: database.token_db_enhanced
-- `services/oi_profile_service.py` — imports: database.token_db_enhanced
-- `services/oi_tracker_service.py` — imports: database.token_db_enhanced
-- `services/option_chain_service.py` — imports: database.symbol, database.token_db_enhanced
-- `services/option_symbol_service.py` — imports: database.symbol, database.token_db_enhanced
 - `services/search_service.py` — imports: database.symbol, database.token_db_enhanced
-- `services/straddle_chart_service.py` — imports: database.token_db_enhanced
 - `services/symbol_service.py` — imports: database.symbol
-- `services/vol_surface_service.py` — imports: database.token_db_enhanced
-- `utils/api_analyzer.py` — imports: database.symbol
-- `utils/symbol_utils.py` — imports: database.token_db_enhanced
 - `websocket_proxy/mapping.py` — imports: database.symbol
 
 ## UNCLASSIFIED (0 files)
