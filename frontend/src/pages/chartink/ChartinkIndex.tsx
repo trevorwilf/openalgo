@@ -13,7 +13,7 @@ import {
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { showToast } from '@/utils/toast'
-import { chartinkApi } from '@/api/chartink'
+import { chartinkApi } from '@/india_legacy/api/chartink'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

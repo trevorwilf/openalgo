@@ -10,7 +10,7 @@ import {
 } from 'lightweight-charts'
 import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { useThemeStore } from '@/stores/themeStore'
-import { ivChartApi, type IVChartData } from '@/api/iv-chart'
+import { ivChartApi, type IVChartData } from '@/india_legacy/api/iv-chart'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Command,
