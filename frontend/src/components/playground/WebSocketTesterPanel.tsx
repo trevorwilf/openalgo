@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useWebSocketTester } from '@/hooks/useWebSocketTester'
 import { ConnectionPanel } from './ConnectionPanel'
-import { MessageComposer } from './MessageComposer'
+import { MessageComposer } from '@/india_legacy/components/playground/MessageComposer'
 import { MessageLog } from './MessageLog'
 import { showToast } from '@/utils/toast'
 
