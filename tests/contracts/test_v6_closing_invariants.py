@@ -123,15 +123,22 @@ def test_v6_invariant_v6_7_30_india_translators_bootstrap_table_present() -> Non
 
 def test_v6_invariant_v6_8_promoted_mpp_service_present() -> None:
     """v6 Phase 5-bis: dispatcher-level MPP for the 9 brokers whose
-    v1 transform_data converts MARKET → LIMIT."""
+    v1 transform_data converts MARKET → LIMIT.
+
+    Phase 5 (T-22) made eligibility capability-driven; the historical
+    9-broker / 2-broker inventory still exists for documentation but
+    the runtime check now consults each broker plugin's
+    ``requires_market_price_protection`` / ``requires_slm_to_sl_conversion``
+    flag.
+    """
     from services.promoted_mpp_service import (
-        BROKERS_REQUIRING_MPP_MARKET,
-        BROKERS_REQUIRING_MPP_SLM,
+        LEGACY_INDIA_MPP_MARKET_BROKERS,
+        LEGACY_INDIA_MPP_SLM_BROKERS,
         apply_mpp_if_required,
     )
 
-    assert len(BROKERS_REQUIRING_MPP_MARKET) == 9
-    assert len(BROKERS_REQUIRING_MPP_SLM) == 2
+    assert len(LEGACY_INDIA_MPP_MARKET_BROKERS) == 9
+    assert len(LEGACY_INDIA_MPP_SLM_BROKERS) == 2
     assert callable(apply_mpp_if_required)
 
 

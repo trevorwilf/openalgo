@@ -21,12 +21,21 @@ from domain.enums import (
 from domain.instrument_ref import InstrumentRef
 from domain.orders import NormalizedOrderRequest
 from services.promoted_mpp_service import (
-    BROKERS_REQUIRING_MPP_MARKET,
-    BROKERS_REQUIRING_MPP_SLM,
+    LEGACY_INDIA_MPP_MARKET_BROKERS,
+    LEGACY_INDIA_MPP_SLM_BROKERS,
     apply_mpp_if_required,
     requires_mpp_market,
     requires_mpp_slm,
 )
+
+# Phase 5 (T-22) — alias the renamed inventory frozensets so the
+# existing parametrized tests keep working. The runtime behavior is
+# now capability-driven (each broker plugin declares
+# ``requires_market_price_protection`` / ``requires_slm_to_sl_conversion``);
+# the inventory below is the documentation snapshot of which India
+# brokers historically needed MPP.
+BROKERS_REQUIRING_MPP_MARKET = LEGACY_INDIA_MPP_MARKET_BROKERS
+BROKERS_REQUIRING_MPP_SLM = LEGACY_INDIA_MPP_SLM_BROKERS
 
 
 def _make_order(
