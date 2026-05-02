@@ -6,12 +6,22 @@ from marshmallow import ValidationError
 
 from database.auth_db import verify_api_key
 from limiter import limiter
-from services.option_greeks_service import get_option_greeks
+from services.options.dispatcher import get_options_provider
 from utils.logging import get_logger
 
 from .data_schemas import OptionGreeksSchema
 
 logger = get_logger(__name__)
+
+
+# Phase 2-bis-3-3 (T-13 / T-14) — dispatch through the options
+# provider so the v1 endpoint shares the provider contract with v2.
+# The India provider exposes the legacy India option services via
+# ``service_modules()``.
+def get_option_greeks(*args, **kwargs):
+    return get_options_provider("india").service_modules()["greeks"].get_option_greeks(
+        *args, **kwargs
+    )
 
 # Rate limit for option greeks API
 GREEKS_RATE_LIMIT = os.getenv("GREEKS_RATE_LIMIT", "30 per minute")

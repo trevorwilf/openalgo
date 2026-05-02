@@ -641,10 +641,14 @@ def sandbox_reload_squareoff_schedule() -> tuple[bool, dict[str, Any], int]:
         - HTTP status code (int)
     """
     try:
-        from sandbox.squareoff_thread import (
-            get_squareoff_scheduler_status,
-            reload_squareoff_schedule,
-        )
+        # Phase 2-bis-3-3 (T-13 / T-14 remaining) — dispatch through
+        # the India sandbox provider rather than importing
+        # ``sandbox.squareoff_thread`` directly.
+        from services.sandbox.dispatcher import get_sandbox_provider
+
+        squareoff_thread = get_sandbox_provider("india").service_modules()["squareoff_thread"]
+        get_squareoff_scheduler_status = squareoff_thread.get_squareoff_scheduler_status
+        reload_squareoff_schedule = squareoff_thread.reload_squareoff_schedule
 
         # Reload the schedule from config
         success, message = reload_squareoff_schedule()
@@ -690,9 +694,13 @@ def sandbox_get_squareoff_status() -> tuple[bool, dict[str, Any], int]:
         - HTTP status code (int)
     """
     try:
-        from sandbox.squareoff_thread import get_squareoff_scheduler_status
+        # Phase 2-bis-3-3 (T-13 / T-14 remaining) — dispatch through
+        # the India sandbox provider rather than importing
+        # ``sandbox.squareoff_thread`` directly.
+        from services.sandbox.dispatcher import get_sandbox_provider
 
-        status = get_squareoff_scheduler_status()
+        squareoff_thread = get_sandbox_provider("india").service_modules()["squareoff_thread"]
+        status = squareoff_thread.get_squareoff_scheduler_status()
 
         return True, {"status": "success", "data": status, "mode": "analyze"}, 200
 

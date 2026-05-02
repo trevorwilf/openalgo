@@ -110,11 +110,23 @@ from marshmallow import ValidationError
 
 from limiter import limiter
 from restx_api.schemas import OptionsMultiOrderSchema
-from services.options_multiorder_service import place_options_multiorder
+from services.options.dispatcher import get_options_provider
 from utils.logging import get_logger
 
 # Initialize logger
 logger = get_logger(__name__)
+
+
+# Phase 2-bis-3-3 (T-13 / T-14) — dispatch through the options
+# provider so the v1 endpoint shares the provider contract with v2.
+# The India provider exposes the legacy India option services via
+# ``service_modules()``.
+def place_options_multiorder(*args, **kwargs):
+    return (
+        get_options_provider("india")
+        .service_modules()["multiorder"]
+        .place_options_multiorder(*args, **kwargs)
+    )
 
 # Create namespace
 api = Namespace("optionsmultiorder", description="Options Multi-Order API")

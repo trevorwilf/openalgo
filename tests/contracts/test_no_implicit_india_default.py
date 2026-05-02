@@ -144,15 +144,23 @@ def test_t08_session_tz_active_india_broker_still_uses_kolkata(monkeypatch) -> N
 
 def test_t06_frontend_helper_is_documented_in_test_suite() -> None:
     """T-06 is a frontend (TypeScript) change — it lives in
-    frontend/src/hooks/useSupportedExchanges.ts. This Python test
-    only asserts the file ships the new fail-closed text so
-    backend CI catches accidental reverts. Frontend behavior is
-    covered by the Vitest suite under frontend/src/hooks/.
+    frontend/src/india_legacy/hooks/useSupportedExchanges.ts (relocated
+    in v9-bis to the india_legacy/ subtree). This Python test only
+    asserts the file ships the new fail-closed text so backend CI
+    catches accidental reverts. Frontend behavior is covered by the
+    Vitest suite under frontend/src/india_legacy/hooks/.
     """
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[2]
-    hook = repo_root / "frontend" / "src" / "hooks" / "useSupportedExchanges.ts"
+    hook = (
+        repo_root
+        / "frontend"
+        / "src"
+        / "india_legacy"
+        / "hooks"
+        / "useSupportedExchanges.ts"
+    )
     body = hook.read_text(encoding="utf-8")
     assert "if (cap == null) return false" in body, (
         "Phase 1 T-06 frontend fail-closed return false (cap null) missing"

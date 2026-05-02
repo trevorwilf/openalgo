@@ -131,5 +131,27 @@ class IndiaSandboxProvider:
             "squareoff": SquareOffManager,
         }
 
+    # Phase 2-bis-3-3 (T-13 / T-14 remaining) — expose the legacy
+    # India sandbox thread/control modules so consumers
+    # (``services/analyzer_service.py``, ``services/sandbox_service.py``)
+    # can dispatch through ``get_sandbox_provider("india").service_modules()``
+    # rather than importing ``sandbox.execution_thread`` /
+    # ``sandbox.squareoff_thread`` / ``sandbox.position_manager``
+    # directly.
+    def service_modules(self) -> dict[str, object]:
+        """Return the legacy India sandbox thread/control modules by role.
+
+        Keys: ``execution_thread``, ``squareoff_thread``,
+        ``position_manager``. Values are module objects; callers use
+        them as before (``mod.start_execution_engine()`` etc.).
+        """
+        from sandbox import execution_thread, position_manager, squareoff_thread
+
+        return {
+            "execution_thread": execution_thread,
+            "squareoff_thread": squareoff_thread,
+            "position_manager": position_manager,
+        }
+
 
 __all__ = ["IndiaSandboxProvider", "REGION_CODE"]

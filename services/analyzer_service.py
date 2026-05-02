@@ -89,20 +89,25 @@ def toggle_analyzer_mode_with_auth(
         # Set the analyzer mode
         set_analyze_mode(new_mode)
 
-        # Start/stop execution engine and squareoff scheduler based on mode
-        from sandbox.execution_thread import start_execution_engine, stop_execution_engine
-        from sandbox.squareoff_thread import start_squareoff_scheduler, stop_squareoff_scheduler
+        # Start/stop execution engine and squareoff scheduler based on mode.
+        # Phase 2-bis-3-3 (T-13 / T-14 remaining) — dispatch through the
+        # India sandbox provider so the consumer side shares the
+        # provider contract with the v2 lane.
+        from services.sandbox.dispatcher import get_sandbox_provider
+
+        sandbox_modules = get_sandbox_provider("india").service_modules()
+        execution_thread = sandbox_modules["execution_thread"]
+        squareoff_thread = sandbox_modules["squareoff_thread"]
+        position_manager = sandbox_modules["position_manager"]
 
         if new_mode:
             # Analyzer mode ON - start both threads
-            start_execution_engine()
-            start_squareoff_scheduler()
+            execution_thread.start_execution_engine()
+            squareoff_thread.start_squareoff_scheduler()
 
             # Run catch-up settlement for any missed settlements while app was stopped
-            from sandbox.position_manager import catchup_missed_settlements
-
             try:
-                catchup_missed_settlements()
+                position_manager.catchup_missed_settlements()
                 logger.info("Catch-up settlement check completed")
             except Exception as e:
                 logger.exception(f"Error in catch-up settlement: {e}")
@@ -110,8 +115,8 @@ def toggle_analyzer_mode_with_auth(
             logger.info("Analyzer mode enabled - Execution engine and square-off scheduler started")
         else:
             # Analyzer mode OFF - stop both threads
-            stop_execution_engine()
-            stop_squareoff_scheduler()
+            execution_thread.stop_execution_engine()
+            squareoff_thread.stop_squareoff_scheduler()
             logger.info(
                 "Analyzer mode disabled - Execution engine and square-off scheduler stopped"
             )

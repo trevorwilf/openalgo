@@ -67,13 +67,16 @@ def test_run_parity_supports_lane_filter():
 
 
 def test_legacy_fallback_exchanges_alias_is_gone():
-    """v5 Phase 2 removed the deprecated alias. Verify import-by-name."""
+    """v5 Phase 2 removed the deprecated alias. Verify import-by-name.
+
+    The file was relocated in v9-bis to ``frontend/src/india_legacy/lib/``.
+    """
     text = (
         REPO_ROOT
         / "frontend"
         / "src"
-        / "lib"
         / "india_legacy"
+        / "lib"
         / "legacy_fallback_exchanges.ts"
     ).read_text(encoding="utf-8")
     assert "INDIA_LEGACY_FALLBACK_EXCHANGES" in text, (

@@ -65,13 +65,23 @@ from flask_restx import Namespace, Resource
 from marshmallow import ValidationError
 
 from limiter import limiter
-from services.option_chain_service import get_option_chain
+from services.options.dispatcher import get_options_provider
 from utils.logging import get_logger
 
 from .data_schemas import OptionChainSchema
 
 # Initialize logger
 logger = get_logger(__name__)
+
+
+# Phase 2-bis-3-3 (T-13 / T-14) — dispatch through the options
+# provider so the v1 endpoint shares the provider contract with v2.
+# The India provider exposes the legacy India option services via
+# ``service_modules()``.
+def get_option_chain(*args, **kwargs):
+    return get_options_provider("india").service_modules()["chain"].get_option_chain(
+        *args, **kwargs
+    )
 
 # Create namespace
 api = Namespace("optionchain", description="Get Option Chain with Real-time Quotes")
