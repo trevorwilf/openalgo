@@ -1,20 +1,12 @@
-# database/tv_search.py
+"""Phase 9-bis-2 final-cleanup (T-35 push) — sys.modules aliasing shim.
 
-from database.symbol import SymToken
+The actual code lives at
+``market_regions.india.legacy_v1.database.tv_search``.
+"""
+from __future__ import annotations
 
+import sys as _sys
 
-def search_symbols(symbol, exchange):
-    """Look up symbols by exact symbol-exchange match.
+from market_regions.india.legacy_v1.database import tv_search as _orig
 
-    Performs an exact-match query against the ``SymToken`` table
-    and returns all rows where both ``symbol`` and ``exchange``
-    match the provided values.
-
-    Args:
-        symbol: The symbol string to match exactly.
-        exchange: The exchange code to match exactly (e.g. ``'NSE'``, ``'NFO'``).
-
-    Returns:
-        A list of ``SymToken`` ORM instances matching the query.
-    """
-    return SymToken.query.filter(SymToken.symbol == symbol, SymToken.exchange == exchange).all()
+_sys.modules[__name__] = _orig

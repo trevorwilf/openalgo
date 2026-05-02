@@ -1,21 +1,18 @@
-# sandbox/__init__.py
+"""Phase 9-bis-2 final-cleanup (T-35 push) — sys.modules aliasing shim.
+
+The actual sandbox engine code lives at
+``market_regions.india.legacy_v1.sandbox``. This package alias
+preserves ``import sandbox`` / ``from sandbox import X`` /
+``from sandbox.order_manager import OrderManager`` etc. by
+replacing the package object in ``sys.modules`` with the
+relocated package. Module-level singletons (threads, locks)
+stay singleton because both import paths resolve to the same
+module object.
 """
-Sandbox Mode - API Analyzer Environment
+from __future__ import annotations
 
-OpenAlgo is an open-source application that provides Sandbox Mode (API Analyzer)
-to make it easier for traders to test strategies in a realistic simulated
-environment without executing real trades through a broker.
+import sys as _sys
 
-Key Features:
-- ₹10,000,000 (1 Crore) starting sandbox capital (configurable)
-- Auto reset every Sunday at midnight IST (configurable)
-- Real market data integration
-- Realistic order execution simulation
-- Position and holdings management
-- Leverage-based margin calculations
-- Auto square-off for MIS positions
-- T+1 settlement for CNC holdings
-- Self-hosted, transparent, open-source testing environment
-"""
+from market_regions.india.legacy_v1 import sandbox as _orig
 
-__version__ = "1.0.0"
+_sys.modules[__name__] = _orig
