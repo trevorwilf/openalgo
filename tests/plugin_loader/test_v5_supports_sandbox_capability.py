@@ -17,7 +17,7 @@ from domain.capabilities import (
 
 def test_indian_inference_sets_supports_sandbox_true():
     inferred = infer_capabilities_from_legacy(
-        plugin_data={"broker_type": "IN_stock"},
+        plugin_data={"broker_type": "IN_stock", "supported_regions": ["india"]},
         broker_code="zerodha",
     )
     assert inferred["supports_sandbox"] is True

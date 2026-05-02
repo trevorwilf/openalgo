@@ -129,6 +129,7 @@ def test_infer_indian_defaults() -> None:
     d = infer_capabilities_from_legacy(
         {
             "Plugin Name": "zerodha",
+            "supported_regions": ["india"],  # Phase 1 T-03: required explicit
             "supported_exchanges": ["NSE", "NFO"],
             "broker_type": "IN_stock",
             "leverage_config": False,
@@ -153,6 +154,7 @@ def test_infer_crypto_defaults() -> None:
     d = infer_capabilities_from_legacy(
         {
             "Plugin Name": "deltaexchange",
+            "supported_regions": ["india"],  # Phase 1 T-03: required explicit
             "supported_exchanges": ["CRYPTO"],
             "broker_type": "crypto",
             "leverage_config": True,
@@ -171,7 +173,11 @@ def test_infer_crypto_defaults() -> None:
 
 def test_infer_unknown_broker_type_uses_skeleton() -> None:
     d = infer_capabilities_from_legacy(
-        {"supported_exchanges": ["XFOO"], "broker_type": "mystery_family"},
+        {
+            "supported_regions": ["india"],  # Phase 1 T-03: required explicit
+            "supported_exchanges": ["XFOO"],
+            "broker_type": "mystery_family",
+        },
         broker_code="mystery",
     )
     caps = BrokerCapabilities(**d)
@@ -184,6 +190,7 @@ def test_infer_explicit_fields_override_defaults() -> None:
     """Richer shapes declared in plugin.json win over the inferred defaults."""
     d = infer_capabilities_from_legacy(
         {
+            "supported_regions": ["india"],  # Phase 1 T-03: required explicit
             "supported_exchanges": ["NSE"],
             "broker_type": "IN_stock",
             "leverage_config": False,
@@ -219,6 +226,7 @@ def test_infer_uses_plugin_name_for_display() -> None:
     d = infer_capabilities_from_legacy(
         {
             "Plugin Name": "Pretty Broker Name",
+            "supported_regions": ["india"],  # Phase 1 T-03: required explicit
             "supported_exchanges": ["NSE"],
             "broker_type": "IN_stock",
         },
@@ -229,19 +237,38 @@ def test_infer_uses_plugin_name_for_display() -> None:
 
 def test_infer_falls_back_to_broker_code_for_display() -> None:
     d = infer_capabilities_from_legacy(
-        {"supported_exchanges": ["NSE"], "broker_type": "IN_stock"},
+        {
+            "supported_regions": ["india"],  # Phase 1 T-03: required explicit
+            "supported_exchanges": ["NSE"],
+            "broker_type": "IN_stock",
+        },
         broker_code="xyz",
     )
     assert d["broker_display_name"] == "xyz"
 
 
-def test_infer_defaults_to_in_stock_when_broker_type_missing() -> None:
+def test_infer_no_longer_defaults_to_in_stock_when_broker_type_missing() -> None:
+    """Phase 1 T-04: the implicit ``broker_type='IN_stock'`` default for
+    legacy India plugins has been removed. A plugin that explicitly
+    declares ``supported_regions=["india"]`` but omits ``broker_type``
+    now falls through to ``_common_defaults()`` (OTHER market family),
+    not Indian defaults. Every shipped legacy plugin already declares
+    broker_type explicitly, so this only affects synthetic test data.
+    """
     d = infer_capabilities_from_legacy(
-        {"supported_exchanges": ["NSE"]}, broker_code="legacy_plugin"
+        {
+            "supported_regions": ["india"],  # Phase 1 T-03: required explicit
+            "supported_exchanges": ["NSE"],
+            # broker_type intentionally omitted to verify T-04 removal
+        },
+        broker_code="legacy_plugin",
     )
     caps = BrokerCapabilities(**d)
-    assert MarketFamily.IN_STOCK in caps.market_families
-    assert caps.supports_analyzer is True
+    assert MarketFamily.IN_STOCK not in caps.market_families, (
+        "Phase 1 T-04 removed the implicit IN_stock default for empty broker_type"
+    )
+    assert MarketFamily.OTHER in caps.market_families
+    assert caps.supports_analyzer is False  # _common_defaults skeleton
 
 
 

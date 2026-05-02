@@ -60,12 +60,37 @@ def _connected_broker_caps() -> dict | None:
 
 
 def _is_india_broker() -> bool:
+    """Return True iff the connected broker explicitly lists ``india``.
+
+    Phase 1 T-05 of the market-agnostic refactor: both prior fallback
+    branches (capability lookup returned None; supported_regions empty)
+    used to silently return True. They now raise
+    ``MissingRegionContext`` so callers surface a structured error
+    instead of producing an Indian-defaulted order on a non-India
+    broker. The migration commit in this same phase populated
+    ``supported_regions`` on every shipped legacy plugin, so the
+    "empty regions" branch is unreachable for known plugins.
+    """
+    from domain.errors import MissingRegionContext
+
     caps = _connected_broker_caps()
     if caps is None:
-        return True  # unknown — preserve legacy default for backward compat
+        raise MissingRegionContext(
+            "MCP cannot determine the connected broker's region: "
+            "capability fetch returned None. Ensure the OpenAlgo "
+            "instance reachable at HOST exposes /api/v2/capabilities/"
+            "<broker> and that the broker plugin declares "
+            "supported_regions.",
+            attempted_sources=["capabilities_endpoint"],
+        )
     regions = [str(r).lower() for r in (caps.get("supported_regions") or [])]
     if not regions:
-        return True  # legacy India plugins have no supported_regions
+        raise MissingRegionContext(
+            "MCP cannot determine the connected broker's region: "
+            "the broker plugin declares no supported_regions. Update "
+            "the plugin.json to declare supported_regions explicitly.",
+            attempted_sources=["broker_capabilities"],
+        )
     return "india" in regions
 
 

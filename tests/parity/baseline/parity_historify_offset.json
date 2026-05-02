@@ -55,6 +55,6 @@
       "2026-07-15": 19800,
       "2026-10-15": 19800
     },
-    "default_unknown_venue": 19800
+    "default_none_venue": "raises_VenueResolutionError"
   }
 }

@@ -40,12 +40,14 @@ def test_invalid_shape_skipped_without_crash(
             "good": {
                 "Plugin Name": "good",
                 "broker_type": "IN_stock",
+                "supported_regions": ["india"],
                 "supported_exchanges": ["NSE"],
                 "leverage_config": False,
             },
             "bad": {
                 "Plugin Name": "bad",
                 "broker_type": "IN_stock",
+                "supported_regions": ["india"],
                 # Wrong type: should be list of strings
                 "supported_exchanges": "NSE,BSE",
                 "leverage_config": False,
@@ -74,6 +76,7 @@ def test_malformed_json_skipped(
             "valid": {
                 "Plugin Name": "valid",
                 "broker_type": "IN_stock",
+                "supported_regions": ["india"],
                 "supported_exchanges": ["NSE"],
             },
             "corrupt": "{not valid json",
@@ -105,12 +108,14 @@ def test_skipped_brokers_excluded_from_auth_dict(
             "good": {
                 "Plugin Name": "good",
                 "broker_type": "IN_stock",
+                "supported_regions": ["india"],
                 "supported_exchanges": ["NSE"],
                 "leverage_config": False,
             },
             "bad": {
                 "Plugin Name": "bad",
                 "broker_type": "IN_stock",
+                "supported_regions": ["india"],
                 "supported_exchanges": 123,  # wrong type
             },
         }

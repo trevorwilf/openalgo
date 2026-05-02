@@ -1,7 +1,10 @@
 """Phase 4 — utils.session reads SESSION_EXPIRY_TIMEZONE.
 
-Default tz remains Asia/Kolkata for backward compatibility. Operators
-on US/EU venues set SESSION_EXPIRY_TIMEZONE explicitly.
+Phase 1 T-08 of the market-agnostic refactor: the bootstrap default
+(no env var, no broker session) changed from Asia/Kolkata to UTC.
+India operators that need Kolkata in the bootstrap window must set
+SESSION_EXPIRY_TIMEZONE explicitly. Operators on US/EU venues
+continue to set SESSION_EXPIRY_TIMEZONE explicitly.
 """
 
 from __future__ import annotations
@@ -18,12 +21,19 @@ def _reset_env(monkeypatch):
     monkeypatch.delenv("DISABLE_SESSION_EXPIRY", raising=False)
 
 
-def test_default_tz_is_asia_kolkata(monkeypatch) -> None:
-    """No env var → tz = Asia/Kolkata (legacy default)."""
+def test_default_tz_is_utc_in_bootstrap(monkeypatch) -> None:
+    """Phase 1 T-08: No env var, no broker session → tz = UTC.
+
+    Previously this was Asia/Kolkata. The change ensures non-India
+    operators do not silently inherit IST during bootstrap.
+    """
     from utils import session as utils_session
 
+    # Reset the one-shot warned flag so the warning fires this time too.
+    if hasattr(utils_session._session_tz, "_bootstrap_warned"):
+        delattr(utils_session._session_tz, "_bootstrap_warned")
     tz = utils_session._session_tz()
-    assert str(tz) == "Asia/Kolkata"
+    assert str(tz) == "UTC"
 
 
 def test_explicit_us_tz(monkeypatch) -> None:

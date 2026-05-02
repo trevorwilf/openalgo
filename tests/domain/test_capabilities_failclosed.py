@@ -22,10 +22,18 @@ from domain.errors import BrokerCapabilityError
 # --- legacy India parity -------------------------------------------------
 
 
-def test_legacy_indian_plugin_with_no_supported_regions_still_inferred() -> None:
-    """Zerodha-shaped plugin: gets IN_stock + INR defaults."""
+def test_legacy_indian_plugin_with_explicit_supported_regions_inferred() -> None:
+    """Zerodha-shaped plugin: gets IN_stock + INR defaults.
+
+    Phase 1 T-03: legacy India plugins are required to declare
+    ``supported_regions=["india"]`` explicitly (the migration commit
+    in this branch added the field to all 32 shipped plugins). The
+    earlier "no supported_regions = legacy India" auto-inference is
+    retired.
+    """
     plugin = {
         "Plugin Name": "zerodha",
+        "supported_regions": ["india"],  # Phase 1 T-03: now required
         "supported_exchanges": ["NSE", "BSE", "NFO", "BFO"],
         "broker_type": "IN_stock",
         "leverage_config": False,
@@ -47,9 +55,18 @@ def test_legacy_indian_plugin_with_supported_regions_india_inferred() -> None:
     assert caps["base_currency"].value == "INR"
 
 
-def test_legacy_crypto_plugin_with_no_supported_regions_still_inferred() -> None:
+def test_legacy_crypto_plugin_with_explicit_supported_regions_inferred() -> None:
+    """Crypto broker plugin: gets crypto + USDT defaults.
+
+    Phase 1 T-03: must declare supported_regions explicitly. Delta
+    Exchange is India-served (SEBI static IP), so the migration
+    commit declared ``supported_regions=["india"]`` on its
+    plugin.json. The crypto inference still runs because the
+    inference picks the branch on ``broker_type``, not region.
+    """
     plugin = {
         "Plugin Name": "deltaexchange",
+        "supported_regions": ["india"],  # Phase 1 T-03: now required
         "supported_exchanges": ["CRYPTO"],
         "broker_type": "crypto",
     }

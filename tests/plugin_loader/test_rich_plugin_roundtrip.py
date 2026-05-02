@@ -13,6 +13,7 @@ def test_rich_plugin_preserved(
         {
             "hybrid": {
                 "Plugin Name": "Hybrid Broker",
+                "supported_regions": ["india"],  # Phase 1 T-03: required explicit
                 "broker_type": "IN_stock",
                 "supported_exchanges": ["NSE", "NFO"],
                 "leverage_config": True,

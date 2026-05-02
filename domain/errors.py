@@ -334,6 +334,37 @@ class MissingVenueContext(DomainError):
         super().__init__(message or "missing venue context for promoted request")
 
 
+class VenueResolutionError(DomainError):
+    """A venue lookup needed a venue code but received None or an unresolvable value.
+
+    Phase 1 (T-07) of the market-agnostic refactor: replaces the
+    silent ``return _INDIA_OFFSET_SECONDS`` fallback in
+    ``database.venue_offset.venue_local_offset_seconds`` with a
+    structured error. Callers (e.g. ``database.historify_db``
+    aggregation queries) MUST handle this rather than relying on an
+    implicit IST default.
+
+    Distinct from ``MissingVenueContext`` (which signals a request
+    arrived without venue info) and ``UnsupportedVenue`` (which
+    signals the supplied venue is registered but not allowed here):
+    ``VenueResolutionError`` covers the case where the lookup
+    receives ``None`` or an unrecognized code and cannot continue.
+    """
+
+    code = ErrorCode.MISSING_VENUE_CONTEXT  # share existing structured-error code
+
+    def __init__(self, message: str | None = None, *, attempted_venue: str | None = None) -> None:
+        self.attempted_venue = attempted_venue
+        super().__init__(
+            message
+            or (
+                "could not resolve venue local offset: venue_code is missing "
+                "or unrecognized; supply an explicit venue or set the offset "
+                "from the venue's IANA timezone via the region plugin"
+            )
+        )
+
+
 class MissingCurrencyContext(DomainError):
     """A promoted request requires a currency but none was supplied or resolvable.
 

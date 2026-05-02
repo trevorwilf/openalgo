@@ -24,11 +24,28 @@ def test_explicit_env_value_wins(monkeypatch):
     assert tz.zone == "America/New_York"
 
 
-def test_unset_no_broker_session_falls_back_to_kolkata(monkeypatch):
+def test_unset_no_broker_session_returns_utc_in_bootstrap(monkeypatch):
+    """Phase 1 T-08: bootstrap (no broker session, no env var) returns
+    UTC instead of the prior implicit Asia/Kolkata default. India
+    operators that need Kolkata in the bootstrap window must set
+    SESSION_EXPIRY_TIMEZONE explicitly."""
     monkeypatch.delenv("SESSION_EXPIRY_TIMEZONE", raising=False)
     monkeypatch.setattr(session_module, "_resolve_active_broker_caps", lambda: None)
+    # Reset the one-shot warning flag so this test always exercises the warning path.
+    if hasattr(session_module._session_tz, "_bootstrap_warned"):
+        delattr(session_module._session_tz, "_bootstrap_warned")
     tz = session_module._session_tz()
-    assert tz.zone == "Asia/Kolkata"
+    assert tz.zone == "UTC"
+
+
+def test_t07_venue_offset_none_raises(monkeypatch):
+    """Phase 1 T-07: venue_local_offset_seconds(None) is now a
+    structured VenueResolutionError instead of silent 19800."""
+    from database.venue_offset import venue_local_offset_seconds
+    from domain.errors import VenueResolutionError
+
+    with pytest.raises(VenueResolutionError):
+        venue_local_offset_seconds(None)
 
 
 def test_unset_with_india_broker_returns_kolkata(monkeypatch):

@@ -1002,9 +1002,24 @@ def _get_aggregated_ohlcv(
         # (NSE/BSE/NFO/BFO/CDS/MCX) return 19800 (Asia/Kolkata, DST-free)
         # so existing India aggregation is bit-identical. Non-India
         # venues compute their offset from the venue's IANA timezone.
+        # Phase 1 T-07: ``venue_local_offset_seconds`` now raises
+        # ``VenueResolutionError`` when ``exchange`` is None instead of
+        # silently using the India offset. Callers reach this code
+        # only via the historify aggregate query, which always supplies
+        # an exchange; if a future caller arrives without one, the
+        # error is the correct surface.
         from database.venue_offset import venue_local_offset_seconds
+        from domain.errors import VenueResolutionError
 
-        ist_offset = venue_local_offset_seconds(exchange)
+        try:
+            ist_offset = venue_local_offset_seconds(exchange)
+        except VenueResolutionError:
+            logger.exception(
+                "historify aggregation could not resolve venue offset "
+                "for exchange=%r; aggregation skipped",
+                exchange,
+            )
+            return pd.DataFrame()
 
         # Candle alignment algorithm:
         # 1. Convert UTC timestamp to IST by adding ist_offset
