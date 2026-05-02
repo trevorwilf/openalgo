@@ -31,18 +31,42 @@ class SquareOffManager:
     """Manages automatic square-off of MIS positions"""
 
     def __init__(self):
-        self.ist = pytz.timezone("Asia/Kolkata")
+        # Phase 2 T-10 — IST timezone re-exported from market_regions.
+        from market_regions.india.sessions import IST
+        self.ist = IST
 
-        # Load square-off times from config
+        # Phase 2-bis-1 (T-11 wiring) — defaults sourced from
+        # ``market_regions.india.squareoff.MANDATORY_CLOSE_RULES``.
+        # Operator overrides via ``get_config(...)`` continue to take
+        # precedence; the region plugin only supplies the defaults.
+        # Pre-Phase-2-bis the defaults were hardcoded at the
+        # call-site; this change makes the region the single source
+        # of truth for the default HH:MM values.
+        from market_regions.india.squareoff import MANDATORY_CLOSE_RULES
+
+        venue_defaults: dict[str, str] = {
+            rule["venue"]: rule["local_close"]
+            for rule in MANDATORY_CLOSE_RULES
+        }
+
+        # Map config-key → default lookup. The legacy keys group
+        # NSE/BSE/NFO/BFO under one knob and CDS/BCD under another;
+        # we preserve that grouping by reading the first venue's
+        # default in each group.
+        nse_bse_default = venue_defaults.get("NSE", "15:15")
+        cds_bcd_default = venue_defaults.get("CDS", "16:45")
+        mcx_default = venue_defaults.get("MCX", "23:30")
+        ncdex_default = venue_defaults.get("NCDEX", "17:00")
+
         self.square_off_times = {
-            "NSE": self._parse_time(get_config("nse_bse_square_off_time", "15:15")),
-            "BSE": self._parse_time(get_config("nse_bse_square_off_time", "15:15")),
-            "NFO": self._parse_time(get_config("nse_bse_square_off_time", "15:15")),
-            "BFO": self._parse_time(get_config("nse_bse_square_off_time", "15:15")),
-            "CDS": self._parse_time(get_config("cds_bcd_square_off_time", "16:45")),
-            "BCD": self._parse_time(get_config("cds_bcd_square_off_time", "16:45")),
-            "MCX": self._parse_time(get_config("mcx_square_off_time", "23:30")),
-            "NCDEX": self._parse_time(get_config("ncdex_square_off_time", "17:00")),
+            "NSE": self._parse_time(get_config("nse_bse_square_off_time", nse_bse_default)),
+            "BSE": self._parse_time(get_config("nse_bse_square_off_time", nse_bse_default)),
+            "NFO": self._parse_time(get_config("nse_bse_square_off_time", nse_bse_default)),
+            "BFO": self._parse_time(get_config("nse_bse_square_off_time", nse_bse_default)),
+            "CDS": self._parse_time(get_config("cds_bcd_square_off_time", cds_bcd_default)),
+            "BCD": self._parse_time(get_config("cds_bcd_square_off_time", cds_bcd_default)),
+            "MCX": self._parse_time(get_config("mcx_square_off_time", mcx_default)),
+            "NCDEX": self._parse_time(get_config("ncdex_square_off_time", ncdex_default)),
         }
 
     def _parse_time(self, time_str):
