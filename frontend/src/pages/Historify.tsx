@@ -268,15 +268,22 @@ export default function Historify() {
     computed_intervals: string[]
     all_intervals: string[]
   } | null>(null)
-  const [exchanges, setExchanges] = useState<string[]>(['NSE', 'BSE', 'NFO', 'BFO', 'MCX', 'CDS', 'BCD', 'NSE_INDEX', 'BSE_INDEX', 'CRYPTO'])
+  // Phase 4-bis-2 (T-19) — exchanges come from the backend at
+  // /historify/api/exchanges. The pre-Phase-4-bis-2 hardcoded India
+  // default array is removed; rendered fallback is empty until
+  // loadExchanges() completes. India parity is preserved because the
+  // backend returns the same India venues.
+  const [exchanges, setExchanges] = useState<string[]>([])
   const [stats, setStats] = useState<Stats>({ database_size_mb: 0, total_records: 0, total_symbols: 0, watchlist_count: 0 })
 
   // Tab state
   const [activeTab, setActiveTab] = useState<string>('watchlist')
 
-  // Symbol search state
+  // Symbol search state — Phase 4-bis-2 (T-19): default to whatever
+  // the API returns first; before the fetch completes the field is
+  // empty rather than seeded with India 'NSE'.
   const [newSymbol, setNewSymbol] = useState('')
-  const [newExchange, setNewExchange] = useState('NSE')
+  const [newExchange, setNewExchange] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [showSearchResults, setShowSearchResults] = useState(false)
   const searchContainerRef = useRef<HTMLDivElement>(null)
