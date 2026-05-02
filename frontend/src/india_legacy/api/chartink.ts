@@ -6,7 +6,7 @@ import type {
 } from '@/types/chartink'
 import type { SymbolSearchResult } from '@/types/strategy'
 import type { ApiResponse } from '@/types/trading'
-import { webClient } from './client'
+import { webClient } from '@/api/client'
 
 export const chartinkApi = {
   /**

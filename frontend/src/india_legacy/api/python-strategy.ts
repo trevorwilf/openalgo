@@ -8,7 +8,7 @@ import type {
   ScheduleConfig,
 } from '@/types/python-strategy'
 import type { ApiResponse } from '@/types/trading'
-import { webClient } from './client'
+import { webClient } from '@/api/client'
 
 export const pythonStrategyApi = {
   /**

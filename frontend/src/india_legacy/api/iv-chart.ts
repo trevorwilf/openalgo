@@ -1,4 +1,4 @@
-import { webClient } from './client'
+import { webClient } from '@/api/client'
 
 export interface IVDataPoint {
   time: number

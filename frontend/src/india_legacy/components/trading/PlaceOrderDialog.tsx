@@ -27,7 +27,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useBrokerStore } from '@/stores/brokerStore'
 import { type PlatformOrderType, platformOrderTypeToLegacy } from '@/types/capabilities'
 import { showToast } from '@/utils/toast'
-import { MarketDepthPanel } from './MarketDepthPanel'
+import { MarketDepthPanel } from '@/components/trading/MarketDepthPanel'
 import { QuoteHeader } from './QuoteHeader'
 
 // Price types for order dialog
