@@ -7,6 +7,10 @@
       "reason": "Last-resort India fallback list; gated behind India region check at the call site."
     },
     {
+      "path": "src/hooks/useRegionCapabilities.ts",
+      "reason": "Multi-region currency / locale / symbol lookup table. India is one row in a 13-currency table; the hook itself never assumes India and the table is ALSO the source of truth for USD/EUR/GBP/JPY/etc. mappings."
+    },
+    {
       "path": "src/api/chartink.ts",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
@@ -232,10 +236,6 @@
     },
     {
       "path": "src/pages/IVSmile.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/MasterContract.tsx",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {
