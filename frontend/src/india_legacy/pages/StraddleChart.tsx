@@ -8,7 +8,7 @@ import {
   type IChartApi,
   type ISeriesApi,
 } from 'lightweight-charts'
-import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
+import { useSupportedExchanges } from '@/india_legacy/hooks/useSupportedExchanges'
 import { useThemeStore } from '@/stores/themeStore'
 import { oiProfileApi } from '@/api/oi-profile'
 import {

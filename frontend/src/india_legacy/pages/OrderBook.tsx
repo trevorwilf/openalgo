@@ -51,7 +51,7 @@ import {
 import { useFormatCurrency } from '@/lib/format/currency'
 import { cn, sanitizeCSV } from '@/lib/utils'
 // Note: AlertDialog still used for Cancel All Orders
-import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
+import { useSupportedExchanges } from '@/india_legacy/hooks/useSupportedExchanges'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
 import type { Order, OrderStats } from '@/types/trading'

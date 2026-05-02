@@ -8,7 +8,7 @@ import {
   type IChartApi,
   type ISeriesApi,
 } from 'lightweight-charts'
-import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
+import { useSupportedExchanges } from '@/india_legacy/hooks/useSupportedExchanges'
 import { useThemeStore } from '@/stores/themeStore'
 import { ivChartApi, type IVChartData } from '@/india_legacy/api/iv-chart'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'

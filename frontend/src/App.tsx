@@ -11,7 +11,7 @@ import { useBrokerStore } from '@/stores/brokerStore'
 // Lazy load all pages for code splitting
 // Public pages
 const Home = lazy(() => import('@/pages/Home'))
-const Faq = lazy(() => import('@/pages/Faq'))
+const Faq = lazy(() => import('@/india_legacy/pages/Faq'))
 const Setup = lazy(() => import('@/pages/Setup'))
 const Login = lazy(() => import('@/pages/Login'))
 const ResetPassword = lazy(() => import('@/pages/ResetPassword'))
@@ -27,21 +27,21 @@ const SamcoAuth = lazy(() => import('@/pages/SamcoAuth'))
 
 // Main pages
 const Dashboard = lazy(() => import('@/pages/Dashboard'))
-const Positions = lazy(() => import('@/pages/Positions'))
-const OrderBook = lazy(() => import('@/pages/OrderBook'))
-const TradeBook = lazy(() => import('@/pages/TradeBook'))
+const Positions = lazy(() => import('@/india_legacy/pages/Positions'))
+const OrderBook = lazy(() => import('@/india_legacy/pages/OrderBook'))
+const TradeBook = lazy(() => import('@/india_legacy/pages/TradeBook'))
 const Holdings = lazy(() => import('@/pages/Holdings'))
-const Token = lazy(() => import('@/pages/Token'))
+const Token = lazy(() => import('@/india_legacy/pages/Token'))
 const Search = lazy(() => import('@/pages/Search'))
 const ApiKey = lazy(() => import('@/pages/ApiKey'))
 const Profile = lazy(() => import('@/pages/Profile'))
 const MasterContract = lazy(() => import('@/pages/MasterContract'))
-const ActionCenter = lazy(() => import('@/pages/ActionCenter'))
+const ActionCenter = lazy(() => import('@/india_legacy/pages/ActionCenter'))
 
 // Platform pages
 const Platforms = lazy(() => import('@/pages/Platforms'))
-const TradingView = lazy(() => import('@/pages/TradingView'))
-const GoCharting = lazy(() => import('@/pages/GoCharting'))
+const TradingView = lazy(() => import('@/india_legacy/pages/TradingView'))
+const GoCharting = lazy(() => import('@/india_legacy/pages/GoCharting'))
 const PnLTracker = lazy(() => import('@/pages/PnLTracker'))
 
 // Sandbox & Analyzer
@@ -50,11 +50,11 @@ const SandboxPnL = lazy(() => import('@/india_legacy/pages/SandboxPnL'))
 const Analyzer = lazy(() => import('@/india_legacy/pages/Analyzer'))
 const WebSocketTest = lazy(() => import('@/pages/WebSocketTest'))
 const Playground = lazy(() => import('@/pages/Playground'))
-const Historify = lazy(() => import('@/pages/Historify'))
-const HistorifyCharts = lazy(() => import('@/pages/HistorifyCharts'))
+const Historify = lazy(() => import('@/india_legacy/pages/Historify'))
+const HistorifyCharts = lazy(() => import('@/india_legacy/pages/HistorifyCharts'))
 
 // Tools & Option Chain
-const Tools = lazy(() => import('@/pages/Tools'))
+const Tools = lazy(() => import('@/india_legacy/pages/Tools'))
 const OptionChain = lazy(() => import('@/pages/OptionChain'))
 const IVChart = lazy(() => import('@/india_legacy/pages/IVChart'))
 const OITracker = lazy(() => import('@/india_legacy/pages/OITracker'))
@@ -115,14 +115,14 @@ function HoldingsRoute() {
 }
 
 // Admin pages
-const AdminIndex = lazy(() => import('@/pages/admin/AdminIndex'))
+const AdminIndex = lazy(() => import('@/india_legacy/pages/admin/AdminIndex'))
 const FreezeQty = lazy(() => import('@/india_legacy/pages/admin/FreezeQty'))
 const Holidays = lazy(() => import('@/pages/admin/Holidays'))
 const MarketTimings = lazy(() => import('@/india_legacy/pages/admin/MarketTimings'))
 
 // Telegram pages
 const TelegramIndex = lazy(() => import('@/pages/telegram/TelegramIndex'))
-const TelegramConfig = lazy(() => import('@/pages/telegram/TelegramConfig'))
+const TelegramConfig = lazy(() => import('@/india_legacy/pages/telegram/TelegramConfig'))
 const TelegramUsers = lazy(() => import('@/pages/telegram/TelegramUsers'))
 const TelegramAnalytics = lazy(() => import('@/pages/telegram/TelegramAnalytics'))
 
