@@ -93,5 +93,43 @@ class IndiaSandboxProvider:
             partial_fills_supported=False,
         )
 
+    # Phase 2-bis-3 (T-13 wiring) — expose the legacy India sandbox
+    # engine classes as a compose-able dict so consumers
+    # (services/sandbox_service.py, blueprints/sandbox.py) can
+    # eventually route through the dispatcher rather than
+    # importing from ``sandbox.*`` directly. The classes themselves
+    # remain unchanged — this provider does NOT duplicate their
+    # behavior; it just makes them reachable via
+    # ``get_sandbox_provider("india").manager_classes()``.
+    def manager_classes(self) -> dict[str, type]:
+        """Return the legacy India sandbox manager classes by role.
+
+        Keys: ``order``, ``position``, ``fund``, ``holdings``,
+        ``squareoff``, ``execution``, ``catch_up``. Values are the
+        actual class objects from the ``sandbox.*`` package; callers
+        ``cls(user_id=...)`` etc. as before, but discover them
+        through the provider rather than module-level imports.
+
+        India parity: the values are exactly the classes
+        ``services/sandbox_service.py`` and
+        ``services/analyzer_service.py`` import today; the dispatcher
+        route is additive — the legacy direct-import call sites still
+        work bit-identically. ``services/sandbox_service.py`` is the
+        consumer migrated in v9-bis-2.
+        """
+        from sandbox.fund_manager import FundManager
+        from sandbox.holdings_manager import HoldingsManager
+        from sandbox.order_manager import OrderManager
+        from sandbox.position_manager import PositionManager
+        from sandbox.squareoff_manager import SquareOffManager
+
+        return {
+            "order": OrderManager,
+            "position": PositionManager,
+            "fund": FundManager,
+            "holdings": HoldingsManager,
+            "squareoff": SquareOffManager,
+        }
+
 
 __all__ = ["IndiaSandboxProvider", "REGION_CODE"]
