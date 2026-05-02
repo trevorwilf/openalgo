@@ -54,7 +54,9 @@ logger = logging.getLogger(__name__)
 python_strategy_bp = Blueprint("python_strategy_bp", __name__, url_prefix="/python")
 
 # Timezone configuration - Indian Standard Time
-IST = pytz.timezone("Asia/Kolkata")
+# Phase 2 T-10: relocated source of truth lives in
+# market_regions.india.sessions; this module re-exports it locally.
+from market_regions.india.sessions import IST  # noqa: E402,F401
 
 # Global storage with thread locks for safety
 RUNNING_STRATEGIES = {}  # {strategy_id: {'process': subprocess.Popen, 'started_at': datetime}}

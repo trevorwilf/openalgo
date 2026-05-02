@@ -32,8 +32,8 @@ logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
 _scheduler = None
 _scheduler_lock = threading.Lock()
 
-# IST timezone
-IST = pytz.timezone("Asia/Kolkata")
+# IST timezone — Phase 2 T-10: relocated to market_regions.india.sessions.
+from market_regions.india.sessions import IST  # noqa: E402,F401
 
 
 def _schedule_square_off_jobs(scheduler):

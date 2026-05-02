@@ -24,8 +24,10 @@ from sqlalchemy.pool import NullPool
 from utils.constants import CRYPTO_EXCHANGES, EXCHANGE_CRYPTO
 from utils.logging import get_logger
 
-# IST Timezone
-IST = pytz.timezone("Asia/Kolkata")
+# IST Timezone — Phase 2 T-10: relocated source of truth lives in
+# market_regions.india.sessions; this module continues to expose
+# ``IST`` as a re-export so existing imports keep working.
+from market_regions.india.sessions import IST  # noqa: E402,F401
 
 logger = get_logger(__name__)
 
@@ -297,6 +299,11 @@ def seed_holidays_2026():
     Seed 2026 market holidays based on official NSE and MCX calendars.
     Source: NSE Circular & MCX Circular for Calendar Year 2026.
 
+    Phase 2 T-09 of the market-agnostic refactor: the holiday list
+    itself moved to ``market_regions.india.holidays.HOLIDAYS_2026``.
+    The seed function (which writes the data into the holiday tables)
+    stays here in PROMOTED_CORE; only the data is region-owned now.
+
     Includes:
     - Trading holidays (market closed)
     - Special sessions (Muhurat trading)
@@ -304,172 +311,9 @@ def seed_holidays_2026():
     MCX evening session on holidays: 17:00–23:55 IST
     MCX fully closed on: Republic Day, Good Friday, Gandhi Jayanti, Christmas
     """
-    holidays_2026 = [
-        # January
-        {
-            "date": "2026-01-15",
-            "description": "Municipal Corporation Election - Maharashtra",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD"],
-            "open": [
-                {"exchange": "MCX", "start_time": 1768476600000, "end_time": 1768501500000}
-            ],  # MCX evening 17:00-23:55
-        },
-        {
-            "date": "2026-01-26",
-            "description": "Republic Day",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX"],
-            "open": [],
-        },
-        # March
-        {
-            "date": "2026-03-03",
-            "description": "Holi",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD"],
-            "open": [
-                {"exchange": "MCX", "start_time": 1772537400000, "end_time": 1772562300000}
-            ],  # MCX evening 17:00-23:55
-        },
-        {
-            "date": "2026-03-26",
-            "description": "Shri Ram Navami",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD"],
-            "open": [
-                {"exchange": "MCX", "start_time": 1774524600000, "end_time": 1774549500000}
-            ],  # MCX evening 17:00-23:55
-        },
-        {
-            "date": "2026-03-31",
-            "description": "Shri Mahavir Jayanti",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD"],
-            "open": [
-                {"exchange": "MCX", "start_time": 1774956600000, "end_time": 1774981500000}
-            ],  # MCX evening 17:00-23:55
-        },
-        # April
-        {
-            "date": "2026-04-03",
-            "description": "Good Friday",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX"],
-            "open": [],
-        },
-        {
-            "date": "2026-04-14",
-            "description": "Dr. Baba Saheb Ambedkar Jayanti",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD"],
-            "open": [
-                {"exchange": "MCX", "start_time": 1776166200000, "end_time": 1776191100000}
-            ],  # MCX evening 17:00-23:55
-        },
-        # May
-        {
-            "date": "2026-05-01",
-            "description": "Maharashtra Day",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD"],
-            "open": [
-                {"exchange": "MCX", "start_time": 1777635000000, "end_time": 1777659900000}
-            ],  # MCX evening 17:00-23:55
-        },
-        {
-            "date": "2026-05-28",
-            "description": "Bakri Id",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD"],
-            "open": [
-                {"exchange": "MCX", "start_time": 1779967800000, "end_time": 1779992700000}
-            ],  # MCX evening 17:00-23:55
-        },
-        # June
-        {
-            "date": "2026-06-26",
-            "description": "Muharram",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD"],
-            "open": [
-                {"exchange": "MCX", "start_time": 1782473400000, "end_time": 1782498300000}
-            ],  # MCX evening 17:00-23:55
-        },
-        # September
-        {
-            "date": "2026-09-14",
-            "description": "Ganesh Chaturthi",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD"],
-            "open": [
-                {"exchange": "MCX", "start_time": 1789385400000, "end_time": 1789410300000}
-            ],  # MCX evening 17:00-23:55
-        },
-        # October
-        {
-            "date": "2026-10-02",
-            "description": "Mahatma Gandhi Jayanti",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX"],
-            "open": [],
-        },
-        {
-            "date": "2026-10-20",
-            "description": "Dussehra",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD"],
-            "open": [
-                {"exchange": "MCX", "start_time": 1792495800000, "end_time": 1792520700000}
-            ],  # MCX evening 17:00-23:55
-        },
-        # November - Diwali with Muhurat Trading
-        {
-            "date": "2026-11-08",
-            "description": "Diwali Laxmi Pujan (Muhurat Trading)",
-            "holiday_type": "SPECIAL_SESSION",
-            "closed": [],
-            "open": [
-                # Muhurat Trading session — default 18:00 to 19:15 IST (exact timings via circular)
-                {"exchange": "NSE", "start_time": 1794141000000, "end_time": 1794145500000},
-                {"exchange": "BSE", "start_time": 1794141000000, "end_time": 1794145500000},
-                {"exchange": "NFO", "start_time": 1794141000000, "end_time": 1794145500000},
-                {"exchange": "BFO", "start_time": 1794141000000, "end_time": 1794145500000},
-                {"exchange": "CDS", "start_time": 1794141000000, "end_time": 1794145500000},
-                {"exchange": "BCD", "start_time": 1794141000000, "end_time": 1794145500000},
-                # MCX Muhurat — 18:00 to 00:15 (next day)
-                {"exchange": "MCX", "start_time": 1794141000000, "end_time": 1794163500000},
-            ],
-        },
-        {
-            "date": "2026-11-10",
-            "description": "Diwali Balipratipada",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD"],
-            "open": [
-                {"exchange": "MCX", "start_time": 1794310200000, "end_time": 1794335100000}
-            ],  # MCX evening 17:00-23:55
-        },
-        {
-            "date": "2026-11-24",
-            "description": "Prakash Gurpurb Sri Guru Nanak Dev",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD"],
-            "open": [
-                {"exchange": "MCX", "start_time": 1795519800000, "end_time": 1795544700000}
-            ],  # MCX evening 17:00-23:55
-        },
-        # December
-        {
-            "date": "2026-12-25",
-            "description": "Christmas",
-            "holiday_type": "TRADING_HOLIDAY",
-            "closed": ["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX"],
-            "open": [],
-        },
-    ]
+    from market_regions.india.holidays import HOLIDAYS_2026
 
-    _seed_holidays(holidays_2026, 2026)
+    _seed_holidays(HOLIDAYS_2026, 2026)
 
 
 def _seed_holidays(holidays_data: list[dict], year: int):

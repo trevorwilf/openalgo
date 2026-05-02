@@ -18,8 +18,8 @@ from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# IST timezone
-IST = pytz.timezone("Asia/Kolkata")
+# IST timezone — Phase 2 T-10: relocated to market_regions.india.sessions.
+from market_regions.india.sessions import IST  # noqa: E402,F401
 
 
 def get_last_session_boundary():
