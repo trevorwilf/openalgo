@@ -387,21 +387,28 @@ _EXPLICIT_OVERRIDE_KEYS: frozenset[str] = frozenset(
 
 def _is_legacy_india_plugin(plugin_data: dict[str, Any]) -> bool:
     """A plugin is treated as legacy India for inference purposes when
-    it omits ``supported_regions`` entirely or declares only ``india``.
+    it explicitly declares ``supported_regions=["india"]``.
 
-    The legacy 24+ Indian broker plugins do not declare
-    ``supported_regions`` at all — they get IN_stock inference. A new
-    plugin that declares ``supported_regions=["us"]`` (or anything that
-    excludes "india") must provide explicit metadata; the legacy
-    inference is intentionally unavailable for it.
+    Phase 1 of the market-agnostic refactor (T-03) tightened this:
+    after the one-time migration commit added explicit
+    ``supported_regions=["india"]`` to every legacy India plugin,
+    omitting the field is no longer treated as "implicitly India".
+    Such plugins fall through to the explicit-fields check and raise
+    ``BrokerCapabilityError`` if they cannot satisfy it.
+
+    A plugin that declares ``supported_regions`` excluding ``india``
+    (e.g. ``["us"]``) is not legacy India and must provide explicit
+    metadata; the legacy inference is intentionally unavailable for it.
     """
     if "supported_regions" not in plugin_data:
-        return True
+        return False  # Phase 1 T-03: no supported_regions ≠ legacy India
     regions = plugin_data.get("supported_regions") or []
     if not isinstance(regions, list):
-        return True  # malformed — let pydantic complain downstream
+        return False  # malformed — let pydantic complain downstream
     normalized = {str(r).strip().lower() for r in regions}
-    return not normalized or normalized == {"india"}
+    if not normalized:
+        return False
+    return normalized == {"india"}
 
 
 def _check_explicit_fields_for_non_india(
@@ -457,10 +464,15 @@ def infer_capabilities_from_legacy(
     if not is_legacy_india:
         _check_explicit_fields_for_non_india(plugin_data, broker_code)
 
-    if is_legacy_india:
-        broker_type = str(plugin_data.get("broker_type", "IN_stock")).strip()
-    else:
-        broker_type = str(plugin_data.get("broker_type", "")).strip()
+    # Phase 1 T-04: removed the implicit ``broker_type="IN_stock"``
+    # default for legacy India plugins. After T-03's migration commit
+    # added explicit ``supported_regions=["india"]`` to every legacy
+    # India plugin, all of them already declare ``broker_type``
+    # explicitly. The fallback ``""`` is now the same code path for
+    # both legacy and non-legacy plugins, which routes empty
+    # broker_type through ``_common_defaults()`` rather than
+    # ``_indian_defaults()``.
+    broker_type = str(plugin_data.get("broker_type", "")).strip()
     supported_exchanges = list(plugin_data.get("supported_exchanges", []))
     display_name = str(
         plugin_data.get("Plugin Name")

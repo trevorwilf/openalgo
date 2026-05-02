@@ -46,16 +46,29 @@ def venue_local_offset_seconds(
     """Return the UTC offset (seconds) for ``venue_code`` on ``on_date``.
 
     Behavior:
-        * ``None`` or unknown venue → ``19800`` (Asia/Kolkata legacy
-          default; preserves bit-identical India aggregation behavior).
-        * India venue (NSE / BSE / NFO / BFO / CDS / MCX / NSE_INDEX / BSE_INDEX / BCD)
-          → ``19800`` (Asia/Kolkata is DST-free).
+        * ``None`` venue → raise ``VenueResolutionError`` (Phase 1 T-07).
+        * India venue (NSE / BSE / NFO / BFO / CDS / MCX / NSE_INDEX /
+          BSE_INDEX / BCD) → ``19800`` (Asia/Kolkata is DST-free).
+          Lookup is now explicit, not a fallback.
         * Known non-India venue → computed from its IANA timezone for
           ``on_date`` (defaults to today). Returns the standard or
           DST offset as appropriate.
+        * Unknown venue (not in ``_INDIA_VENUES`` and not in
+          ``_VENUE_TZ``) → ``19800``. This is the last remaining
+          implicit-India fallback inside this helper; the consumer at
+          ``database.historify_db`` continues to depend on a numeric
+          offset for the SQL bucketing template, and a future Phase
+          (region-plugin-driven venue catalog) will replace this with
+          a region-plugin lookup. See ADR 0023.
     """
+    from domain.errors import VenueResolutionError
+
     if venue_code is None:
-        return _INDIA_OFFSET_SECONDS
+        raise VenueResolutionError(
+            "venue_local_offset_seconds requires an explicit venue code; "
+            "the prior implicit Asia/Kolkata fallback has been removed.",
+            attempted_venue=None,
+        )
     code = str(venue_code).strip().upper()
     if code in _INDIA_VENUES:
         return _INDIA_OFFSET_SECONDS

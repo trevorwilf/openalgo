@@ -19,6 +19,7 @@ def _reset(reset_loader_state):
 def _legacy_indian(extra: dict | None = None) -> dict:
     base = {
         "Plugin Name": "legacy_in",
+        "supported_regions": ["india"],  # Phase 1 T-03: required explicit
         "broker_type": "IN_stock",
         "supported_exchanges": ["NSE"],
     }

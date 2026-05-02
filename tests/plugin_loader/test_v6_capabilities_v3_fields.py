@@ -103,6 +103,7 @@ def test_v3_fields_round_trip_when_populated() -> None:
 def test_infer_capabilities_round_trips_v3_fields_explicit_override() -> None:
     plugin_data = {
         "broker_type": "IN_stock",
+        "supported_regions": ["india"],  # Phase 1 T-03: required explicit
         "Plugin Name": "ZerodhaTest",
         "supported_exchanges": ["NSE", "BSE"],
         # New v3 fields explicitly declared in plugin.json
@@ -130,6 +131,7 @@ def test_infer_capabilities_legacy_india_keeps_safe_defaults() -> None:
     """A legacy India plugin that does NOT declare v3 fields gets safe defaults."""
     plugin_data = {
         "broker_type": "IN_stock",
+        "supported_regions": ["india"],  # Phase 1 T-03: required explicit
         "Plugin Name": "LegacyIndiaTest",
         "supported_exchanges": ["NSE"],
     }

@@ -12,7 +12,16 @@ def test_loader_accepts_rich_supported_venue_codes_without_legacy_field(
         {
             "schwab_like": {
                 "Plugin Name": "Schwab Like",
+                # Phase 1 T-03 / T-04 + ADR 0025: a plugin not
+                # classified as legacy India must declare these
+                # explicitly to pass strict-mode promoted-plugin
+                # validation AND fail-closed inference.
+                "broker_code": "schwab_like",
                 "broker_display_name": "Schwab Like",
+                "account_context_supports": ["account_id"],
+                "broker_type": "US_stock",
+                "supported_regions": ["us"],
+                "default_currency": "USD",
                 "market_families": ["US_STOCK"],
                 "supported_venue_codes": ["XNYS", "XNAS"],
                 "supported_asset_classes": ["EQUITY", "ETF"],
@@ -25,6 +34,14 @@ def test_loader_accepts_rich_supported_venue_codes_without_legacy_field(
                 "supports_fractional": True,
                 "supports_extended_hours": True,
                 "supports_short_selling": True,
+                # Phase 1 v3 (ADR 0017) — non-India promoted gate fields.
+                "auth_modes": ["OAUTH"],
+                "master_contract_refresh_policy": {
+                    "timezone": "America/New_York",
+                    "cutoff_local": "08:00",
+                    "frequency": "daily",
+                    "skip_if_24x7": False,
+                },
             }
         }
     )
@@ -42,7 +59,14 @@ def test_supported_regions_inferred_from_market_families(
             "hybrid_us_uk": {
                 "Plugin Name": "Hybrid",
                 "supported_exchanges": ["XNYS", "XLON"],
-                "broker_type": "IN_stock",
+                # Phase 1 T-03 / T-04: a plugin not classified as
+                # legacy India must declare broker_type/default_currency
+                # explicitly. supported_regions is intentionally
+                # omitted so this test exercises the
+                # ``_default_supported_regions`` model_validator that
+                # back-fills it from market_families.
+                "broker_type": "US_stock",
+                "default_currency": "USD",
                 "market_families": ["US_STOCK", "UK_STOCK"],
                 "supported_venue_codes": ["XNYS", "XLON"],
                 "supported_asset_classes": ["EQUITY"],
@@ -51,6 +75,15 @@ def test_supported_regions_inferred_from_market_families(
                 "supported_sessions": ["REGULAR"],
                 "supported_quantity_units": ["WHOLE"],
                 "trading_currencies": ["USD", "GBP"],
+                "base_currency": "USD",
+                # Phase 1 v3 (ADR 0017) — non-India promoted gate fields.
+                "auth_modes": ["OAUTH"],
+                "master_contract_refresh_policy": {
+                    "timezone": "America/New_York",
+                    "cutoff_local": "08:00",
+                    "frequency": "daily",
+                    "skip_if_24x7": False,
+                },
             }
         }
     )

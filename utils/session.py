@@ -41,14 +41,27 @@ def _session_tz() -> pytz.BaseTzInfo:
     # Env unset — resolve via the active BROKER session. Only a
     # confidently-resolved non-India broker triggers the fail-closed
     # path; absence of a broker session (early bootstrap, settings-
-    # only state) defers to the Asia/Kolkata legacy default with a
-    # one-shot warning so the app can come up.
+    # only state) now returns UTC and emits a one-shot warning so
+    # India deployments do not silently inherit Asia/Kolkata across
+    # bootstrap any more (Phase 1 T-08).
     broker_caps = _resolve_active_broker_caps()
     if broker_caps is None:
-        # No broker session yet — bootstrap path. Preserve existing
-        # India deployments and let non-India operators set
-        # SESSION_EXPIRY_TIMEZONE before logging in.
-        return pytz.timezone("Asia/Kolkata")
+        # No broker session yet — bootstrap path. Phase 1 T-08:
+        # default to UTC so non-India operators do not silently
+        # inherit Asia/Kolkata before they have a chance to log in
+        # and resolve the active broker. India operators continue
+        # to set SESSION_EXPIRY_TIMEZONE=Asia/Kolkata if they want
+        # the legacy behavior in the bootstrap window.
+        if not getattr(_session_tz, "_bootstrap_warned", False):
+            logger.warning(
+                "bootstrap_session_tz_default_utc — no active broker "
+                "session and SESSION_EXPIRY_TIMEZONE is unset; "
+                "defaulting to UTC for the bootstrap window. Set "
+                "SESSION_EXPIRY_TIMEZONE explicitly if a non-default "
+                "timezone is required pre-login."
+            )
+            _session_tz._bootstrap_warned = True  # type: ignore[attr-defined]
+        return pytz.timezone("UTC")
 
     regions = list(getattr(broker_caps, "supported_regions", None) or [])
     region_codes = [str(r).strip().lower() for r in regions]

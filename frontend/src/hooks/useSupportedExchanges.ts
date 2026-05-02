@@ -41,9 +41,15 @@ const FNO_CODES = new Set(['NFO', 'BFO', 'MCX', 'CDS', 'CRYPTO'])
  */
 
 function _broker_is_india_shaped(cap: { supported_regions?: string[] | null } | null): boolean {
-  if (cap == null) return true // unknown — treat as legacy India for backward compat
+  // Phase 1 T-06 of the market-agnostic refactor: both prior fallback
+  // branches (cap == null; regions array empty) used to silently
+  // return true and let the UI render the legacy NSE/NFO dropdown.
+  // They now return false; callers must render an "unavailable /
+  // select broker" state instead of an India-defaulted dropdown when
+  // capabilities have not loaded or supported_regions is undeclared.
+  if (cap == null) return false
   const regions = (cap.supported_regions ?? []).map((r) => String(r).toLowerCase())
-  if (regions.length === 0) return true
+  if (regions.length === 0) return false
   return regions.includes('india')
 }
 
