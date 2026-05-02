@@ -191,13 +191,81 @@ def list_market_regions() -> dict[str, MarketRegion]:
     return dict(_market_regions)
 
 
+# ---------------------------------------------------------------------------
+# Phase 7 — RegionPlugin instantiation cache.
+#
+# In addition to the MarketRegion (parsed plugin.json) the loader caches
+# one :class:`RegionPlugin` instance per loaded region. Region packages
+# that don't ship a ``plugin.py`` continue to work — :func:`get_region_plugin`
+# returns ``None`` for them and callers fall through to the legacy
+# direct-data-import paths.
+# ---------------------------------------------------------------------------
+
+_region_plugins: dict[str, Any] = {}
+
+
+def get_region_plugin(region_code: str) -> Any | None:
+    """Return the cached :class:`domain.region_plugin.RegionPlugin`
+    instance for ``region_code``, or ``None`` if the region package
+    has no ``plugin.py`` (e.g. EU / UK stubs in this engagement).
+
+    Lazy-imports the region package's ``plugin`` module on first call.
+    The cache is cleared by :func:`_reset_cache_for_tests`.
+    """
+    code = str(region_code).strip().lower()
+    if code in _region_plugins:
+        return _region_plugins[code]
+    if code not in _market_regions:
+        return None
+
+    import importlib
+
+    try:
+        mod = importlib.import_module(f"market_regions.{code}.plugin")
+    except ImportError as exc:
+        logger.debug(
+            "region %s has no plugin.py module yet (%s); RegionPlugin "
+            "Protocol unavailable for this region",
+            code, exc,
+        )
+        _region_plugins[code] = None
+        return None
+
+    cls_name_candidates = (
+        # Title-case (e.g. India → IndiaRegionPlugin)
+        f"{code.capitalize()}RegionPlugin",
+        # Upper-case (e.g. us → USRegionPlugin, eu → EURegionPlugin)
+        f"{code.upper()}RegionPlugin",
+        # Plain alias for region packages that don't want a code-
+        # specific class name
+        "RegionPlugin",
+    )
+    cls = None
+    for name in cls_name_candidates:
+        cls = getattr(mod, name, None)
+        if cls is not None:
+            break
+    if cls is None:
+        logger.warning(
+            "region %s has plugin.py but no <Code>RegionPlugin / "
+            "RegionPlugin class — skipping",
+            code,
+        )
+        _region_plugins[code] = None
+        return None
+    instance = cls()
+    _region_plugins[code] = instance
+    return instance
+
+
 # Test hooks ---------------------------------------------------------------
 
 
 def _reset_cache_for_tests() -> None:
-    global _market_regions, _skipped_regions
+    global _market_regions, _skipped_regions, _region_plugins
     _market_regions = {}
     _skipped_regions = set()
+    _region_plugins = {}
     _load_schema.cache_clear()
 
 
