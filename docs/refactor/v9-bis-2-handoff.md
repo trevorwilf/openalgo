@@ -5,9 +5,29 @@ or future engineer picking up the deferred work.
 **Purpose:** start work on the remaining deferred items without
 re-discovering the codebase state. Read this first.
 
-**Last updated:** 2026-05-02 evening, after the bis-phase pass.
-**State of `dev`:** synced with `origin/dev` (user pushed). Working
-tree clean.
+**Last updated:** 2026-05-02 evening, after T-13/T-14, T-24, and T-23
+all closed in a single session.
+**State of `dev`:** synced with `origin/dev` (auto-pushed at end of
+each merge). Working tree clean.
+
+**Status update (2026-05-02 late evening):** Three of the five
+v9-bis-2 deferred items have shipped:
+
+* ✅ T-13 / T-14 consumer-side remaining (Phase 2-bis-3-3, commit
+  `7df6235e`)
+* ✅ T-24 full doc relocation (Phase 8-bis-2-2, commit `0a034865`)
+* ✅ T-23 physical relocation (Phase 9-bis-physical, commit `98dfb227`)
+
+The remaining two items are **blocked on external dependencies** and
+cannot ship without out-of-band engagement:
+
+* EU + UK Python `RegionPlugin` implementations — gated on EU/UK
+  pilot broker API documentation + a target broker.
+* Real Schwab / Webull / Alpaca / IBKR broker plugins — gated on
+  official API access (Schwab/Webull guardrail).
+
+The remainder of this document is preserved for reference; the
+"Remaining deferred work" section below is now down to two items.
 
 ---
 
@@ -41,7 +61,7 @@ Listed in order of decreasing tractability. Pick one, branch off
 items in one branch** — the whole point of these as separate
 engagements is per-item integration testing.
 
-### 1. T-13 / T-14 remaining consumer-side migration
+### 1. T-13 / T-14 remaining consumer-side migration — ✅ CLOSED 2026-05-02 (Phase 2-bis-3-3, commit `7df6235e`)
 
 **Scope:** Migrate the remaining call sites from direct
 `sandbox.*` / `services.option_*_service` imports to the
@@ -99,7 +119,7 @@ the shim pattern above.
 
 ---
 
-### 2. T-23 physical relocation
+### 2. T-23 physical relocation — ✅ CLOSED 2026-05-02 (Phase 9-bis-physical, commit `98dfb227`)
 
 **Scope:** Move 44 `restx_api/*.py` files (excluding `restx_api/v2/`)
 + `domain/translators.py` + `utils/constants.py` into
@@ -212,7 +232,7 @@ non-negotiable" rule).
 
 ---
 
-### 3. T-24 full — physical doc relocation
+### 3. T-24 full — physical doc relocation — ✅ CLOSED 2026-05-02 (Phase 8-bis-2-2, commit `0a034865`)
 
 **Scope:** Relocate per-section endpoint pages under
 `docs/api/v1/<section>/`.
@@ -260,7 +280,7 @@ A physical move needs a redirect strategy. Options:
 
 ---
 
-### 4. EU + UK Python `RegionPlugin` implementations
+### 4. EU + UK Python `RegionPlugin` implementations — blocked on pilot brokers
 
 **Status per Phase 7 prompt §7b:** "EU and UK explicitly stay as
 stubs in this phase." Intentional out-of-scope until EU/UK pilot
@@ -289,7 +309,7 @@ session windows + options grammar all need research.
 
 ---
 
-### 5. Real broker plugins (Schwab / Webull / Alpaca / IBKR)
+### 5. Real broker plugins (Schwab / Webull / Alpaca / IBKR) — blocked on API access
 
 **Status:** Out of every phase per the Schwab/Webull guardrail.
 Mock plugins at `broker/_mock_schwab_like/` and
@@ -549,11 +569,11 @@ regenerate `docs/refactor/file_classification.md`.
 | Bucket | Count | What |
 |---|---|---|
 | `PROMOTED_CORE` | 85 | Region-neutral; fail-closed; lane-isolation enforced |
-| `LEGACY_INDIA` | 211 | India v1 lane internals; allowlisted India literals OK |
-| `REGION_PLUGIN` | 31 | Under `market_regions/<code>/` |
+| `LEGACY_INDIA` | 167 | India v1 lane internals (was 211 pre-T-23; 44 files moved out 2026-05-02) |
+| `REGION_PLUGIN` | 78 | Under `market_regions/<code>/` (was 31 pre-T-23; +47 added under `market_regions/india/legacy_v1/`) |
 | `BROKER_PLUGIN` | 564 | Under `broker/<code>/` |
-| `COMPATIBILITY_SHIM` | 7 | Explicit bridges (e.g. `domain/translators.py`) |
-| **Total** | **898** | |
+| `COMPATIBILITY_SHIM` | 10 | Explicit bridges (was 7; +3 net — `restx_api/{schemas,data_schemas,account_schema}.py` + `utils/constants.py` shims minus `restx_api/_v1_lane_guard.py` which moved to REGION_PLUGIN) |
+| **Total** | **904** | |
 
 ### Frontend
 
