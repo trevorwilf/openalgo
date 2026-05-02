@@ -35,7 +35,7 @@ Concretely:
 
 Add 10 v5 error codes to `domain.errors.ErrorCode`, one Python
 exception class per code, and one canonical response shape per code
-(documented in `docs/api/v2_errors.md`).
+(documented in `docs/api/v2/v2_errors.md`).
 
 ### Added codes
 
@@ -89,7 +89,7 @@ synthetic_future, oi
 * The order-ticket UI can disable individual controls when the
   backend returns `unsupported_capability`/`dimension=tif`.
 * Existing per-feature codes stay; deprecation is deferred to v6.
-* Docs: `docs/api/v2_errors.md` is the single source of truth for
+* Docs: `docs/api/v2/v2_errors.md` is the single source of truth for
   the response shape per code.
 
 ## Implementation notes

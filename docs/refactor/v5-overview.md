@@ -91,7 +91,7 @@ Each phase has its own completion document at
 * `docs/refactor/schwab_readiness.md` /
   `docs/refactor/webull_readiness.md` — framework-readiness
   evidence packages.
-* `docs/api/v2_errors.md` — v5 structured error taxonomy (ADR 0029).
+* `docs/api/v2/v2_errors.md` — v5 structured error taxonomy (ADR 0029).
 * `docs/observability/promoted_request_labels.md` — v5 observability
   label spec (ADR 0030).
 * `docs/adr/0001-*.md` … `0030-*.md` — accepted ADRs.

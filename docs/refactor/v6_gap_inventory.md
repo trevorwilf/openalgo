@@ -123,9 +123,9 @@ The owning-phase column refers to phases of the v6 prompt:
 | E1-3-69 | `broker/fyers/streaming/*` Indian symbol formats | INTENTIONAL-INDIA-LIMIT | n/a | Same as E1-3-55 |
 | E1-3-70 | `broker/{paytm,zerodha,indmoney}/.../data.py` Indian token formats | INTENTIONAL-INDIA-LIMIT | n/a | Same as E1-3-55 |
 | E1-3-71 | `collections/openalgo/IN_stock/*` + Postman collections use Indian examples | INTENTIONAL-INDIA-LIMIT | n/a | India-focused API collection; not load-bearing |
-| E1-3-72 | `docs/api/market-calendar/timings.md` IST examples | INTENTIONAL-INDIA-LIMIT | n/a | Documentation; non-load-bearing |
-| E1-3-73 | `docs/api/market-data/history.md` says timestamps are IST | INTENTIONAL-INDIA-LIMIT | n/a | Doc reflects v1 behavior; ADR 0003 freezes v1 |
-| E1-3-74 | `docs/api/options-services/optionchain.md` Indian indices | INTENTIONAL-INDIA-LIMIT | n/a | Doc; v1/India-specific |
+| E1-3-72 | `docs/api/v1/market-calendar/timings.md` IST examples (relocated from `docs/api/market-calendar/timings.md` in Phase 8-bis-2-2) | INTENTIONAL-INDIA-LIMIT | n/a | Documentation; non-load-bearing |
+| E1-3-73 | `docs/api/v1/market-data/history.md` says timestamps are IST (relocated from `docs/api/market-data/history.md`) | INTENTIONAL-INDIA-LIMIT | n/a | Doc reflects v1 behavior; ADR 0003 freezes v1 |
+| E1-3-74 | `docs/api/v1/options-services/optionchain.md` Indian indices (relocated from `docs/api/options-services/optionchain.md`) | INTENTIONAL-INDIA-LIMIT | n/a | Doc; v1/India-specific |
 | E1-3-75 | `docs/userguide/symbol-format/README.md` Indian grammar | INTENTIONAL-INDIA-LIMIT | n/a | Doc; v1/India-specific |
 | E1-3-76 | `docs/adr/0011-region-gating-india-features.md` lists India-only features | ALREADY-CLOSED | n/a | The ADR itself documents the closure |
 | E1-3-77 | ADR 0026 (Sandbox) acknowledges India hardcoding | ALREADY-CLOSED | n/a | ADR + provider contract |
@@ -209,8 +209,8 @@ The owning-phase column refers to phases of the v6 prompt:
 | E2-3-50 | `broker/deltaexchange/api/order_api.py` Asia/Kolkata + spot symbol `_INR` | INTENTIONAL-INDIA-LIMIT | n/a | Same as E2-3-49 |
 | E2-3-51 | `broker/deltaexchange/mapping/order_data.py` MIS/CNC/NRML + NSE | INTENTIONAL-INDIA-LIMIT | n/a | Crypto for Indian users |
 | E2-3-52 | `broker/deltaexchange/streaming/delta_mapping.py` `NSE`→`CRYPTO` alias | INTENTIONAL-INDIA-LIMIT | n/a | Compatibility alias inside crypto adapter |
-| E2-3-53 | `docs/api/options-services/optionsymbol.md` Indian options docs | INTENTIONAL-INDIA-LIMIT | n/a | Doc |
-| E2-3-54 | `docs/api/order-information/openposition.md` Indian product/exchange table | INTENTIONAL-INDIA-LIMIT | n/a | Doc |
+| E2-3-53 | `docs/api/v1/options-services/optionsymbol.md` Indian options docs (relocated from `docs/api/options-services/optionsymbol.md`) | INTENTIONAL-INDIA-LIMIT | n/a | Doc |
+| E2-3-54 | `docs/api/v1/order-information/openposition.md` Indian product/exchange table (relocated from `docs/api/order-information/openposition.md`) | INTENTIONAL-INDIA-LIMIT | n/a | Doc |
 | E2-3-55 | `test/symbols.csv` Indian fixture | INTENTIONAL-INDIA-LIMIT | n/a | Test fixture |
 | E2-3-56 | `test/all_symbols.csv` Indian fixture | INTENTIONAL-INDIA-LIMIT | n/a | Test fixture |
 

@@ -1,245 +1,36 @@
 # OpenAlgo API Documentation
 
-Welcome to the OpenAlgo REST API Documentation. This comprehensive guide covers all API endpoints available for algorithmic trading operations.
+Welcome to the OpenAlgo REST API Documentation. The REST surface is
+split into two operator-controlled lanes per
+[ADR 0005](../adr/0005-two-lanes-legacy-and-promoted.md).
 
 ## Two lanes
 
-OpenAlgo's REST surface is split into two operator-controlled lanes
-per [ADR 0005](../adr/0005-two-lanes-legacy-and-promoted.md):
+| Lane | Status | Use when |
+|------|--------|----------|
+| **[`/api/v1` — Legacy India lane](v1/README.md)** | Deprecated; sunset machinery in Phase 9. India-only by design. Mounted only when the India region plugin is loaded. Every response carries `Deprecation: true` + `Sunset:` headers. | You're integrating with one of the 30 supported India brokers and need bit-identical legacy behavior. |
+| **[`/api/v2` — Region-neutral lane](v2/README.md)** | Promoted lane. Stable region-agnostic DTOs sourced from `domain/`. Per-broker opt-in via `API_V2_<BROKER>=1`. India broker bit-identical with v1 (Phase 6 ALL_GREEN verified — see [`docs/refactor/v6-translator-parity-status.md`](../refactor/v6-translator-parity-status.md)). | You're integrating with a non-India broker, OR you've flipped your India broker's `API_V2_<BROKER>` flag on. |
 
-* **[`/api/v1` — Legacy India lane](v1/README.md)**. India-only
-  by design; mounted only when the India region plugin is loaded.
-  Every response carries `Deprecation: true` + `Sunset:` headers.
-  See [`v1/README.md`](v1/README.md) for the lane status, sunset
-  machinery, and per-section endpoint references.
-* **[`/api/v2` — Region-neutral lane](v2/README.md)**. Stable,
-  region-agnostic DTOs sourced from `domain/`. Per-broker opt-in via
-  `API_V2_<BROKER>=1`. India broker bit-identical with v1
-  (Phase 6 verified — see
-  [`docs/refactor/v6-translator-parity-status.md`](../refactor/v6-translator-parity-status.md)
-  STATUS: ALL_GREEN).
-
-> **C-P2-027 region note** — examples below use India-specific values
-> (`NIFTY`, `NSE`, `NFO`, `MIS`, `CNC`, `NRML`, `INR`, `₹`, IST timestamps,
-> 09:15-15:30 sessions). Replace with your region's equivalents when
-> targeting a non-India broker. See
+> **C-P2-027 region note** — examples in v1 docs use India-specific
+> values (`NIFTY`, `NSE`, `NFO`, `MIS`, `CNC`, `NRML`, `INR`, `₹`,
+> IST timestamps, 09:15-15:30 sessions). Replace with your region's
+> equivalents when targeting a non-India broker. See
 > [`docs/refactor/multi_region_broker_compatibility_matrix.md`](../refactor/multi_region_broker_compatibility_matrix.md)
 > for per-region symbology, and
 > [`docs/refactor/future-broker-onboarding-checklist.md`](../refactor/future-broker-onboarding-checklist.md)
 > for the contract a non-India broker plugin satisfies.
 
-## Base URL
+## Choosing a lane
 
-```http
-Local Host   :  http://127.0.0.1:5000/api/v1
-Ngrok Domain :  https://<your-ngrok-domain>.ngrok-free.app/api/v1
-Custom Domain:  https://<your-custom-domain>/api/v1
-```
-
-## Authentication
-
-All API endpoints require authentication using an API key. Include your API key in the request body:
-
-```json
-{
-  "apikey": "<your_app_apikey>"
-}
-```
-
-## API Categories
-
-### Order Management
-Execute and manage trading orders across all supported exchanges.
-
-| Endpoint | Description |
-|----------|-------------|
-| [PlaceOrder](./order-management/placeorder.md) | Place a new order |
-| [PlaceSmartOrder](./order-management/placesmartorder.md) | Place position-aware smart order |
-| [OptionsOrder](./order-management/optionsorder.md) | Place options order with offset |
-| [OptionsMultiOrder](./order-management/optionsmultiorder.md) | Place multi-leg options order |
-| [BasketOrder](./order-management/basketorder.md) | Place multiple orders simultaneously |
-| [SplitOrder](./order-management/splitorder.md) | Split large order into smaller chunks |
-| [ModifyOrder](./order-management/modifyorder.md) | Modify an existing order |
-| [CancelOrder](./order-management/cancelorder.md) | Cancel a specific order |
-| [CancelAllOrder](./order-management/cancelallorder.md) | Cancel all open orders |
-| [ClosePosition](./order-management/closeposition.md) | Close all open positions |
-
-### Order Information
-Query order status and position information.
-
-| Endpoint | Description |
-|----------|-------------|
-| [OrderStatus](./order-information/orderstatus.md) | Get current status of an order |
-| [OpenPosition](./order-information/openposition.md) | Get open position for a symbol |
-
-### Market Data
-Access real-time and historical market data.
-
-| Endpoint | Description |
-|----------|-------------|
-| [Quotes](./market-data/quotes.md) | Get market quotes for a symbol |
-| [MultiQuotes](./market-data/multiquotes.md) | Get quotes for multiple symbols |
-| [Depth](./market-data/depth.md) | Get market depth (Level 2) data |
-| [History](./market-data/history.md) | Get historical OHLCV data |
-| [Intervals](./market-data/intervals.md) | Get available time intervals |
-
-### Symbol Services
-Symbol lookup, search, and instrument data.
-
-| Endpoint | Description |
-|----------|-------------|
-| [Symbol](./symbol-services/symbol.md) | Get detailed symbol information |
-| [Search](./symbol-services/search.md) | Search for symbols |
-| [Expiry](./symbol-services/expiry.md) | Get expiry dates for F&O |
-| [Instruments](./symbol-services/instruments.md) | Get all instruments list |
-
-### Options Services
-Options-specific operations and analytics.
-
-| Endpoint | Description |
-|----------|-------------|
-| [OptionSymbol](./options-services/optionsymbol.md) | Get option symbol by offset |
-| [OptionChain](./options-services/optionchain.md) | Get full option chain data |
-| [SyntheticFuture](./options-services/syntheticfuture.md) | Calculate synthetic futures price |
-| [OptionGreeks](./options-services/optiongreeks.md) | Calculate option Greeks and IV |
-
-### Account Services
-Account information, funds, and portfolio data.
-
-| Endpoint | Description |
-|----------|-------------|
-| [Funds](./account-services/funds.md) | Get account funds information |
-| [Margin](./account-services/margin.md) | Calculate margin requirement |
-| [OrderBook](./account-services/orderbook.md) | Get all orders for the day |
-| [TradeBook](./account-services/tradebook.md) | Get all trades for the day |
-| [PositionBook](./account-services/positionbook.md) | Get all current positions |
-| [Holdings](./account-services/holdings.md) | Get portfolio holdings |
-
-### Market Calendar
-Market timing and holiday information.
-
-| Endpoint | Description |
-|----------|-------------|
-| [Holidays](./market-calendar/holidays.md) | Get market holidays for a year |
-| [Timings](./market-calendar/timings.md) | Get market timings for a date |
-| [CheckHoliday](./market-calendar/checkholiday.md) | Check if a date is a holiday |
-
-### Analyzer Services
-Sandbox/analyzer mode for testing.
-
-| Endpoint | Description |
-|----------|-------------|
-| [AnalyzerStatus](./analyzer-services/analyzerstatus.md) | Get analyzer mode status |
-| [AnalyzerToggle](./analyzer-services/analyzertoggle.md) | Toggle analyzer mode on/off |
-
-### WebSocket Streaming
-Real-time market data streaming.
-
-| Endpoint | Description |
-|----------|-------------|
-| [LTP](./websocket-streaming/ltp.md) | Subscribe to last traded price |
-| [Quote](./websocket-streaming/quote.md) | Subscribe to quote updates |
-| [Depth](./websocket-streaming/depth.md) | Subscribe to market depth |
-
-## Order Constants
-
-### Exchange Codes
-| Code | Description |
-|------|-------------|
-| NSE | National Stock Exchange (Equity) |
-| BSE | Bombay Stock Exchange (Equity) |
-| NFO | NSE Futures & Options |
-| BFO | BSE Futures & Options |
-| CDS | Currency Derivatives (NSE) |
-| BCD | Currency Derivatives (BSE) |
-| MCX | Multi Commodity Exchange |
-| NSE_INDEX | NSE Index (for options trading) |
-| BSE_INDEX | BSE Index (for options trading) |
-
-### Product Types
-| Code | Description |
-|------|-------------|
-| MIS | Margin Intraday Square-off |
-| CNC | Cash and Carry (Equity Delivery) |
-| NRML | Normal (F&O Overnight) |
-
-### Price Types
-| Code | Description |
-|------|-------------|
-| MARKET | Market order |
-| LIMIT | Limit order |
-| SL | Stop-loss limit order |
-| SL-M | Stop-loss market order |
-
-### Action Types
-| Code | Description |
-|------|-------------|
-| BUY | Buy order |
-| SELL | Sell order |
-
-## Symbol Format Reference
-
-### Equity
-```
-SYMBOL
-Example: RELIANCE, SBIN, TCS
-```
-
-### Futures
-```
-[SYMBOL][DD][MMM][YY]FUT
-Example: NIFTY30JAN25FUT, BANKNIFTY27FEB25FUT
-```
-
-### Options
-```
-[SYMBOL][DD][MMM][YY][STRIKE][CE/PE]
-Example: NIFTY30JAN2525000CE, BANKNIFTY27FEB2552000PE
-```
-
-## Response Format
-
-All API responses follow a consistent JSON format:
-
-### Success Response
-```json
-{
-  "status": "success",
-  "data": { ... }
-}
-```
-
-### Error Response
-```json
-{
-  "status": "error",
-  "message": "Error description"
-}
-```
-
-## HTTP Status Codes
-
-| Code | Description |
-|------|-------------|
-| 200 | Success |
-| 400 | Bad Request (validation error) |
-| 403 | Forbidden (invalid API key) |
-| 404 | Not Found |
-| 429 | Rate Limit Exceeded |
-| 500 | Internal Server Error |
-
-## Rate Limits
-
-OpenAlgo implements differentiated rate limiting for various API operations:
-
-| API Type | Rate Limit |
-|----------|------------|
-| Order Management | 10 per second |
-| Smart Orders | 2 per second |
-| General APIs | 50 per second |
-| Webhooks | 100 per minute |
-
-For detailed rate limiting information including configuration options, see [Rate Limiting](./rate-limiting.md).
+* New integrations targeting an India broker today: start with
+  [`v1`](v1/README.md). Plan to migrate to v2 once
+  `API_V2_<YOUR_BROKER>=1` is rolled out by your operator.
+* New integrations targeting any non-India broker: only
+  [`v2`](v2/README.md) is available.
+* Existing integrations: keep using [`v1`](v1/README.md). Watch for
+  `Deprecation: true` and `Sunset:` headers — your operator may have
+  set `OPENALGO_V1_SUNSET_DATE` for a hard cutover. Until then v1 is
+  fully supported.
 
 ## SDK Support
 
