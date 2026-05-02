@@ -70,23 +70,26 @@ is_xts_broker() {
     fi
 }
 
-# Function to check timezone
+# Function to check timezone — Phase 8 (T-26): operator-controlled
+# deploy timezone via $OPENALGO_DEPLOY_TZ. Defaults to Asia/Kolkata
+# for backward compatibility with existing India deployments.
 check_timezone() {
+    deploy_tz="${OPENALGO_DEPLOY_TZ:-Asia/Kolkata}"
     current_tz=$(timedatectl | grep "Time zone" | awk '{print $3}')
-    log_message "Current timezone: $current_tz" "$BLUE"
+    log_message "Current timezone: $current_tz (target: $deploy_tz)" "$BLUE"
 
-    if [[ "$current_tz" == "Asia/Kolkata" ]]; then
-        log_message "Server is already set to IST timezone." "$GREEN"
+    if [[ "$current_tz" == "$deploy_tz" ]]; then
+        log_message "Server is already set to $deploy_tz." "$GREEN"
         return 0
     fi
 
-    log_message "Server is not set to IST timezone." "$YELLOW"
-    read -p "Would you like to change the timezone to IST? (y/n): " change_tz
+    log_message "Server is not set to $deploy_tz." "$YELLOW"
+    read -p "Would you like to change the timezone to $deploy_tz? (y/n): " change_tz
     if [[ $change_tz =~ ^[Yy]$ ]]; then
-        log_message "Changing timezone to IST..." "$BLUE"
-        sudo timedatectl set-timezone Asia/Kolkata
+        log_message "Changing timezone to $deploy_tz..." "$BLUE"
+        sudo timedatectl set-timezone "$deploy_tz"
         check_status "Failed to change timezone"
-        log_message "Timezone successfully changed to IST" "$GREEN"
+        log_message "Timezone successfully changed to $deploy_tz" "$GREEN"
     else
         log_message "Keeping current timezone: $current_tz" "$YELLOW"
     fi

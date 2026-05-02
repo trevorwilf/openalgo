@@ -362,6 +362,12 @@ if %TOTAL_RAM_MB% LSS 3000 (
 echo [INFO] System: %TOTAL_RAM_MB%MB RAM, %CPU_CORES% cores
 echo [INFO] Config: shm=%SHM_SIZE_MB%MB, threads=%THREAD_LIMIT%, strategy_mem=%STRATEGY_MEM_LIMIT%MB
 
+REM Phase 8 (T-26) — region-aware deploy timezone. Operator overrides
+REM via the OPENALGO_DEPLOY_TZ environment variable; defaults to
+REM Asia/Kolkata for backward compatibility with existing India
+REM deployments.
+if "%OPENALGO_DEPLOY_TZ%"=="" set OPENALGO_DEPLOY_TZ=Asia/Kolkata
+
 REM Run container
 echo [INFO] Starting container...
 docker run -d ^
@@ -375,7 +381,7 @@ docker run -d ^
     -e "NUMEXPR_NUM_THREADS=%THREAD_LIMIT%" ^
     -e "NUMBA_NUM_THREADS=%THREAD_LIMIT%" ^
     -e "STRATEGY_MEMORY_LIMIT_MB=%STRATEGY_MEM_LIMIT%" ^
-    -e "TZ=Asia/Kolkata" ^
+    -e "TZ=%OPENALGO_DEPLOY_TZ%" ^
     -v "%OPENALGO_DIR%\db:/app/db" ^
     -v "%OPENALGO_DIR%\strategies:/app/strategies" ^
     -v "%OPENALGO_DIR%\log:/app/log" ^

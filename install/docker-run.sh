@@ -422,7 +422,7 @@ do_start() {
         -e "NUMEXPR_NUM_THREADS=${THREAD_LIMIT}" \
         -e "NUMBA_NUM_THREADS=${THREAD_LIMIT}" \
         -e "STRATEGY_MEMORY_LIMIT_MB=${STRATEGY_MEM_LIMIT}" \
-        -e "TZ=Asia/Kolkata" \
+        -e "TZ=${OPENALGO_DEPLOY_TZ:-Asia/Kolkata}" \
         -v "$OPENALGO_DIR/db:/app/db" \
         -v "$OPENALGO_DIR/strategies:/app/strategies" \
         -v "$OPENALGO_DIR/log:/app/log" \
