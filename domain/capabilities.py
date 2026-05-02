@@ -171,6 +171,19 @@ class BrokerCapabilities(BaseModel):
     # 08:00 IST behavior for backward compat.
     master_contract_refresh_policy: dict[str, Any] | None = None
 
+    # ---- v7 / Phase 0 T-02 capability flags --------------------------------
+    # All optional, default to safe-no-op values. No live consumer reads
+    # these in Phase 0 — they are added now so Phase 5 can swap the
+    # promoted_mpp_service hardcoded broker frozensets for capability
+    # reads, Phase 5 can replace the WS router's NSE/BSE substring match
+    # with a per-broker topic_format read, and Phase 9 can gate v1
+    # mounting per broker via requires_v1_compat.
+    requires_market_price_protection: bool = False
+    requires_slm_to_sl_conversion: bool = False
+    minor_unit_divisor: int | None = None
+    topic_format: str | None = None
+    requires_v1_compat: bool = False
+
     @model_validator(mode="before")
     @classmethod
     def _default_supported_regions(cls, data: Any) -> Any:
@@ -362,6 +375,12 @@ _EXPLICIT_OVERRIDE_KEYS: frozenset[str] = frozenset(
         "streaming_transports",
         "supports_account_hashes",
         "supports_subaccounts",
+        # v7 / Phase 0 T-02 capability flags
+        "requires_market_price_protection",
+        "requires_slm_to_sl_conversion",
+        "minor_unit_divisor",
+        "topic_format",
+        "requires_v1_compat",
     }
 )
 
