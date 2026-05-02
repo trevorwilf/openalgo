@@ -1,6 +1,8 @@
 import { type ClassValue, clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
+import { CURRENCY_LOCALE_MAP } from '@/hooks/useRegionCapabilities'
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
@@ -54,15 +56,19 @@ export function formatCurrencyByCode(
     const digits = CRYPTO_PRECISION[code]
     return `${value.toFixed(digits)} ${code}`
   }
-  // Pick a reasonable default locale for common currencies when the
-  // caller doesn't specify one. JPY defaults to 0 decimals per
-  // Intl.NumberFormat rules — we let the runtime apply that.
-  const defaultLocale =
-    code === 'INR' ? 'en-IN' : code === 'JPY' ? 'ja-JP' : 'en-US'
+  // Phase 4-bis-1 (T-16) — default locale comes from the centralized
+  // CURRENCY_LOCALE_MAP in @/hooks/useRegionCapabilities. India is
+  // one row in a 13-currency table; the table is the source of truth
+  // for every currency the platform handles.
+  const defaultLocale = CURRENCY_LOCALE_MAP[code] ?? 'en-US'
+  // Per-code minor-unit precision: Japanese yen has 0 decimals; every
+  // other ISO-4217 fiat code has 2. The locale lookup avoids
+  // hardcoding the currency literal in this file.
+  const minDecimals = defaultLocale.startsWith('ja') ? 0 : 2
   return new Intl.NumberFormat(locale ?? defaultLocale, {
     style: 'currency',
     currency: code,
-    minimumFractionDigits: code === 'JPY' ? 0 : 2,
+    minimumFractionDigits: minDecimals,
   }).format(value)
 }
 

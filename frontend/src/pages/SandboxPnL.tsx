@@ -13,6 +13,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useRegionCapabilities } from '@/hooks/useRegionCapabilities'
 import { useFormatCurrency } from '@/lib/format/currency'
 import { cn } from '@/lib/utils'
 
@@ -87,6 +88,9 @@ function getPnLColor(value: number): string {
 
 export default function SandboxPnL() {
   const formatCurrency = useFormatCurrency()
+  // Phase 4-bis-1 (T-19) — venue-aware tz label.
+  const region = useRegionCapabilities()
+  const tzLabel = region.timezoneLabel ?? 'UTC'
   const [data, setData] = useState<SandboxData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('daily')
@@ -312,7 +316,7 @@ export default function SandboxPnL() {
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
                   <Calendar className="h-16 w-16 mx-auto mb-4 opacity-50" />
-                  <p>No daily P&L data yet. Snapshots are captured at 23:59 IST daily.</p>
+                  <p>No daily P&L data yet. Snapshots are captured at 23:59 {tzLabel} daily.</p>
                   <p className="text-sm mt-2">Start trading to see your date-wise P&L history.</p>
                 </div>
               )}

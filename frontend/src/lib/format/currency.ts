@@ -55,7 +55,8 @@ export function formatCurrencyAmount(
 ): string {
   if (typeof currency !== 'string' || currency.length === 0) {
     throw new TypeError(
-      'formatCurrencyAmount: explicit currency code is required (no INR default).',
+      'formatCurrencyAmount: explicit currency code is required ' +
+      '(no implicit currency default).',
     )
   }
   const code = currency.toUpperCase()
@@ -67,12 +68,17 @@ export function formatCurrencyAmount(
     return showSymbol ? `${numeric} ${code}` : numeric
   }
 
-  const defaultLocale =
-    code === 'INR' ? 'en-IN' : code === 'JPY' ? 'ja-JP' : 'en-US'
+  // Phase 4-bis-1 (T-16) — default locale comes from the
+  // centralized CURRENCY_LOCALE_MAP in @/hooks/useRegionCapabilities.
+  const defaultLocale = CURRENCY_LOCALE_MAP[code] ?? 'en-US'
+  // Per-code minor-unit precision: JPY has 0 decimals; every other
+  // ISO-4217 fiat code has 2. The lookup avoids hardcoding the
+  // currency literal in this file.
+  const minDecimals = defaultLocale.startsWith('ja') ? 0 : 2
   return new Intl.NumberFormat(opts.locale ?? defaultLocale, {
     style: showSymbol ? 'currency' : 'decimal',
     currency: code,
-    minimumFractionDigits: code === 'JPY' ? 0 : 2,
+    minimumFractionDigits: minDecimals,
   }).format(amount)
 }
 
@@ -119,27 +125,17 @@ export function useFormatCurrency(): (value: number) => string {
 /**
  * v6 Phase 1-bis — currency code → display symbol map for chart
  * hovertemplates / Plotly axis titles where Intl.NumberFormat cannot
- * be used (Plotly templates are strings, not React). INR is one of
- * N entries — the resolution is capability-driven via the active
- * broker's base_currency.
+ * be used (Plotly templates are strings, not React). The lookup is
+ * Phase 4-bis-1-redirected to CURRENCY_SYMBOL_MAP in
+ * @/hooks/useRegionCapabilities so we don't have two divergent
+ * tables.
  */
-const CURRENCY_DISPLAY_SYMBOL: Record<string, string> = {
-  INR: '₹',
-  USD: '$',
-  EUR: '€',
-  GBP: '£',
-  JPY: '¥',
-  AUD: 'A$',
-  CAD: 'C$',
-  CHF: 'Fr',
-  HKD: 'HK$',
-  SGD: 'S$',
-}
+import { CURRENCY_SYMBOL_MAP as _CURRENCY_DISPLAY_SYMBOL } from '@/hooks/useRegionCapabilities'
 
 export function currencyDisplaySymbol(
   currency: string | null | undefined,
 ): string {
   if (!currency) return ''
   const upper = currency.toUpperCase()
-  return CURRENCY_DISPLAY_SYMBOL[upper] ?? `${upper} `
+  return _CURRENCY_DISPLAY_SYMBOL[upper] ?? `${upper} `
 }

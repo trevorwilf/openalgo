@@ -45,7 +45,14 @@ export interface RegionCapabilities {
   isIndiaActive: boolean
 }
 
-const _CURRENCY_LOCALE: Record<string, string> = {
+// Phase 4-bis-1 (T-16) — centralized currency → locale + symbol
+// tables. Exported so `lib/utils.ts:formatCurrencyByCode` and
+// `lib/format/currency.ts:formatCurrencyAmount` can drop their
+// inline `'INR' / 'JPY' / else en-US'` chains and consult the same
+// 13-currency map. India is one row; the table is the source of
+// truth for USD / EUR / GBP / JPY / CHF / SGD / HKD / AUD / USDT /
+// USDC / BTC / ETH too.
+export const CURRENCY_LOCALE_MAP: Record<string, string> = {
   INR: 'en-IN',
   USD: 'en-US',
   EUR: 'en-GB',
@@ -61,7 +68,7 @@ const _CURRENCY_LOCALE: Record<string, string> = {
   ETH: 'en-US',
 }
 
-const _CURRENCY_SYMBOL: Record<string, string> = {
+export const CURRENCY_SYMBOL_MAP: Record<string, string> = {
   INR: '₹',
   USD: '$',
   EUR: '€',
@@ -76,6 +83,9 @@ const _CURRENCY_SYMBOL: Record<string, string> = {
   BTC: '₿',
   ETH: 'Ξ',
 }
+
+const _CURRENCY_LOCALE = CURRENCY_LOCALE_MAP
+const _CURRENCY_SYMBOL = CURRENCY_SYMBOL_MAP
 
 /**
  * Returns the active region's currency / locale / timezone / venue
