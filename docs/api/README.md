@@ -2,13 +2,27 @@
 
 Welcome to the OpenAlgo REST API Documentation. This comprehensive guide covers all API endpoints available for algorithmic trading operations.
 
+## Two lanes
+
+OpenAlgo's REST surface is split into two operator-controlled lanes
+per [ADR 0005](../adr/0005-two-lanes-legacy-and-promoted.md):
+
+* **[`/api/v1` — Legacy India lane](v1/README.md)**. India-only
+  by design; mounted only when the India region plugin is loaded.
+  Every response carries `Deprecation: true` + `Sunset:` headers.
+  See [`v1/README.md`](v1/README.md) for the lane status, sunset
+  machinery, and per-section endpoint references.
+* **[`/api/v2` — Region-neutral lane](v2/README.md)**. Stable,
+  region-agnostic DTOs sourced from `domain/`. Per-broker opt-in via
+  `API_V2_<BROKER>=1`. India broker bit-identical with v1
+  (Phase 6 verified — see
+  [`docs/refactor/v6-translator-parity-status.md`](../refactor/v6-translator-parity-status.md)
+  STATUS: ALL_GREEN).
+
 > **C-P2-027 region note** — examples below use India-specific values
 > (`NIFTY`, `NSE`, `NFO`, `MIS`, `CNC`, `NRML`, `INR`, `₹`, IST timestamps,
 > 09:15-15:30 sessions). Replace with your region's equivalents when
-> targeting a non-India broker. The `/api/v1` lane is India-only by
-> design (per ADR 0005); `/api/v2` is the region-neutral lane and is
-> documented under [`docs/api/v2/`](v2/) when an operator flips
-> `API_V2_<BROKER>=1`. See
+> targeting a non-India broker. See
 > [`docs/refactor/multi_region_broker_compatibility_matrix.md`](../refactor/multi_region_broker_compatibility_matrix.md)
 > for per-region symbology, and
 > [`docs/refactor/future-broker-onboarding-checklist.md`](../refactor/future-broker-onboarding-checklist.md)
