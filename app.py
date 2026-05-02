@@ -219,10 +219,30 @@ def create_app():
     else:
         logger.warning("React frontend not available - run 'npm run build' in frontend/")
 
-    app.register_blueprint(api_v1_bp)
+    # Phase 9 (T-23 logical) — the legacy /api/v1 lane is India-shaped
+    # at the schema / service / response-shape level. Register it only
+    # when the India region plugin is loaded; non-India deployments
+    # never mount these routes (any direct request returns 404 at the
+    # route layer, not 410 — the 410 comes from the operator-controlled
+    # OPENALGO_V1_SUNSET_DATE machinery for India-active deployments).
+    # Lazy-load the region cache here so this check runs before the
+    # bulk load_market_regions() call at startup (line ~503).
+    from utils.region_loader import get_market_region, load_market_regions
 
-    # Exempt API endpoints from CSRF protection (they use API key authentication)
-    csrf.exempt(api_v1_bp)
+    if get_market_region("india") is None:
+        load_market_regions(os.path.join(app.root_path, "market_regions"))
+
+    if get_market_region("india") is not None:
+        app.register_blueprint(api_v1_bp)
+        # Exempt API endpoints from CSRF protection (they use API key authentication)
+        csrf.exempt(api_v1_bp)
+        logger.debug("api_v1 mounted: India region plugin loaded")
+    else:
+        logger.warning(
+            "api_v1 NOT mounted: market_regions/india/plugin.json failed to "
+            "load. Non-India deployments are expected to hit this branch; "
+            "/api/v1/* requests will receive 404 Not Found."
+        )
 
     # Phase 6: /api/v2 skeleton — registered only when API_V2 flag is on.
     try:
