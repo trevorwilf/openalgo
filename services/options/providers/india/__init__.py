@@ -167,5 +167,35 @@ class IndiaOptionsProvider:
     def lot_size_for(self, contract: OptionContract) -> int:
         return _LOT_SIZES.get(contract.underlying, 1)
 
+    # Phase 2-bis-3 (T-14 wiring) — expose the legacy India options
+    # service entry-point modules so consumers can route through
+    # ``get_options_provider("india").service_modules()`` rather than
+    # importing ``services.option_*_service`` directly. The modules
+    # themselves are unchanged; the dispatcher route is additive —
+    # the per-callsite migration of ``restx_api/option_*.py`` and
+    # ``restx_api/options_*.py`` is the v9-bis-2 follow-up.
+    def service_modules(self) -> dict[str, object]:
+        """Return the legacy India option-service modules by role.
+
+        Keys: ``symbol``, ``chain``, ``greeks``, ``multiorder``,
+        ``place_order``. Values are module objects; callers use them
+        as before (``mod.parse_option_symbol(...)`` etc.).
+        """
+        from services import (
+            option_chain_service,
+            option_greeks_service,
+            option_symbol_service,
+            options_multiorder_service,
+            place_options_order_service,
+        )
+
+        return {
+            "symbol": option_symbol_service,
+            "chain": option_chain_service,
+            "greeks": option_greeks_service,
+            "multiorder": options_multiorder_service,
+            "place_order": place_options_order_service,
+        }
+
 
 __all__ = ["IndiaOptionsProvider", "REGION_CODE"]
