@@ -17,6 +17,24 @@ import { useRegionCapabilities } from '@/hooks/useRegionCapabilities'
 import { useFormatCurrency } from '@/lib/format/currency'
 import { cn } from '@/lib/utils'
 
+// Phase 4-bis-2 (T-19 partial 3) — region-agnostic product → badge-
+// variant mapping. India products (intraday MIS, cash CNC, normal
+// NRML) and US/EU/UK products (DAY_TRADE, OVERNIGHT, MARGIN) all
+// fan out without hardcoding the codes inline. Unknown products
+// fall through to "outline" — the unstyled state is the safe
+// default for any broker / region.
+type BadgeVariant = 'secondary' | 'default' | 'outline'
+
+const _INTRADAY_PRODUCTS = new Set(['MIS', 'DAY_TRADE'])
+const _CASH_PRODUCTS = new Set(['CNC', 'OVERNIGHT'])
+
+function productBadgeVariant(product: string | null | undefined): BadgeVariant {
+  const code = String(product ?? '').toUpperCase()
+  if (_INTRADAY_PRODUCTS.has(code)) return 'secondary'
+  if (_CASH_PRODUCTS.has(code)) return 'default'
+  return 'outline'
+}
+
 interface DailyPnL {
   date: string
   realized_pnl: number
@@ -362,15 +380,7 @@ export default function SandboxPnL() {
                             <Badge variant="outline">{pos.exchange}</Badge>
                           </TableCell>
                           <TableCell>
-                            <Badge
-                              variant={
-                                pos.product === 'MIS'
-                                  ? 'secondary'
-                                  : pos.product === 'CNC'
-                                    ? 'default'
-                                    : 'outline'
-                              }
-                            >
+                            <Badge variant={productBadgeVariant(pos.product)}>
                               {pos.product}
                             </Badge>
                           </TableCell>
