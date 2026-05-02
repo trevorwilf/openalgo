@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { OptionChainResponse, OptionStrike } from '@/types/option-chain'
-import { useOptionChainPolling } from './useOptionChainPolling'
-import { useMarketData } from './useMarketData'
+import { useOptionChainPolling } from '@/hooks/useOptionChainPolling'
+import { useMarketData } from '@/hooks/useMarketData'
 
 // Index symbols that use NSE_INDEX/BSE_INDEX for quotes (matches backend lists)
 const NSE_INDEX_SYMBOLS = new Set([
@@ -139,7 +139,7 @@ export function useOptionChainLive(
     }
 
     // Create merged chain with WebSocket LTP updates
-    const mergedChain: OptionStrike[] = polledData.chain.map((strike) => {
+    const mergedChain: OptionStrike[] = polledData.chain.map((strike: OptionStrike) => {
       const newStrike = { ...strike }
 
       // Update CE data from WebSocket

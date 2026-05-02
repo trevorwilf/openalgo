@@ -1,4 +1,4 @@
-import { webClient } from './client'
+import { webClient } from '@/api/client'
 
 export type Watchlist = 'mytrades' | 'simulation'
 
