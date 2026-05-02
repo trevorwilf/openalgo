@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import type { StrategyTemplate, TemplateLeg } from '@/lib/strategyTemplates'
+import type { StrategyTemplate, TemplateLeg } from '@/india_legacy/lib/strategyTemplates'
 import { cn } from '@/lib/utils'
 import type { OptionStrike } from '@/types/option-chain'
 

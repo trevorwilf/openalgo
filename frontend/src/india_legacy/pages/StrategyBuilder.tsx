@@ -9,21 +9,21 @@ import {
   type PortfolioEntry,
   type Watchlist,
 } from '@/india_legacy/api/strategy-portfolio'
-import { EditLegDialog } from '@/components/strategy-builder/EditLegDialog'
-import { GreeksTab, type LegGreeks } from '@/components/strategy-builder/GreeksTab'
-import { type LegDraft, ManualLegBuilder } from '@/components/strategy-builder/ManualLegBuilder'
-import { PayoffChart } from '@/components/strategy-builder/PayoffChart'
-import { PnLTab } from '@/components/strategy-builder/PnLTab'
-import { PositionsPanel } from '@/components/strategy-builder/PositionsPanel'
-import { SaveStrategyDialog } from '@/components/strategy-builder/SaveStrategyDialog'
-import { Simulators } from '@/components/strategy-builder/Simulators'
+import { EditLegDialog } from '@/india_legacy/components/strategy-builder/EditLegDialog'
+import { GreeksTab, type LegGreeks } from '@/india_legacy/components/strategy-builder/GreeksTab'
+import { type LegDraft, ManualLegBuilder } from '@/india_legacy/components/strategy-builder/ManualLegBuilder'
+import { PayoffChart } from '@/india_legacy/components/strategy-builder/PayoffChart'
+import { PnLTab } from '@/india_legacy/components/strategy-builder/PnLTab'
+import { PositionsPanel } from '@/india_legacy/components/strategy-builder/PositionsPanel'
+import { SaveStrategyDialog } from '@/india_legacy/components/strategy-builder/SaveStrategyDialog'
+import { Simulators } from '@/india_legacy/components/strategy-builder/Simulators'
 
-import { SymbolHeader } from '@/components/strategy-builder/SymbolHeader'
+import { SymbolHeader } from '@/india_legacy/components/strategy-builder/SymbolHeader'
 import {
   type ResolvedTemplateLeg,
   TemplateDialog,
-} from '@/components/strategy-builder/TemplateDialog'
-import { TemplateGrid } from '@/components/strategy-builder/TemplateGrid'
+} from '@/india_legacy/components/strategy-builder/TemplateDialog'
+import { TemplateGrid } from '@/india_legacy/components/strategy-builder/TemplateGrid'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
@@ -39,8 +39,8 @@ import {
   type StrategyLeg,
   totalPnlAt,
   totalPremium,
-} from '@/lib/strategyMath'
-import type { Direction, StrategyTemplate } from '@/lib/strategyTemplates'
+} from '@/india_legacy/lib/strategyMath'
+import type { Direction, StrategyTemplate } from '@/india_legacy/lib/strategyTemplates'
 import { useAuthStore } from '@/stores/authStore'
 import type { OptionChainResponse } from '@/types/option-chain'
 import { showToast } from '@/utils/toast'

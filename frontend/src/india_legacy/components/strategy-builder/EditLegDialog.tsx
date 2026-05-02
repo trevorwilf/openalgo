@@ -19,8 +19,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { buildFutureSymbol, buildOptionSymbol } from '@/lib/strategyMath'
-import type { StrategyLeg } from '@/lib/strategyMath'
+import { buildFutureSymbol, buildOptionSymbol } from '@/india_legacy/lib/strategyMath'
+import type { StrategyLeg } from '@/india_legacy/lib/strategyMath'
 import type { OptionStrike } from '@/types/option-chain'
 
 export interface EditLegDialogProps {

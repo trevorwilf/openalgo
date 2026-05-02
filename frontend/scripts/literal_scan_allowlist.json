@@ -11,27 +11,7 @@
       "reason": "Multi-region currency / locale / symbol lookup table. India is one row in a 13-currency table; the hook itself never assumes India and the table is ALSO the source of truth for USD/EUR/GBP/JPY/etc. mappings."
     },
     {
-      "path": "src/components/option-chain/ColumnReorderPanel.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
       "path": "src/components/playground/MessageComposer.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/strategy-builder/EditLegDialog.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/strategy-builder/GreeksTab.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/strategy-builder/ManualLegBuilder.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/components/strategy-builder/TemplateDialog.tsx",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {
@@ -43,19 +23,7 @@
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {
-      "path": "src/hooks/useOptionChainLive.ts",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
       "path": "src/hooks/useSupportedExchanges.ts",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/lib/strategyMath.ts",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/lib/strategyTemplates.ts",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {
@@ -71,27 +39,7 @@
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {
-      "path": "src/pages/admin/FreezeQty.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/admin/MarketTimings.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/Analyzer.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/CustomStraddle.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
       "path": "src/pages/Faq.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/GEXDashboard.tsx",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {
@@ -107,51 +55,11 @@
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {
-      "path": "src/pages/IVChart.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/IVSmile.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/OIProfile.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/OITracker.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
       "path": "src/pages/OrderBook.tsx",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {
       "path": "src/pages/Positions.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/Sandbox.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/SandboxPnL.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/StraddleChart.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/strategy/ConfigureSymbols.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/StrategyBuilder.tsx",
-      "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
-    },
-    {
-      "path": "src/pages/StrategyPortfolio.tsx",
       "reason": "India-specific UI surface (Phase 5 region-gating reduces this)."
     },
     {

@@ -2,7 +2,7 @@ import type * as PlotlyTypes from 'plotly.js'
 import { useMemo } from 'react'
 import Plot from 'react-plotly.js'
 import { currencyDisplaySymbol } from '@/lib/format/currency'
-import type { PayoffResult } from '@/lib/strategyMath'
+import type { PayoffResult } from '@/india_legacy/lib/strategyMath'
 import { useBrokerStore } from '@/stores/brokerStore'
 import { useThemeStore } from '@/stores/themeStore'
 

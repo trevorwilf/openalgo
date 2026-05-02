@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button'
-import { type Direction, STRATEGY_TEMPLATES, type StrategyTemplate } from '@/lib/strategyTemplates'
+import { type Direction, STRATEGY_TEMPLATES, type StrategyTemplate } from '@/india_legacy/lib/strategyTemplates'
 import { cn } from '@/lib/utils'
 
 export interface TemplateGridProps {
