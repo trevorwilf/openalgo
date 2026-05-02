@@ -81,6 +81,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
+import { useRegionCapabilities } from '@/hooks/useRegionCapabilities'
 import { useSocket } from '@/hooks/useSocket'
 import { cn } from '@/lib/utils'
 import { profileMenuItems } from '@/config/navigation'
@@ -251,6 +252,12 @@ export default function Historify() {
   const { user, logout } = useAuthStore()
   const navigate = useNavigate()
   const [showLogoutDialog, setShowLogoutDialog] = useState(false)
+  // Phase 4-bis-1 (T-19) — venue-aware tz label for the schedule UI.
+  // India brokers continue to render `IST`; non-India brokers render
+  // their own venue's short label (`ET`, `GMT`, etc.). Falls through
+  // to `UTC` when no broker is connected.
+  const region = useRegionCapabilities()
+  const tzLabel = region.timezoneLabel ?? 'UTC'
 
   // Core state
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([])
@@ -848,7 +855,7 @@ export default function Historify() {
     const [h, m] = (schedule.time_of_day || '09:15').split(':').map(Number)
     const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h
     const ampm = h >= 12 ? 'PM' : 'AM'
-    return `Daily at ${hour12}:${m.toString().padStart(2, '0')} ${ampm} IST`
+    return `Daily at ${hour12}:${m.toString().padStart(2, '0')} ${ampm} ${tzLabel}`
   }
 
   const performSearch = async (query: string) => {
@@ -2558,7 +2565,7 @@ export default function Historify() {
               </div>
             ) : (
               <div>
-                <Label>Time of Day (IST)</Label>
+                <Label>Time of Day ({tzLabel})</Label>
                 <div className="flex gap-2 mt-1">
                   <Select
                     value={(() => {
