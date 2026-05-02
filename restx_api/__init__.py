@@ -15,7 +15,11 @@ api = Api(
 # Every /api/v1/* request runs through this guard. India brokers
 # proceed unchanged; non-India brokers receive a structured 410 Gone
 # with code v1_unavailable_for_non_india_broker.
-from ._v1_lane_guard import enforce_india_only as _v1_enforce_india_only
+# Phase 9-bis-physical (T-23 Group D) — guard relocated to
+# market_regions.india.legacy_v1.restx_api._v1_lane_guard.
+from market_regions.india.legacy_v1.restx_api._v1_lane_guard import (
+    enforce_india_only as _v1_enforce_india_only,
+)
 
 
 # v5 Phase 8 (D-1) — v1 deprecation announcement via response headers.
@@ -91,47 +95,51 @@ def _v1_deprecation_headers(response):
     response.headers.setdefault("Link", '<https://docs.openalgo.in/migration/v1-to-v2>; rel="deprecation"')
     return response
 
-# Import namespaces
-from .analyzer import api as analyzer_ns
-from .basket_order import api as basket_order_ns
-from .cancel_all_order import api as cancel_all_order_ns
-from .cancel_order import api as cancel_order_ns
-from .chart_api import api as chart_ns
-from .close_position import api as close_position_ns
-from .depth import api as depth_ns
-from .expiry import api as expiry_ns
-from .funds import api as funds_ns
-from .history import api as history_ns
-from .holdings import api as holdings_ns
-from .instruments import api as instruments_ns
-from .intervals import api as intervals_ns
-from .margin import api as margin_ns
-from .market_holidays import api as market_holidays_ns
-from .market_timings import api as market_timings_ns
-from .modify_order import api as modify_order_ns
-from .multi_option_greeks import api as multi_option_greeks_ns
-from .multiquotes import api as multiquotes_ns
-from .openposition import api as openposition_ns
-from .option_chain import api as option_chain_ns
-from .option_greeks import api as option_greeks_ns
-from .option_symbol import api as option_symbol_ns
-from .options_multiorder import api as options_multiorder_ns
-from .options_order import api as options_order_ns
-from .orderbook import api as orderbook_ns
-from .orderstatus import api as orderstatus_ns
-from .ping import api as ping_ns
-from .place_order import api as place_order_ns
-from .place_smart_order import api as place_smart_order_ns
-from .pnl_symbols import api as pnl_symbols_ns
-from .positionbook import api as positionbook_ns
-from .quotes import api as quotes_ns
-from .search import api as search_ns
-from .split_order import api as split_order_ns
-from .symbol import api as symbol_ns
-from .synthetic_future import api as synthetic_future_ns
-from .telegram_bot import api as telegram_ns
-from .ticker import api as ticker_ns
-from .tradebook import api as tradebook_ns
+# Import namespaces. Phase 9-bis-physical (T-23 Group C) — endpoint
+# modules now live under ``market_regions.india.legacy_v1.restx_api.*``;
+# the ``api_v1_bp`` Blueprint + namespace registrations stay here so
+# ``app.py``'s ``from restx_api import api_v1_bp`` import remains
+# stable.
+from market_regions.india.legacy_v1.restx_api.analyzer import api as analyzer_ns
+from market_regions.india.legacy_v1.restx_api.basket_order import api as basket_order_ns
+from market_regions.india.legacy_v1.restx_api.cancel_all_order import api as cancel_all_order_ns
+from market_regions.india.legacy_v1.restx_api.cancel_order import api as cancel_order_ns
+from market_regions.india.legacy_v1.restx_api.chart_api import api as chart_ns
+from market_regions.india.legacy_v1.restx_api.close_position import api as close_position_ns
+from market_regions.india.legacy_v1.restx_api.depth import api as depth_ns
+from market_regions.india.legacy_v1.restx_api.expiry import api as expiry_ns
+from market_regions.india.legacy_v1.restx_api.funds import api as funds_ns
+from market_regions.india.legacy_v1.restx_api.history import api as history_ns
+from market_regions.india.legacy_v1.restx_api.holdings import api as holdings_ns
+from market_regions.india.legacy_v1.restx_api.instruments import api as instruments_ns
+from market_regions.india.legacy_v1.restx_api.intervals import api as intervals_ns
+from market_regions.india.legacy_v1.restx_api.margin import api as margin_ns
+from market_regions.india.legacy_v1.restx_api.market_holidays import api as market_holidays_ns
+from market_regions.india.legacy_v1.restx_api.market_timings import api as market_timings_ns
+from market_regions.india.legacy_v1.restx_api.modify_order import api as modify_order_ns
+from market_regions.india.legacy_v1.restx_api.multi_option_greeks import api as multi_option_greeks_ns
+from market_regions.india.legacy_v1.restx_api.multiquotes import api as multiquotes_ns
+from market_regions.india.legacy_v1.restx_api.openposition import api as openposition_ns
+from market_regions.india.legacy_v1.restx_api.option_chain import api as option_chain_ns
+from market_regions.india.legacy_v1.restx_api.option_greeks import api as option_greeks_ns
+from market_regions.india.legacy_v1.restx_api.option_symbol import api as option_symbol_ns
+from market_regions.india.legacy_v1.restx_api.options_multiorder import api as options_multiorder_ns
+from market_regions.india.legacy_v1.restx_api.options_order import api as options_order_ns
+from market_regions.india.legacy_v1.restx_api.orderbook import api as orderbook_ns
+from market_regions.india.legacy_v1.restx_api.orderstatus import api as orderstatus_ns
+from market_regions.india.legacy_v1.restx_api.ping import api as ping_ns
+from market_regions.india.legacy_v1.restx_api.place_order import api as place_order_ns
+from market_regions.india.legacy_v1.restx_api.place_smart_order import api as place_smart_order_ns
+from market_regions.india.legacy_v1.restx_api.pnl_symbols import api as pnl_symbols_ns
+from market_regions.india.legacy_v1.restx_api.positionbook import api as positionbook_ns
+from market_regions.india.legacy_v1.restx_api.quotes import api as quotes_ns
+from market_regions.india.legacy_v1.restx_api.search import api as search_ns
+from market_regions.india.legacy_v1.restx_api.split_order import api as split_order_ns
+from market_regions.india.legacy_v1.restx_api.symbol import api as symbol_ns
+from market_regions.india.legacy_v1.restx_api.synthetic_future import api as synthetic_future_ns
+from market_regions.india.legacy_v1.restx_api.telegram_bot import api as telegram_ns
+from market_regions.india.legacy_v1.restx_api.ticker import api as ticker_ns
+from market_regions.india.legacy_v1.restx_api.tradebook import api as tradebook_ns
 
 # Add namespaces
 api.add_namespace(place_order_ns, path="/placeorder")

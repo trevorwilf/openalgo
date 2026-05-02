@@ -129,14 +129,24 @@ def test_log_promoted_request_warns_on_legacy_lane_under_v2(caplog):
 def test_v1_route_does_not_call_helper():
     """Document the contract: legacy v1 routes do NOT call the promoted helper.
 
-    This is enforced by code review; the test grep-asserts that
-    `restx_api/_v1_lane_guard.py` (and any v1 handler) does not import
+    This is enforced by code review; the test grep-asserts that the
+    v1 lane guard (and any v1 handler) does not import
     `utils.observability`.
+
+    Phase 9-bis-physical (T-23 Group D) relocated the guard to
+    market_regions/india/legacy_v1/restx_api/_v1_lane_guard.py.
     """
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[2]
-    v1_guard = repo_root / "restx_api" / "_v1_lane_guard.py"
+    v1_guard = (
+        repo_root
+        / "market_regions"
+        / "india"
+        / "legacy_v1"
+        / "restx_api"
+        / "_v1_lane_guard.py"
+    )
     assert v1_guard.is_file()
     text = v1_guard.read_text(encoding="utf-8")
     assert "utils.observability" not in text, (

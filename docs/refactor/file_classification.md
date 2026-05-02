@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **898**.
+Total classified files: **904**.
 
 Classification semantics:
 
@@ -106,7 +106,7 @@ Classification semantics:
 - `utils/region_loader.py`
 - `utils/version.py`
 
-## LEGACY_INDIA (211 files)
+## LEGACY_INDIA (167 files)
 
 - `app.py`
 - `blueprints/__init__.py`
@@ -186,49 +186,6 @@ Classification semantics:
 - `database/user_db.py`
 - `mcp/mcpserver.py`
 - `restx_api/__init__.py`
-- `restx_api/account_schema.py`
-- `restx_api/analyzer.py`
-- `restx_api/basket_order.py`
-- `restx_api/cancel_all_order.py`
-- `restx_api/cancel_order.py`
-- `restx_api/chart_api.py`
-- `restx_api/close_position.py`
-- `restx_api/data_schemas.py`
-- `restx_api/depth.py`
-- `restx_api/expiry.py`
-- `restx_api/funds.py`
-- `restx_api/history.py`
-- `restx_api/holdings.py`
-- `restx_api/instruments.py`
-- `restx_api/intervals.py`
-- `restx_api/margin.py`
-- `restx_api/market_holidays.py`
-- `restx_api/market_timings.py`
-- `restx_api/modify_order.py`
-- `restx_api/multi_option_greeks.py`
-- `restx_api/multiquotes.py`
-- `restx_api/openposition.py`
-- `restx_api/option_chain.py`
-- `restx_api/option_greeks.py`
-- `restx_api/option_symbol.py`
-- `restx_api/options_multiorder.py`
-- `restx_api/options_order.py`
-- `restx_api/orderbook.py`
-- `restx_api/orderstatus.py`
-- `restx_api/ping.py`
-- `restx_api/place_order.py`
-- `restx_api/place_smart_order.py`
-- `restx_api/pnl_symbols.py`
-- `restx_api/positionbook.py`
-- `restx_api/quotes.py`
-- `restx_api/schemas.py`
-- `restx_api/search.py`
-- `restx_api/split_order.py`
-- `restx_api/symbol.py`
-- `restx_api/synthetic_future.py`
-- `restx_api/telegram_bot.py`
-- `restx_api/ticker.py`
-- `restx_api/tradebook.py`
 - `sandbox/__init__.py`
 - `sandbox/catch_up_processor.py`
 - `sandbox/execution_engine.py`
@@ -295,7 +252,6 @@ Classification semantics:
 - `utils.py`
 - `utils/api_analyzer.py`
 - `utils/auth_utils.py`
-- `utils/constants.py`
 - `utils/email_debug.py`
 - `utils/email_utils.py`
 - `utils/env_check.py`
@@ -320,11 +276,58 @@ Classification semantics:
 - `websocket_proxy/port_check.py`
 - `websocket_proxy/server.py`
 
-## REGION_PLUGIN (31 files)
+## REGION_PLUGIN (78 files)
 
 - `market_regions/india/__init__.py`
 - `market_regions/india/holidays.py`
 - `market_regions/india/legacy_v1/__init__.py`
+- `market_regions/india/legacy_v1/constants.py`
+- `market_regions/india/legacy_v1/restx_api/__init__.py`
+- `market_regions/india/legacy_v1/restx_api/_v1_lane_guard.py`
+- `market_regions/india/legacy_v1/restx_api/account_schema.py`
+- `market_regions/india/legacy_v1/restx_api/analyzer.py`
+- `market_regions/india/legacy_v1/restx_api/basket_order.py`
+- `market_regions/india/legacy_v1/restx_api/cancel_all_order.py`
+- `market_regions/india/legacy_v1/restx_api/cancel_order.py`
+- `market_regions/india/legacy_v1/restx_api/chart_api.py`
+- `market_regions/india/legacy_v1/restx_api/close_position.py`
+- `market_regions/india/legacy_v1/restx_api/data_schemas.py`
+- `market_regions/india/legacy_v1/restx_api/depth.py`
+- `market_regions/india/legacy_v1/restx_api/expiry.py`
+- `market_regions/india/legacy_v1/restx_api/funds.py`
+- `market_regions/india/legacy_v1/restx_api/history.py`
+- `market_regions/india/legacy_v1/restx_api/holdings.py`
+- `market_regions/india/legacy_v1/restx_api/instruments.py`
+- `market_regions/india/legacy_v1/restx_api/intervals.py`
+- `market_regions/india/legacy_v1/restx_api/margin.py`
+- `market_regions/india/legacy_v1/restx_api/market_holidays.py`
+- `market_regions/india/legacy_v1/restx_api/market_timings.py`
+- `market_regions/india/legacy_v1/restx_api/modify_order.py`
+- `market_regions/india/legacy_v1/restx_api/multi_option_greeks.py`
+- `market_regions/india/legacy_v1/restx_api/multiquotes.py`
+- `market_regions/india/legacy_v1/restx_api/openposition.py`
+- `market_regions/india/legacy_v1/restx_api/option_chain.py`
+- `market_regions/india/legacy_v1/restx_api/option_greeks.py`
+- `market_regions/india/legacy_v1/restx_api/option_symbol.py`
+- `market_regions/india/legacy_v1/restx_api/options_multiorder.py`
+- `market_regions/india/legacy_v1/restx_api/options_order.py`
+- `market_regions/india/legacy_v1/restx_api/orderbook.py`
+- `market_regions/india/legacy_v1/restx_api/orderstatus.py`
+- `market_regions/india/legacy_v1/restx_api/ping.py`
+- `market_regions/india/legacy_v1/restx_api/place_order.py`
+- `market_regions/india/legacy_v1/restx_api/place_smart_order.py`
+- `market_regions/india/legacy_v1/restx_api/pnl_symbols.py`
+- `market_regions/india/legacy_v1/restx_api/positionbook.py`
+- `market_regions/india/legacy_v1/restx_api/quotes.py`
+- `market_regions/india/legacy_v1/restx_api/schemas.py`
+- `market_regions/india/legacy_v1/restx_api/search.py`
+- `market_regions/india/legacy_v1/restx_api/split_order.py`
+- `market_regions/india/legacy_v1/restx_api/symbol.py`
+- `market_regions/india/legacy_v1/restx_api/synthetic_future.py`
+- `market_regions/india/legacy_v1/restx_api/telegram_bot.py`
+- `market_regions/india/legacy_v1/restx_api/ticker.py`
+- `market_regions/india/legacy_v1/restx_api/tradebook.py`
+- `market_regions/india/legacy_v1/translators.py`
 - `market_regions/india/locale.py`
 - `market_regions/india/options_grammar.py`
 - `market_regions/india/plugin.py`
@@ -921,13 +924,16 @@ Classification semantics:
 - `broker/zerodha/streaming/zerodha_websocket.py`
 - `broker/zerodha/translator.py`
 
-## COMPATIBILITY_SHIM (7 files)
+## COMPATIBILITY_SHIM (10 files)
 
 - `database/venue_offset.py`
 - `domain/translators.py`
-- `restx_api/_v1_lane_guard.py`
+- `restx_api/account_schema.py`
+- `restx_api/data_schemas.py`
+- `restx_api/schemas.py`
 - `services/instrument_resolver.py`
 - `services/order_router_service.py`
 - `services/venue_session_service.py`
+- `utils/constants.py`
 - `utils/venue_local_time.py`
 
