@@ -172,7 +172,17 @@ def test_feature_dict_fallback_triggers(app, capability_factory) -> None:
 
 BLUEPRINT_FILES = [
     REPO_ROOT / "blueprints" / "analyzer.py",
-    REPO_ROOT / "blueprints" / "sandbox.py",
+    # Phase 9-bis-2 final-cleanup (T-35 push) relocated the sandbox
+    # blueprint to market_regions/india/legacy_v1/blueprints/sandbox.py.
+    # The blueprints/sandbox.py path is a sys.modules-aliasing shim
+    # with no route definitions, so the AST scan must look at the new
+    # location.
+    REPO_ROOT
+    / "market_regions"
+    / "india"
+    / "legacy_v1"
+    / "blueprints"
+    / "sandbox.py",
 ]
 
 
