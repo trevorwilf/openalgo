@@ -20,6 +20,10 @@ import { useEffect, useMemo, useState } from 'react'
 import type { BrokerCapabilities, PlatformOrderType, PlatformQuantityUnit, PlatformTimeInForce } from '@/types/capabilities'
 import type { BrokerOrderRule, OrderSide } from '@/types/broker-rules'
 import { pickMatchingRule } from '@/types/broker-rules'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { cn } from '@/lib/utils'
 
 export interface Instrument {
   instrument_id?: string | null
@@ -219,126 +223,223 @@ export function PlaceOrderDialogV2({
     }
   }
 
+  // Native ``<select>`` styled with shadcn/Tailwind classes — the
+  // hidden-but-accessible cousin of the shadcn ``Select`` component.
+  // Keeps Playwright's ``selectOption()`` working (Radix Select is a
+  // combobox built from divs/portals; ``selectOption`` doesn't drive
+  // it) while still matching the rest of the UI's design language.
+  const selectClass = cn(
+    'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm',
+    'shadow-xs transition-[color,box-shadow] outline-none',
+    'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]',
+    'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
+  )
+
   return (
-    <form onSubmit={submit} data-testid="place-order-v2">
-      <div>
-        <label htmlFor="v2-symbol">Symbol</label>
-        <div id="v2-symbol" data-testid="v2-symbol">
-          {instrument.canonical_symbol} @ {instrument.venue_code}
+    <form onSubmit={submit} className="space-y-4 pt-2" data-testid="place-order-v2">
+      {/* Symbol header — prominent, read-only context */}
+      <div className="rounded-md border bg-muted/30 px-3 py-2">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground">
+          Trading
+        </div>
+        <div
+          id="v2-symbol"
+          data-testid="v2-symbol"
+          className="font-mono text-base font-semibold"
+        >
+          {instrument.canonical_symbol}{' '}
+          <span className="text-muted-foreground font-normal">
+            @ {instrument.venue_code}
+          </span>
         </div>
       </div>
 
-      <div>
-        <label htmlFor="v2-side">Side</label>
+      {/* Buy / Sell toggle — two big colour-coded buttons rather than a
+          dropdown. Native <select> still under the hood (data-testid
+          preserved + hidden) so Playwright's selectOption keeps
+          working without rewriting the test suite. */}
+      <div className="space-y-1.5">
+        <Label htmlFor="v2-side">Action</Label>
         <select
           id="v2-side"
           value={side}
           onChange={(e) => setSide(e.target.value as OrderSide)}
           data-testid="v2-side"
+          className="sr-only"
+          aria-label="Buy or sell"
         >
           <option value="BUY">Buy</option>
           <option value="SELL">Sell</option>
         </select>
-      </div>
-
-      <div>
-        <label htmlFor="v2-quantity-unit">Quantity Unit</label>
-        <select
-          id="v2-quantity-unit"
-          value={quantityUnit}
-          onChange={(e) => setQuantityUnit(e.target.value as PlatformQuantityUnit)}
-          data-testid="v2-quantity-unit"
-        >
-          {qtyUnits.map((u) => (
-            <option key={u} value={u}>
-              {u}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <label htmlFor="v2-quantity">Quantity</label>
-        <input
-          id="v2-quantity"
-          value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
-          data-testid="v2-quantity"
-        />
-        <div data-testid="v2-quantity-formatted">
-          {quantityUnit === 'NOTIONAL'
-            ? formatCurrency(quantity, instrument.currency)
-            : `${quantity} ${instrument.canonical_symbol}`}
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            type="button"
+            variant={side === 'BUY' ? 'default' : 'outline'}
+            onClick={() => setSide('BUY')}
+            className={cn(
+              'h-10 font-semibold',
+              side === 'BUY' && 'bg-green-600 hover:bg-green-700 text-white',
+            )}
+            data-testid="v2-side-buy"
+          >
+            Buy
+          </Button>
+          <Button
+            type="button"
+            variant={side === 'SELL' ? 'default' : 'outline'}
+            onClick={() => setSide('SELL')}
+            className={cn(
+              'h-10 font-semibold',
+              side === 'SELL' && 'bg-red-600 hover:bg-red-700 text-white',
+            )}
+            data-testid="v2-side-sell"
+          >
+            Sell
+          </Button>
         </div>
       </div>
 
-      <div>
-        <label htmlFor="v2-order-type">Order Type</label>
-        <select
-          id="v2-order-type"
-          value={orderType}
-          onChange={(e) => setOrderType(e.target.value as PlatformOrderType)}
-          data-testid="v2-order-type"
-        >
-          {orderTypes.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {priceRequired && (
-        <div>
-          <label htmlFor="v2-price">Limit Price ({instrument.currency})</label>
-          <input
-            id="v2-price"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            data-testid="v2-price"
+      {/* Quantity row — unit + amount side-by-side */}
+      <div className="grid grid-cols-[1fr_2fr] gap-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="v2-quantity-unit">Unit</Label>
+          <select
+            id="v2-quantity-unit"
+            value={quantityUnit}
+            onChange={(e) => setQuantityUnit(e.target.value as PlatformQuantityUnit)}
+            data-testid="v2-quantity-unit"
+            className={selectClass}
+          >
+            {qtyUnits.map((u) => (
+              <option key={u} value={u}>
+                {u}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="v2-quantity">Quantity</Label>
+          <Input
+            id="v2-quantity"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            data-testid="v2-quantity"
+            inputMode="decimal"
+            placeholder={quantityUnit === 'NOTIONAL' ? '100.00' : '1'}
           />
         </div>
-      )}
-
-      <div>
-        <label htmlFor="v2-tif">Time in Force</label>
-        <select
-          id="v2-tif"
-          value={timeInForce}
-          onChange={(e) => setTimeInForce(e.target.value as PlatformTimeInForce)}
-          data-testid="v2-tif"
-        >
-          {tifs.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
+      </div>
+      <div
+        data-testid="v2-quantity-formatted"
+        className="-mt-2 text-xs text-muted-foreground"
+      >
+        {quantityUnit === 'NOTIONAL'
+          ? `≈ ${formatCurrency(quantity, instrument.currency)} of ${instrument.canonical_symbol}`
+          : `${quantity} ${instrument.canonical_symbol} share${quantity === '1' ? '' : 's'}`}
       </div>
 
-      {showExtendedHoursToggle && (
-        <div>
-          <label htmlFor="v2-extended-hours">Extended Hours</label>
-          <input
-            id="v2-extended-hours"
-            type="checkbox"
-            checked={extendedHours}
-            onChange={(e) => setExtendedHours(e.target.checked)}
-            data-testid="v2-extended-hours"
-          />
+      {/* Order type + Limit price (when applicable) */}
+      <div
+        className={cn(
+          'grid gap-2',
+          priceRequired ? 'grid-cols-2' : 'grid-cols-1',
+        )}
+      >
+        <div className="space-y-1.5">
+          <Label htmlFor="v2-order-type">Order Type</Label>
+          <select
+            id="v2-order-type"
+            value={orderType}
+            onChange={(e) => setOrderType(e.target.value as PlatformOrderType)}
+            data-testid="v2-order-type"
+            className={selectClass}
+          >
+            {orderTypes.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
         </div>
-      )}
+        {priceRequired && (
+          <div className="space-y-1.5">
+            <Label htmlFor="v2-price">
+              Limit Price ({instrument.currency})
+            </Label>
+            <Input
+              id="v2-price"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              data-testid="v2-price"
+              inputMode="decimal"
+              placeholder="100.00"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Time in force + Extended hours */}
+      <div className="grid grid-cols-2 gap-2 items-end">
+        <div className="space-y-1.5">
+          <Label htmlFor="v2-tif">Time in Force</Label>
+          <select
+            id="v2-tif"
+            value={timeInForce}
+            onChange={(e) => setTimeInForce(e.target.value as PlatformTimeInForce)}
+            data-testid="v2-tif"
+            className={selectClass}
+          >
+            {tifs.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </div>
+        {showExtendedHoursToggle ? (
+          <label
+            htmlFor="v2-extended-hours"
+            className="flex items-center gap-2 h-9 px-3 rounded-md border bg-muted/20 cursor-pointer text-sm font-medium"
+          >
+            <input
+              id="v2-extended-hours"
+              type="checkbox"
+              checked={extendedHours}
+              onChange={(e) => setExtendedHours(e.target.checked)}
+              data-testid="v2-extended-hours"
+              className="h-4 w-4 rounded border-input accent-primary"
+            />
+            Extended hours
+          </label>
+        ) : (
+          <div />
+        )}
+      </div>
 
       {/* Product type is Indian-legacy only — never shown for
           non-IN_STOCK brokers. The absence of the selector is part
           of the contract and is asserted by the test suite. */}
       {showProductType && (
-        <div data-testid="v2-product-type-present">product type selector</div>
+        <div data-testid="v2-product-type-present" className="hidden">
+          product type selector
+        </div>
       )}
 
-      <button type="submit" disabled={submitting} data-testid="v2-submit">
-        {submitting ? 'Submitting…' : 'Place Order'}
-      </button>
+      <Button
+        type="submit"
+        disabled={submitting}
+        data-testid="v2-submit"
+        className={cn(
+          'w-full h-11 font-semibold',
+          side === 'BUY'
+            ? 'bg-green-600 hover:bg-green-700 text-white'
+            : 'bg-red-600 hover:bg-red-700 text-white',
+        )}
+      >
+        {submitting
+          ? 'Submitting…'
+          : `${side === 'BUY' ? 'Buy' : 'Sell'} ${instrument.canonical_symbol}`}
+      </Button>
     </form>
   )
 }
