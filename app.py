@@ -541,6 +541,21 @@ def setup_environment(app):
         except Exception as e:  # never block app startup on this hook
             logger.exception("Alpaca adapter installation failed: %s", e)
 
+        # Daily master-contract refresh scheduler. Reads the active
+        # broker's ``master_contract_refresh_policy`` from
+        # ``plugin.json`` and triggers ``async_master_contract_download``
+        # at the per-broker cutoff (``08:00 America/New_York`` for
+        # Alpaca by default). Without this, a Flask process kept
+        # running over multiple sessions serves stale symbol data.
+        try:
+            from services.master_contract_scheduler import (
+                start_master_contract_scheduler,
+            )
+
+            start_master_contract_scheduler()
+        except Exception as e:  # never block app startup
+            logger.exception("master-contract scheduler failed to start: %s", e)
+
     # Setup ngrok cleanup handlers (always register, regardless of ngrok being enabled)
     # This ensures proper cleanup on shutdown even if ngrok is enabled/disabled via UI
     # The actual tunnel creation happens in the __main__ block below
