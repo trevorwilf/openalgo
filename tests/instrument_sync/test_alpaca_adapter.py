@@ -179,3 +179,22 @@ def test_normalize_emits_broker_token_identifier():
     assert ident.broker_code == "alpaca"
     assert ident.venue_code == "XNAS"
     assert ident.identifier_value == "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"
+
+
+def test_resolve_venue_returns_normalized_value():
+    """The InstrumentSyncRunner calls resolve_venue per chunk; for
+    Alpaca it's a passthrough since normalize() already does the
+    venue mapping."""
+    adapter = AlpacaAdapter(json_path=FIXTURE)
+    rows = list(adapter.fetch_raw())
+    norm = adapter.normalize(rows[0])  # AAPL → XNAS
+    assert adapter.resolve_venue(norm) == "XNAS"
+
+
+def test_resolve_identifiers_returns_normalized_list():
+    adapter = AlpacaAdapter(json_path=FIXTURE)
+    rows = list(adapter.fetch_raw())
+    norm = adapter.normalize(rows[0])
+    idents = adapter.resolve_identifiers(norm)
+    assert len(idents) == 1
+    assert idents[0].identifier_type == "BROKER_TOKEN"

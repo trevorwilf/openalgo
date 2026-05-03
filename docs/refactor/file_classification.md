@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **997**.
+Total classified files: **998**.
 
 Classification semantics:
 
@@ -362,7 +362,7 @@ Classification semantics:
 - `services/screeners/providers/uk/__init__.py`
 - `services/screeners/providers/us/__init__.py`
 
-## BROKER_PLUGIN (571 files)
+## BROKER_PLUGIN (572 files)
 
 - `broker/__init__.py`
 - `broker/_mock_schwab_like/__init__.py`
@@ -409,6 +409,7 @@ Classification semantics:
 - `broker/alpaca/api/account_api.py`
 - `broker/alpaca/api/auth_api.py`
 - `broker/alpaca/api/bar_api.py`
+- `broker/alpaca/api/funds.py`
 - `broker/alpaca/api/order_api.py`
 - `broker/alpaca/api/quote_api.py`
 - `broker/alpaca/database/__init__.py`
