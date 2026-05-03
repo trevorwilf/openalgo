@@ -779,6 +779,19 @@ wheels = [
 ]
 
 [[package]]
+name = "eventlet"
+version = "0.41.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "dnspython" },
+    { name = "greenlet" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d3/90/32772ae7c9897554c56b9367b67478a3dc89c70d9b4d12e241746f6fdae3/eventlet-0.41.0.tar.gz", hash = "sha256:35df85f0ccd3e73effb6fd9f1ceae46b500b966c7da1817289c323a307bd397b", size = 565911, upload-time = "2026-04-02T07:33:23.605Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c3/1c/febe9acf1b4f0d67603b231c28d6d17d647d68c90c1963fecdeb64046d6d/eventlet-0.41.0-py3-none-any.whl", hash = "sha256:bc22396093cb4119ff7007776be6a5348a613ccd42eeb0f9519853a6efcbcabe", size = 364574, upload-time = "2026-04-02T07:33:21.756Z" },
+]
+
+[[package]]
 name = "executing"
 version = "2.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1789,6 +1802,7 @@ dependencies = [
     { name = "dnspython" },
     { name = "duckdb" },
     { name = "email-validator" },
+    { name = "eventlet" },
     { name = "executing" },
     { name = "fastjsonschema" },
     { name = "fastparquet" },
@@ -1952,6 +1966,7 @@ requires-dist = [
     { name = "dnspython", specifier = "==2.8.0" },
     { name = "duckdb", specifier = "==1.5.0" },
     { name = "email-validator", specifier = "==2.3.0" },
+    { name = "eventlet", specifier = ">=0.41.0" },
     { name = "executing", specifier = "==2.2.1" },
     { name = "fastjsonschema", specifier = "==2.21.2" },
     { name = "fastparquet", specifier = "==2025.12.0" },

@@ -149,9 +149,14 @@ test('fresh login → broker connect → dashboard → place order → cancel', 
   await page.getByTestId('v2-order-type').selectOption('LIMIT')
   await page.getByTestId('v2-price').fill('50.00')
 
+  // Generous timeout — under eventlet's cooperative scheduling,
+  // the WSGI worker shares one OS thread with the trade-updates
+  // stream + master-contract scheduler, so place-order latency is
+  // higher than under the parallel Flask dev server. 30s is well
+  // above the 99th percentile under eventlet load.
   const respPromise = page.waitForResponse(
     (r) => r.url().includes('/api/v2/orders') && r.request().method() === 'POST',
-    { timeout: 10_000 },
+    { timeout: 30_000 },
   )
   await page.getByTestId('v2-submit').click()
   const resp = await respPromise
