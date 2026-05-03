@@ -61,7 +61,13 @@ def get_broker_config():
 
     broker_name is always returned (needed to display the broker login button).
     broker_api_key and redirect_url are only returned when authenticated.
+    broker_mode (``"paper"`` / ``"live"`` / ``"unknown"``) is always
+    returned so the React header can render an unambiguous PAPER /
+    LIVE badge regardless of broker — operators must never have to
+    guess which environment they're connected to.
     """
+    from services.broker_mode_resolver import resolve_broker_mode
+
     REDIRECT_URL = os.getenv("REDIRECT_URL")
 
     # Extract broker name from redirect URL
@@ -71,6 +77,8 @@ def get_broker_config():
     if not broker_name:
         return jsonify({"status": "error", "message": "Broker not configured"}), 500
 
+    broker_mode = resolve_broker_mode(broker_name)
+
     # Return full config only for authenticated users
     if "user" in session:
         BROKER_API_KEY = os.getenv("BROKER_API_KEY")
@@ -79,6 +87,7 @@ def get_broker_config():
                 "status": "success",
                 "broker_name": broker_name,
                 "broker_api_key": BROKER_API_KEY,
+                "broker_mode": broker_mode,
                 "redirect_url": REDIRECT_URL,
             }
         )
@@ -89,6 +98,7 @@ def get_broker_config():
             "status": "success",
             "broker_name": broker_name,
             "broker_api_key": None,
+            "broker_mode": broker_mode,
             "redirect_url": REDIRECT_URL,
         }
     )

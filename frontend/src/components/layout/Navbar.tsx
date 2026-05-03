@@ -22,6 +22,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { isActiveRoute, mobileSheetItems, navItems, profileMenuItems } from '@/config/navigation'
+import { useBrokerMode } from '@/hooks/useBrokerMode'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { useBrokerStore } from '@/stores/brokerStore'
@@ -35,6 +36,7 @@ export function Navbar() {
   const { mode, appMode, toggleMode, toggleAppMode, isTogglingMode } = useThemeStore()
   const { user, logout } = useAuthStore()
   const { capabilities } = useBrokerStore()
+  const { mode: brokerMode } = useBrokerMode()
 
   // Filter menu items based on broker capabilities
   const filteredProfileMenuItems = profileMenuItems.filter((item) => {
@@ -192,6 +194,33 @@ export function Navbar() {
           {user?.broker && (
             <Badge variant="outline" className="hidden sm:flex text-xs">
               {user.broker}
+            </Badge>
+          )}
+
+          {/* Broker Paper/Live Pill — separate from the App Mode pill
+              below. The App Mode toggle controls OpenAlgo's analyzer
+              (virtual trading layer); THIS pill reflects the broker
+              environment itself (paper-api.alpaca.markets vs the
+              real one). Yellow PAPER is reassuring; red LIVE is
+              the safety signal. Hidden when the resolver couldn't
+              determine the mode (Indian brokers etc.) so we never
+              render a misleading badge. */}
+          {brokerMode === 'paper' && (
+            <Badge
+              className="hidden sm:flex text-xs bg-yellow-400 hover:bg-yellow-500 text-yellow-950 border-yellow-500"
+              data-testid="broker-paper-pill"
+              title="Connected to broker paper-trading environment"
+            >
+              PAPER
+            </Badge>
+          )}
+          {brokerMode === 'live' && (
+            <Badge
+              className="hidden sm:flex text-xs bg-red-600 hover:bg-red-700 text-white border-red-700"
+              data-testid="broker-live-pill"
+              title="Connected to broker LIVE environment — real money"
+            >
+              LIVE
             </Badge>
           )}
 
