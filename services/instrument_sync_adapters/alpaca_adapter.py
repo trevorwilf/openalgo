@@ -195,5 +195,20 @@ class AlpacaAdapter:
             identifiers=identifiers,
         )
 
+    # ------------------------------------------------------------------
+    # Protocol passthroughs
+    #
+    # InstrumentSyncRunner calls these on every chunk. Alpaca's
+    # ``normalize`` already produces the canonical venue_code +
+    # identifier list, so the resolvers are thin passthroughs.
+
+    def resolve_venue(self, normalized: NormalizedInstrumentRow) -> str:
+        return normalized.venue_code
+
+    def resolve_identifiers(
+        self, normalized: NormalizedInstrumentRow
+    ) -> list[IdentifierRecord]:
+        return list(normalized.identifiers)
+
 
 __all__ = ["AlpacaAdapter"]
