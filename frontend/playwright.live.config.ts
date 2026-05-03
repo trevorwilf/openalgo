@@ -19,7 +19,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5000'
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: /(live-instance|auth-instance|paper-trading|paper-trading-actions)\.spec\.ts/,
+  testMatch: /(live-instance|auth-instance|paper-trading|paper-trading-actions|paper-trading-ui-click)\.spec\.ts/,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,

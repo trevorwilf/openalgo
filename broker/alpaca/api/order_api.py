@@ -241,15 +241,24 @@ class AlpacaOrderTranslator:
             else:
                 body["trail_price"] = str(offset)
 
-        # Branch K — extended-hours flag for pre/post-market orders.
-        # Branch M — crypto trades 24/7 with no auction phases; the
-        # extended_hours flag is silently dropped when routing to
-        # CRYPTO so the operator can submit identical orders for
-        # equity / crypto without re-clearing the field.
-        if (
+        # Extended-hours flag — two paths feed into Alpaca's
+        # ``extended_hours: true`` body bit:
+        #
+        #   * Session-based (Branch K legacy): the operator picked
+        #     PRE_MARKET / POST_MARKET / EXTENDED via the session enum.
+        #   * Field-based (modern v2 dialog): the operator toggled the
+        #     ``extended_hours`` boolean independently of the session.
+        #
+        # Crypto trades 24/7 with no auction phases, so the flag is
+        # silently dropped on crypto venues (Branch M).
+        is_crypto_venue = (
+            instrument is not None and instrument.venue_code in _CRYPTO_VENUES
+        )
+        wants_extended = (
             order.session in _EXTENDED_HOURS_SESSIONS
-            and (instrument is None or instrument.venue_code not in _CRYPTO_VENUES)
-        ):
+            or getattr(order, "extended_hours", False)
+        )
+        if wants_extended and not is_crypto_venue:
             body["extended_hours"] = True
 
         if order.client_order_id:

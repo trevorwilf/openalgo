@@ -419,7 +419,11 @@ def test_from_native_order_response_happy():
         _Resolved(),
     )
     assert resp["order_id"] == "abcd-efgh"
-    assert resp["status"] == "accepted"
+    # v5 status normalization: native Alpaca strings are mapped to
+    # the canonical FIX-aligned vocabulary (`NEW`/`FILLED`/etc.) and
+    # the original native string is preserved under `native_status`.
+    assert resp["status"] == "NEW"
+    assert resp["native_status"] == "accepted"
     assert resp["filled_quantity"] == "0"
 
 
