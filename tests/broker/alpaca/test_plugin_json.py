@@ -52,7 +52,13 @@ def test_plugin_supports_fractional_and_notional():
     assert data["supports_notional_orders"] is True
 
 
-def test_plugin_does_not_enable_extended_hours():
-    """MVP scope: no extended-hours until a session rule matrix covers it."""
+def test_plugin_enables_extended_hours():
+    """Branch K — PRE_MARKET / POST_MARKET / EXTENDED sessions are
+    supported via Alpaca's ``extended_hours`` flag, gated on
+    type=LIMIT + TIF=DAY at the translator. Manifest declares the
+    capability.
+    """
     data = json.loads(PLUGIN.read_text(encoding="utf-8"))
-    assert data["supports_extended_hours"] is False
+    assert data["supports_extended_hours"] is True
+    assert "PRE_MARKET" in data["supported_sessions"]
+    assert "POST_MARKET" in data["supported_sessions"]
