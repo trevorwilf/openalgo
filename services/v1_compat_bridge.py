@@ -416,6 +416,185 @@ def _cancelorder() -> tuple[Any, int]:
     return jsonify(_v1_envelope(orderid=order_id)), 200
 
 
+def _multiquotes() -> tuple[Any, int]:
+    """``POST /api/v1/multiquotes`` — fetch one quote per (symbol, exchange).
+
+    The legacy v1 shape is ``{apikey, symbols: [{symbol, exchange}, …]}``
+    returning ``{status, results: [{symbol, exchange, data: QuotesData}]}``.
+    Bridges through Alpaca's quote adapter — one HTTP call per
+    symbol (Alpaca doesn't expose a batch latest-quote endpoint for
+    arbitrary symbol lists, but the REST calls are fast).
+    """
+    auth_token, broker, err = _api_key_to_auth()
+    if err:
+        return jsonify(_v1_error(err)), 401
+    if broker != "alpaca":
+        return jsonify(_v1_error("v1 bridge not implemented for this broker")), 501
+
+    body = request.get_json(silent=True) or {}
+    symbols = body.get("symbols") or []
+    if not isinstance(symbols, list):
+        return jsonify(_v1_error("symbols must be a list")), 400
+
+    try:
+        from broker.alpaca.api.auth_api import auth_handle_from_token
+        from broker.alpaca.api.quote_api import AlpacaQuoteAdapter
+        from domain.instrument_ref import InstrumentRef
+        from services.instrument_resolution import resolve_instrument
+
+        auth = auth_handle_from_token(auth_token)
+        adapter = AlpacaQuoteAdapter(auth=auth)
+        account_ctx = {
+            "broker_code": "alpaca",
+            "auth_token": auth_token,
+            "base_currency": "USD",
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.exception("v1 bridge multiquotes setup failed: %s", e)
+        return jsonify(_v1_error(str(e))), 502
+
+    results: list[dict[str, Any]] = []
+    for entry in symbols:
+        if not isinstance(entry, dict):
+            continue
+        sym = (entry.get("symbol") or "").upper()
+        ex = _alias_venue(entry.get("exchange"))
+        if not sym:
+            continue
+        try:
+            ref = InstrumentRef(venue_code=ex, canonical_symbol=sym)
+            resolved = resolve_instrument(ref, broker_code="alpaca")
+            if resolved is None:
+                continue
+            quote = adapter.get_quote(resolved, account_ctx)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("multiquotes %s@%s failed: %s", sym, ex, e)
+            continue
+        last = float(quote.last) if quote.last is not None else 0.0
+        results.append(
+            {
+                "symbol": sym,
+                "exchange": ex,
+                "data": {
+                    "ask": float(quote.ask) if quote.ask is not None else 0.0,
+                    "bid": float(quote.bid) if quote.bid is not None else 0.0,
+                    "high": last,
+                    "low": last,
+                    "ltp": last,
+                    "oi": 0,
+                    "open": last,
+                    "prev_close": last,
+                    "volume": 0,
+                },
+            }
+        )
+
+    # multiquotes uses {results: ...} at the top level (NOT under
+    # `data`). Mirroring that exactly so the React MarketDataManager
+    # parses the shape it already expects.
+    return jsonify({"status": "success", "results": results}), 200
+
+
+def _history() -> tuple[Any, int]:
+    """``POST /api/v1/history`` — historical OHLCV bars.
+
+    Legacy shape: ``{apikey, symbol, exchange, interval, start_date,
+    end_date}`` returning ``{status, data: [{timestamp, open, high,
+    low, close, volume}, …]}``. Bridges to the Alpaca bar adapter
+    with the v2-canonical interval vocabulary.
+    """
+    auth_token, broker, err = _api_key_to_auth()
+    if err:
+        return jsonify(_v1_error(err)), 401
+    if broker != "alpaca":
+        return jsonify(_v1_error("v1 bridge not implemented for this broker")), 501
+
+    body = request.get_json(silent=True) or {}
+    sym = (body.get("symbol") or "").upper()
+    ex = _alias_venue(body.get("exchange"))
+    interval_in = (body.get("interval") or "").strip()
+    start_date = (body.get("start_date") or "").strip()
+    end_date = (body.get("end_date") or "").strip()
+
+    if not (sym and interval_in and start_date and end_date):
+        return jsonify(_v1_error(
+            "symbol, interval, start_date and end_date are required"
+        )), 400
+
+    # Map the v1 interval vocabulary (1m / 5m / 15m / 30m / 1h / D)
+    # to the canonical promoted-lane interval vocabulary the Alpaca
+    # bar adapter consumes.
+    _INTERVAL_MAP = {
+        "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+        "1h": "1h", "1H": "1h",
+        "D": "1d", "1D": "1d", "d": "1d", "1d": "1d",
+        "W": "1w", "1W": "1w", "1w": "1w",
+        "M": "1mo", "1M": "1mo", "1mo": "1mo",
+    }
+    interval = _INTERVAL_MAP.get(interval_in)
+    if interval is None:
+        return jsonify(_v1_error(
+            f"interval {interval_in!r} not supported by Alpaca bridge "
+            f"(supported: {sorted(set(_INTERVAL_MAP)).__repr__()})"
+        )), 400
+
+    try:
+        from datetime import datetime, time, timezone
+
+        from broker.alpaca.api.auth_api import auth_handle_from_token
+        from broker.alpaca.api.bar_api import AlpacaBarAdapter
+        from domain.broker_market_data import NormalizedBarRequest
+        from domain.instrument_ref import InstrumentRef
+        from services.instrument_resolution import resolve_instrument
+
+        # Date strings are YYYY-MM-DD; treat as UTC midnight to
+        # match the legacy India semantics (which used IST midnight,
+        # but Alpaca's data is UTC-stamped and the operator picks
+        # the interval — close enough for paper trading).
+        start_dt = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
+        end_dt = datetime.combine(
+            datetime.fromisoformat(end_date).date(),
+            time(23, 59, 59),
+            tzinfo=timezone.utc,
+        )
+    except Exception as e:  # noqa: BLE001
+        return jsonify(_v1_error(f"invalid date format: {e}")), 400
+
+    try:
+        auth = auth_handle_from_token(auth_token)
+        adapter = AlpacaBarAdapter(auth=auth)
+        ref = InstrumentRef(venue_code=ex, canonical_symbol=sym)
+        resolved = resolve_instrument(ref, broker_code="alpaca")
+        if resolved is None:
+            return jsonify(_v1_error(f"instrument not in universe: {sym}@{ex}")), 404
+        account_ctx = {
+            "broker_code": "alpaca",
+            "auth_token": auth_token,
+            "base_currency": "USD",
+        }
+        bars = adapter.get_bars(
+            resolved,
+            NormalizedBarRequest(interval=interval, start=start_dt, end=end_dt),
+            account_ctx,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("v1 bridge history failed: %s", e)
+        return jsonify(_v1_error(str(e))), 502
+
+    rows = [
+        {
+            "timestamp": int(bar.ts.timestamp()),
+            "open": float(bar.open),
+            "high": float(bar.high),
+            "low": float(bar.low),
+            "close": float(bar.close),
+            "volume": int(float(bar.volume)) if bar.volume is not None else 0,
+        }
+        for bar in bars
+    ]
+    return jsonify(_v1_envelope(data=rows)), 200
+
+
 def _quotes() -> tuple[Any, int]:
     auth_token, broker, err = _api_key_to_auth()
     if err:
@@ -607,6 +786,10 @@ BRIDGES: dict[str, BridgeFn] = {
     "/api/v1/cancelorder/": _cancelorder,
     "/api/v1/quotes": _quotes,
     "/api/v1/quotes/": _quotes,
+    "/api/v1/multiquotes": _multiquotes,
+    "/api/v1/multiquotes/": _multiquotes,
+    "/api/v1/history": _history,
+    "/api/v1/history/": _history,
 }
 
 
