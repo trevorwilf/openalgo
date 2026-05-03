@@ -198,14 +198,31 @@ def test_alpaca_stream_feed_sip_picks_sip(monkeypatch):
     assert adapter._feed_kind() == "sip"
 
 
-def test_alpaca_stream_base_overrides_feed_choice(monkeypatch):
-    """Operators using the old env var keep working — full-URL
-    override wins."""
+def test_alpaca_stream_base_with_feed_suffix_returns_verbatim(monkeypatch):
+    """When ``ALPACA_STREAM_BASE`` already names a feed (ends in
+    ``/iex`` / ``/sip`` / ``/v1beta3/crypto/...``), the resolver
+    treats it as a complete URL and returns it verbatim. This is the
+    legacy "full-URL override" contract operators relied on.
+    """
+    monkeypatch.setenv("ALPACA_STREAM_BASE", "wss://custom.alpaca/test/iex")
+    monkeypatch.setenv("ALPACA_STREAM_FEED", "crypto")
+    adapter = AlpacaWebSocketAdapter()
+    adapter._auth = _fake_auth()
+    assert adapter._resolve_feed_url() == "wss://custom.alpaca/test/iex"
+
+
+def test_alpaca_stream_base_without_feed_suffix_appends_feed(monkeypatch):
+    """When ``ALPACA_STREAM_BASE`` is a *base* URL (doesn't already
+    name a feed), the resolver appends the feed selector. This is
+    the v6-polish-1 fix that resolved the user-reported 404 on
+    handshake when ``ALPACA_STREAM_BASE='wss://stream.data.alpaca.markets/v2'``
+    was set without ``/iex``.
+    """
     monkeypatch.setenv("ALPACA_STREAM_BASE", "wss://custom.alpaca/test")
     monkeypatch.setenv("ALPACA_STREAM_FEED", "crypto")
     adapter = AlpacaWebSocketAdapter()
     adapter._auth = _fake_auth()
-    assert adapter._resolve_feed_url() == "wss://custom.alpaca/test"
+    assert adapter._resolve_feed_url() == "wss://custom.alpaca/test/crypto"
 
 
 def test_subscribe_to_crypto_on_iex_feed_returns_feed_mismatch(monkeypatch):
