@@ -122,6 +122,14 @@ ALPACA_TO_ORDER_TYPE: dict[str, OrderType] = {
     "stop_limit": OrderType.STOP_LIMIT,
     "trailing_stop": OrderType.TRAILING_STOP,
 }
+# SUPPORTED_ORDER_TYPES tracks the ROUND-TRIPPABLE types only. The
+# auction order types (MARKET_ON_OPEN / LIMIT_ON_OPEN / *_ON_CLOSE)
+# collapse to "market" / "limit" at the Alpaca side and the auction
+# phase is carried by the TIF — that mapping is lossy on the
+# reverse direction so the round-trip dictionaries above don't list
+# them. The translator's _SUPPORTED_TYPES set in
+# ``broker/alpaca/api/order_api.py`` is the union (5 simple + 4
+# auction) and does the lossy translation inline.
 SUPPORTED_ORDER_TYPES: frozenset[OrderType] = frozenset(
     {
         OrderType.MARKET,
@@ -132,23 +140,46 @@ SUPPORTED_ORDER_TYPES: frozenset[OrderType] = frozenset(
     }
 )
 
+# Branch J — auction order types tracked separately. The translator
+# treats these as legal inputs but their wire form is type=market /
+# type=limit + the corresponding auction TIF (opg / cls).
+AUCTION_ORDER_TYPES: frozenset[OrderType] = frozenset(
+    {
+        OrderType.MARKET_ON_OPEN,
+        OrderType.LIMIT_ON_OPEN,
+        OrderType.MARKET_ON_CLOSE,
+        OrderType.LIMIT_ON_CLOSE,
+    }
+)
+
 # Time in force: OpenAlgo TimeInForce ↔ Alpaca lowercase string.
+# Branch J — extended TIFs landed: IOC, FOK, OPG, ATC (Alpaca's
+# wire form for ATC is the lowercase ``cls`` per the REST docs).
 TIF_TO_ALPACA: dict[TimeInForce, str] = {
     TimeInForce.DAY: "day",
     TimeInForce.GTC: "gtc",
-    # Forward-compat (Alpaca supports these but the translator
-    # currently rejects anything outside DAY/GTC):
-    # TimeInForce.IOC: "ioc",
-    # TimeInForce.FOK: "fok",
-    # TimeInForce.OPG: "opg",
-    # TimeInForce.ATC: "cls",   # Alpaca: at-close → "cls"
+    TimeInForce.IOC: "ioc",
+    TimeInForce.FOK: "fok",
+    TimeInForce.OPG: "opg",
+    TimeInForce.ATC: "cls",
 }
 ALPACA_TO_TIF: dict[str, TimeInForce] = {
     "day": TimeInForce.DAY,
     "gtc": TimeInForce.GTC,
+    "ioc": TimeInForce.IOC,
+    "fok": TimeInForce.FOK,
+    "opg": TimeInForce.OPG,
+    "cls": TimeInForce.ATC,
 }
 SUPPORTED_TIF: frozenset[TimeInForce] = frozenset(
-    {TimeInForce.DAY, TimeInForce.GTC}
+    {
+        TimeInForce.DAY,
+        TimeInForce.GTC,
+        TimeInForce.IOC,
+        TimeInForce.FOK,
+        TimeInForce.OPG,
+        TimeInForce.ATC,
+    }
 )
 
 

@@ -28,16 +28,50 @@ _SUPPORTED_TYPES = {
     OrderType.STOP,
     OrderType.STOP_LIMIT,
     OrderType.TRAILING_STOP,
+    # Branch J — auction order types. The domain validator requires
+    # them to be paired with TIF=OPG / TIF=ATC respectively; Alpaca
+    # represents the auction itself via the time_in_force value
+    # (``opg`` / ``cls``) on a regular ``market`` / ``limit`` order.
+    OrderType.MARKET_ON_OPEN,
+    OrderType.LIMIT_ON_OPEN,
+    OrderType.MARKET_ON_CLOSE,
+    OrderType.LIMIT_ON_CLOSE,
 }
-_SUPPORTED_TIF = {TimeInForce.DAY, TimeInForce.GTC}
+_SUPPORTED_TIF = {
+    TimeInForce.DAY,
+    TimeInForce.GTC,
+    # Branch J — extended TIFs.
+    TimeInForce.IOC,
+    TimeInForce.FOK,
+    TimeInForce.OPG,
+    TimeInForce.ATC,
+}
 
 # Branch I — OpenAlgo OrderType → Alpaca REST 'type' string.
+# Branch J — ON_OPEN / ON_CLOSE pseudo-types collapse to plain
+# market/limit at the Alpaca side; the auction phase is carried by
+# the TIF (opg / cls).
 _ORDER_TYPE_NATIVE: dict[OrderType, str] = {
     OrderType.MARKET: "market",
     OrderType.LIMIT: "limit",
     OrderType.STOP: "stop",
     OrderType.STOP_LIMIT: "stop_limit",
     OrderType.TRAILING_STOP: "trailing_stop",
+    OrderType.MARKET_ON_OPEN: "market",
+    OrderType.LIMIT_ON_OPEN: "limit",
+    OrderType.MARKET_ON_CLOSE: "market",
+    OrderType.LIMIT_ON_CLOSE: "limit",
+}
+
+# Branch J — TIF mapping. ``ATC`` collapses to Alpaca's lowercase
+# ``cls`` per Alpaca's REST docs.
+_TIF_NATIVE: dict[TimeInForce, str] = {
+    TimeInForce.DAY: "day",
+    TimeInForce.GTC: "gtc",
+    TimeInForce.IOC: "ioc",
+    TimeInForce.FOK: "fok",
+    TimeInForce.OPG: "opg",
+    TimeInForce.ATC: "cls",
 }
 
 
@@ -123,17 +157,23 @@ class AlpacaOrderTranslator:
             "symbol": symbol,
             "side": side,
             "type": _ORDER_TYPE_NATIVE[order.order_type],
-            "time_in_force": (
-                "day" if order.time_in_force == TimeInForce.DAY else "gtc"
-            ),
+            "time_in_force": _TIF_NATIVE[order.time_in_force],
         }
         if order.quantity_unit == QuantityUnit.NOTIONAL:
             body["notional"] = str(order.quantity)
         else:
             body["qty"] = str(order.quantity)
 
-        # LIMIT and STOP_LIMIT carry a limit price.
-        if order.order_type in {OrderType.LIMIT, OrderType.STOP_LIMIT}:
+        # LIMIT, STOP_LIMIT, LIMIT_ON_OPEN, LIMIT_ON_CLOSE all carry
+        # a limit price (the auction variants collapse to type=limit
+        # at the wire level, so they need the same payload field).
+        _LIMIT_PRICED = {
+            OrderType.LIMIT,
+            OrderType.STOP_LIMIT,
+            OrderType.LIMIT_ON_OPEN,
+            OrderType.LIMIT_ON_CLOSE,
+        }
+        if order.order_type in _LIMIT_PRICED:
             if order.price is None:
                 raise UnsupportedCapability(
                     broker_code=self.broker_code,

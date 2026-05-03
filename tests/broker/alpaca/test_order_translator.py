@@ -105,25 +105,91 @@ def test_validate_accepts_trailing_stop_order():
     AlpacaOrderTranslator().validate(order, _Resolved(), _ctx())
 
 
-def test_validate_rejects_market_on_open():
-    """ON_OPEN / ON_CLOSE are not yet declared in supported_order_types."""
+def test_to_native_market_on_open_emits_market_with_opg_tif():
+    """Branch J — MARKET_ON_OPEN collapses to type=market + tif=opg
+    on the wire (Alpaca represents the auction via the TIF)."""
     order = NormalizedOrderRequest(
         instrument=InstrumentRef(venue_code="XNAS", canonical_symbol="AAPL"),
         side=OrderSide.BUY,
         order_type=OrderType.MARKET_ON_OPEN,
         quantity=Decimal("1"),
         quantity_unit=QuantityUnit.WHOLE,
-        time_in_force=TimeInForce.OPG,  # OPG required for *_ON_OPEN
+        time_in_force=TimeInForce.OPG,
     )
-    with pytest.raises(UnsupportedCapability):
-        AlpacaOrderTranslator().validate(order, _Resolved(), _ctx())
+    body = AlpacaOrderTranslator().to_native(order, _Resolved(), _ctx())
+    assert body["type"] == "market"
+    assert body["time_in_force"] == "opg"
 
 
-def test_validate_rejects_ioc():
-    with pytest.raises(UnsupportedCapability):
-        AlpacaOrderTranslator().validate(
-            _order(tif=TimeInForce.IOC), _Resolved(), _ctx()
-        )
+def test_to_native_limit_on_close_emits_limit_with_cls_tif():
+    """Branch J — LIMIT_ON_CLOSE collapses to type=limit + tif=cls."""
+    order = NormalizedOrderRequest(
+        instrument=InstrumentRef(venue_code="XNAS", canonical_symbol="AAPL"),
+        side=OrderSide.SELL,
+        order_type=OrderType.LIMIT_ON_CLOSE,
+        quantity=Decimal("1"),
+        quantity_unit=QuantityUnit.WHOLE,
+        price=Decimal("180.00"),
+        time_in_force=TimeInForce.ATC,
+    )
+    body = AlpacaOrderTranslator().to_native(order, _Resolved(), _ctx())
+    assert body["type"] == "limit"
+    assert body["time_in_force"] == "cls"
+    assert body["limit_price"] == "180.00"
+
+
+def test_to_native_ioc_market_emits_ioc_tif():
+    body = AlpacaOrderTranslator().to_native(
+        _order(tif=TimeInForce.IOC), _Resolved(), _ctx()
+    )
+    assert body["time_in_force"] == "ioc"
+
+
+def test_to_native_fok_market_emits_fok_tif():
+    body = AlpacaOrderTranslator().to_native(
+        _order(tif=TimeInForce.FOK), _Resolved(), _ctx()
+    )
+    assert body["time_in_force"] == "fok"
+
+
+def test_validate_accepts_ioc():
+    """Branch J — IOC is now a supported TIF."""
+    AlpacaOrderTranslator().validate(
+        _order(tif=TimeInForce.IOC), _Resolved(), _ctx()
+    )
+
+
+def test_validate_accepts_fok():
+    AlpacaOrderTranslator().validate(
+        _order(tif=TimeInForce.FOK), _Resolved(), _ctx()
+    )
+
+
+def test_validate_accepts_opg_with_market_on_open():
+    """OPG TIF requires the corresponding *_ON_OPEN order type per
+    the domain validator."""
+    order = NormalizedOrderRequest(
+        instrument=InstrumentRef(venue_code="XNAS", canonical_symbol="AAPL"),
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET_ON_OPEN,
+        quantity=Decimal("1"),
+        quantity_unit=QuantityUnit.WHOLE,
+        time_in_force=TimeInForce.OPG,
+    )
+    AlpacaOrderTranslator().validate(order, _Resolved(), _ctx())
+
+
+def test_validate_accepts_atc_with_limit_on_close():
+    order = NormalizedOrderRequest(
+        instrument=InstrumentRef(venue_code="XNAS", canonical_symbol="AAPL"),
+        side=OrderSide.SELL,
+        order_type=OrderType.LIMIT_ON_CLOSE,
+        quantity=Decimal("1"),
+        quantity_unit=QuantityUnit.WHOLE,
+        price=Decimal("180.00"),
+        time_in_force=TimeInForce.ATC,
+    )
+    AlpacaOrderTranslator().validate(order, _Resolved(), _ctx())
 
 
 def test_validate_rejects_non_regular_session():
