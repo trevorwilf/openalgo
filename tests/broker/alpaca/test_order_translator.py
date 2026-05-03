@@ -192,13 +192,97 @@ def test_validate_accepts_atc_with_limit_on_close():
     AlpacaOrderTranslator().validate(order, _Resolved(), _ctx())
 
 
-def test_validate_rejects_non_regular_session():
+def test_validate_accepts_pre_market_limit_day_order():
+    """Branch K — extended-hours sessions are supported with the
+    Alpaca-required combination: type=LIMIT and TIF=DAY."""
+    AlpacaOrderTranslator().validate(
+        _order(
+            order_type=OrderType.LIMIT,
+            tif=TimeInForce.DAY,
+            price="180.00",
+            session=Session.PRE_MARKET,
+        ),
+        _Resolved(),
+        _ctx(),
+    )
+
+
+def test_validate_accepts_post_market_limit_day_order():
+    AlpacaOrderTranslator().validate(
+        _order(
+            order_type=OrderType.LIMIT,
+            tif=TimeInForce.DAY,
+            price="180.00",
+            session=Session.POST_MARKET,
+        ),
+        _Resolved(),
+        _ctx(),
+    )
+
+
+def test_validate_rejects_extended_hours_market_order():
+    """Alpaca extended-hours orders must be LIMIT — MARKET is rejected
+    fail-fast at the translator (saves a 422 round-trip to Alpaca)."""
     with pytest.raises(UnsupportedCapability):
         AlpacaOrderTranslator().validate(
-            _order(session=Session.PRE_MARKET),
+            _order(
+                order_type=OrderType.MARKET,
+                tif=TimeInForce.DAY,
+                session=Session.PRE_MARKET,
+            ),
             _Resolved(),
             _ctx(),
         )
+
+
+def test_validate_rejects_extended_hours_gtc_order():
+    """Alpaca extended-hours orders must use TIF=DAY — GTC is rejected."""
+    with pytest.raises(UnsupportedCapability):
+        AlpacaOrderTranslator().validate(
+            _order(
+                order_type=OrderType.LIMIT,
+                tif=TimeInForce.GTC,
+                price="180.00",
+                session=Session.POST_MARKET,
+            ),
+            _Resolved(),
+            _ctx(),
+        )
+
+
+def test_validate_rejects_unsupported_session():
+    """OPENING_AUCTION etc. remain unsupported — the four
+    Alpaca-supported sessions are REGULAR / PRE_MARKET / POST_MARKET /
+    EXTENDED."""
+    with pytest.raises(UnsupportedCapability):
+        AlpacaOrderTranslator().validate(
+            _order(session=Session.OPENING_AUCTION),
+            _Resolved(),
+            _ctx(),
+        )
+
+
+def test_to_native_extended_hours_emits_flag():
+    body = AlpacaOrderTranslator().to_native(
+        _order(
+            order_type=OrderType.LIMIT,
+            tif=TimeInForce.DAY,
+            price="180.00",
+            session=Session.PRE_MARKET,
+        ),
+        _Resolved(),
+        _ctx(),
+    )
+    assert body["extended_hours"] is True
+
+
+def test_to_native_regular_session_omits_flag():
+    body = AlpacaOrderTranslator().to_native(
+        _order(order_type=OrderType.LIMIT, price="180.00"),
+        _Resolved(),
+        _ctx(),
+    )
+    assert "extended_hours" not in body
 
 
 def test_validate_rejects_unknown_venue():
