@@ -237,13 +237,26 @@ def map_time_in_force(tif: TimeInForce) -> str:
 
 # OpenAlgo ComboType → Alpaca REST ``order_class`` value. SINGLE
 # omits the field entirely (Alpaca defaults to ``simple``).
+#
+# ``BRACKET`` (the canonical "parent + take-profit + stop-loss"
+# pattern) is functionally identical to Alpaca's ``bracket``
+# order_class, which OpenAlgo also exposes as ``OTOCO``. The
+# translator accepts both — operators picking the more obviously-
+# named ``BRACKET`` get the same Alpaca payload.
 COMBO_TYPE_TO_ALPACA: dict[ComboType, str] = {
     ComboType.OTO: "oto",
     ComboType.OCO: "oco",
     ComboType.OTOCO: "bracket",
+    ComboType.BRACKET: "bracket",
 }
 SUPPORTED_COMBO_TYPES: frozenset[ComboType] = frozenset(
-    {ComboType.SINGLE, ComboType.OTO, ComboType.OCO, ComboType.OTOCO}
+    {
+        ComboType.SINGLE,
+        ComboType.OTO,
+        ComboType.OCO,
+        ComboType.OTOCO,
+        ComboType.BRACKET,
+    }
 )
 
 
