@@ -1,9 +1,19 @@
-import { ArrowUpDown, ChevronLeft, ChevronRight, Copy, Search as SearchIcon } from 'lucide-react'
+import { ArrowUpDown, ChevronLeft, ChevronRight, Copy, Search as SearchIcon, TrendingUp } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { showToast } from '@/utils/toast'
 import { Badge } from '@/components/ui/badge'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { venueLabel } from '@/lib/venue_labels'
+import { PlaceOrderEntry } from '@/components/trading/PlaceOrderEntry'
+import type { Instrument as TradeInstrument } from '@/components/trading/PlaceOrderDialogV2'
+import { useBrokerStore } from '@/stores/brokerStore'
+import type { BrokerOrderRule } from '@/types/broker-rules'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -32,6 +42,7 @@ interface SearchResult {
   lotsize: number | null
   contract_value: number | null
   freeze_qty: number | null
+  instrumenttype?: string
 }
 
 type SortKey =
@@ -57,10 +68,63 @@ export default function Search() {
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState<number | 'all'>(25)
 
+  // Place-order dialog state.
+  const [tradingRow, setTradingRow] = useState<SearchResult | null>(null)
+  const [apikey, setApikey] = useState<string>('')
+  const [rules, setRules] = useState<BrokerOrderRule[]>([])
+  const capabilities = useBrokerStore((s) => s.capabilities)
+  const fetchCapabilities = useBrokerStore((s) => s.fetchCapabilities)
+
   useEffect(() => {
     fetchResults()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Fetch capabilities once when the page mounts so the place-order
+  // dialog can render the correct controls when the user clicks Trade.
+  useEffect(() => {
+    if (!capabilities) {
+      fetchCapabilities().catch(() => {
+        // brokerStore handles the error state internally.
+      })
+    }
+  }, [capabilities, fetchCapabilities])
+
+  // Lazily fetch the API key + broker rules the first time the user
+  // opens the trade dialog (avoids paying the cost on every search
+  // page mount).
+  useEffect(() => {
+    if (tradingRow === null) return
+    if (!apikey) {
+      fetch('/apikey', {
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      })
+        .then((r) => r.json())
+        .then((j) => setApikey(j.api_key || ''))
+        .catch(() => setApikey(''))
+    }
+    if (rules.length === 0) {
+      fetch('/api/broker/rules', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : { rules: [] }))
+        .then((j) => setRules(j.rules || []))
+        .catch(() => setRules([]))
+    }
+  }, [tradingRow, apikey, rules.length])
+
+  const tradingInstrument: TradeInstrument | null = useMemo(() => {
+    if (!tradingRow) return null
+    return {
+      instrument_id: tradingRow.token,
+      venue_code: tradingRow.exchange,
+      canonical_symbol: tradingRow.symbol,
+      asset_class: tradingRow.instrumenttype || 'EQUITY',
+      currency: 'USD',
+      lot_size: tradingRow.lotsize,
+      tick_size: null,
+      supports_fractional: capabilities?.supports_fractional === true,
+    }
+  }, [tradingRow, capabilities])
 
   const fetchResults = async () => {
     setIsLoading(true)
@@ -226,6 +290,7 @@ export default function Search() {
                   <SortableHeader column="token" label="Token" />
                   <SortableHeader column="lotsize" label="Lot Size" />
                   <SortableHeader column="freeze_qty" label="Freeze Qty" />
+                  <TableHead>Trade</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -269,6 +334,18 @@ export default function Search() {
                       <TableCell className="font-mono text-sm">{row.token}</TableCell>
                       <TableCell>{row.contract_value != null && row.contract_value !== 1 ? row.contract_value : (row.lotsize ?? '-')}</TableCell>
                       <TableCell>{row.freeze_qty ?? '-'}</TableCell>
+                      <TableCell>
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => setTradingRow(row)}
+                          data-testid={`trade-${row.symbol}-${row.exchange}`}
+                          title="Place an order on this symbol"
+                        >
+                          <TrendingUp className="h-3 w-3 mr-1" />
+                          Trade
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
@@ -325,6 +402,52 @@ export default function Search() {
           </Select>
         </div>
       )}
+
+      {/* Place-order dialog (capability-native v2 path). Renders as a
+          modal triggered by clicking "Trade" on a search row. */}
+      <Dialog
+        open={tradingRow !== null}
+        onOpenChange={(open) => {
+          if (!open) setTradingRow(null)
+        }}
+      >
+        <DialogContent className="max-w-xl" data-testid="place-order-dialog">
+          <DialogHeader>
+            <DialogTitle>
+              Place Order — {tradingRow?.symbol}{' '}
+              <span className="text-sm font-normal text-muted-foreground">
+                ({venueLabel(tradingRow?.exchange ?? '')})
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+          {capabilities && tradingInstrument && apikey && (
+            <PlaceOrderEntry
+              apikey={apikey}
+              capabilities={capabilities}
+              rules={rules}
+              instrument={tradingInstrument}
+              onSubmit={(_payload, response) => {
+                const orderId =
+                  (response as { data?: { order_id?: string } })?.data
+                    ?.order_id ?? 'submitted'
+                showToast.success(`Order placed: ${orderId}`, 'orders')
+                setTradingRow(null)
+              }}
+              onError={(err) => {
+                const msg =
+                  (err as { error?: { message?: string } })?.error?.message
+                  ?? (typeof err === 'string' ? err : 'order failed')
+                showToast.error(`Order failed: ${msg}`, 'orders')
+              }}
+            />
+          )}
+          {(!capabilities || !apikey) && (
+            <div className="text-sm text-muted-foreground">
+              Loading broker capabilities and API key…
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

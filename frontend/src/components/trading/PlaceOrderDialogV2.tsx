@@ -173,20 +173,33 @@ export function PlaceOrderDialogV2({
     e.preventDefault()
     setSubmitting(true)
     try {
+      // InstrumentRef accepts exactly one of:
+      //   (instrument_id) | (venue_code + canonical_symbol) |
+      //   (identifier_type + identifier_value)
+      // Prefer instrument_id when present; otherwise fall back to the
+      // venue + canonical pair. Sending all three at once is rejected
+      // server-side with "got multiple".
+      const instrumentRef = instrument.instrument_id
+        ? { instrument_id: instrument.instrument_id }
+        : {
+            venue_code: instrument.venue_code,
+            canonical_symbol: instrument.canonical_symbol,
+          }
       const body: Record<string, unknown> = {
         apikey,
-        instrument: {
-          venue_code: instrument.venue_code,
-          canonical_symbol: instrument.canonical_symbol,
-          ...(instrument.instrument_id ? { instrument_id: instrument.instrument_id } : {}),
-        },
+        instrument: instrumentRef,
         side,
         order_type: orderType,
         quantity,
         quantity_unit: quantityUnit,
         time_in_force: timeInForce,
       }
-      if (priceRequired) body.price = price
+      if (priceRequired) {
+        // NormalizedOrderRequest validates `price` as a Decimal. An
+        // empty string fails parsing — only attach when the operator
+        // entered something.
+        if (price && price.trim() !== '') body.price = price
+      }
       if (showExtendedHoursToggle) body.extended_hours = extendedHours
       const resp = await fetch('/api/v2/orders', {
         method: 'POST',

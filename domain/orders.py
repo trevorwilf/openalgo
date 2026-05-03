@@ -67,6 +67,14 @@ class NormalizedOrderRequest(BaseModel):
     currency: Currency | None = None
     client_order_id: str | None = None
     strategy_tag: str | None = None
+    # Promoted-lane brokers (Alpaca, IBKR, Schwab, Webull, …) gate
+    # extended-session execution on a single boolean rather than a
+    # session enum because the underlying broker API uses one. We
+    # expose it as a typed top-level field so consumers don't have to
+    # smuggle it through ``extra`` (which would lose schema discovery
+    # at the v2 swagger layer). Defaults False — order routes only
+    # through the regular session unless the operator opts in.
+    extended_hours: bool = False
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
