@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **992**.
+Total classified files: **993**.
 
 Classification semantics:
 
@@ -142,7 +142,7 @@ Classification semantics:
 - `utils/traffic_logger.py`
 - `utils/version.py`
 
-## LEGACY_INDIA (49 files)
+## LEGACY_INDIA (50 files)
 
 - `app.py`
 - `blueprints/__init__.py`
@@ -179,6 +179,7 @@ Classification semantics:
 - `database/cache_restoration.py`
 - `mcp/mcpserver.py`
 - `restx_api/__init__.py`
+- `services/instrument_sync_adapters/alpaca_adapter.py`
 - `services/instrument_sync_adapters/delta_adapter.py`
 - `services/instrument_sync_adapters/zerodha_adapter.py`
 - `services/instruments_service.py`

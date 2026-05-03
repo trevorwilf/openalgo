@@ -1,0 +1,93 @@
+[
+  {
+    "id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+    "class": "us_equity",
+    "exchange": "NASDAQ",
+    "symbol": "AAPL",
+    "name": "Apple Inc. Common Stock",
+    "status": "active",
+    "tradable": true,
+    "marginable": true,
+    "shortable": true,
+    "easy_to_borrow": true,
+    "fractionable": true,
+    "maintenance_margin_requirement": 30
+  },
+  {
+    "id": "8ccae427-5dd0-45b3-b5fe-7ba5e422c766",
+    "class": "us_equity",
+    "exchange": "NASDAQ",
+    "symbol": "TSLA",
+    "name": "Tesla, Inc. Common Stock",
+    "status": "active",
+    "tradable": true,
+    "marginable": true,
+    "shortable": true,
+    "easy_to_borrow": true,
+    "fractionable": true,
+    "maintenance_margin_requirement": 30
+  },
+  {
+    "id": "4ce9353b-9ddc-4d54-83f0-3147ab36cc66",
+    "class": "us_equity",
+    "exchange": "NYSE",
+    "symbol": "JPM",
+    "name": "JPMorgan Chase & Co. Common Stock",
+    "status": "active",
+    "tradable": true,
+    "marginable": true,
+    "shortable": true,
+    "easy_to_borrow": true,
+    "fractionable": true,
+    "maintenance_margin_requirement": 30
+  },
+  {
+    "id": "85f57b0f-19f8-4e1a-b2b1-7a3f3c5db3aa",
+    "class": "us_equity",
+    "exchange": "ARCA",
+    "symbol": "SPY",
+    "name": "SPDR S&P 500 ETF Trust",
+    "status": "active",
+    "tradable": true,
+    "marginable": true,
+    "shortable": true,
+    "easy_to_borrow": true,
+    "fractionable": true,
+    "maintenance_margin_requirement": 30
+  },
+  {
+    "id": "d8e5fa86-ad19-4f6c-8a1e-3b0d6c7d51fd",
+    "class": "us_equity",
+    "exchange": "BATS",
+    "symbol": "VOO",
+    "name": "Vanguard S&P 500 ETF",
+    "status": "active",
+    "tradable": true,
+    "marginable": true,
+    "shortable": true,
+    "easy_to_borrow": false,
+    "fractionable": false
+  },
+  {
+    "id": "0ef3a1c4-2f1e-4d9c-aaaa-7b3a3a0d12ef",
+    "class": "us_equity",
+    "exchange": "OTC",
+    "symbol": "RDDT",
+    "name": "Reddit, Inc.",
+    "status": "active",
+    "tradable": false,
+    "marginable": false,
+    "shortable": false,
+    "easy_to_borrow": false,
+    "fractionable": false
+  },
+  {
+    "id": "f4b3a2c1-2f1e-4d9c-bbbb-7b3a3a0d12ef",
+    "class": "us_equity",
+    "exchange": "PINK",
+    "symbol": "BAYRY",
+    "name": "Bayer AG ADR (unmapped exchange — should be skipped)",
+    "status": "active",
+    "tradable": true
+  }
+]

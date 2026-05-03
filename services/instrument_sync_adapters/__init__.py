@@ -13,13 +13,15 @@ and sample fixtures.
 
 from __future__ import annotations
 
+from services.instrument_sync_adapters.alpaca_adapter import AlpacaAdapter
 from services.instrument_sync_adapters.delta_adapter import DeltaAdapter
 from services.instrument_sync_adapters.zerodha_adapter import ZerodhaAdapter
 
 ADAPTERS = {
     "zerodha": ZerodhaAdapter,
     "deltaexchange": DeltaAdapter,
+    "alpaca": AlpacaAdapter,
 }
 
 
-__all__ = ["ADAPTERS", "DeltaAdapter", "ZerodhaAdapter"]
+__all__ = ["ADAPTERS", "AlpacaAdapter", "DeltaAdapter", "ZerodhaAdapter"]
