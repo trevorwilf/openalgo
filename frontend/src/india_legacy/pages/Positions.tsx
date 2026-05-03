@@ -55,6 +55,7 @@ import { useLivePrice } from '@/hooks/useLivePrice'
 import { usePageVisibility } from '@/hooks/usePageVisibility'
 import { useFormatCurrency } from '@/lib/format/currency'
 import { cn, sanitizeCSV } from '@/lib/utils'
+import { venueLabel } from '@/lib/venue_labels'
 import { useAuthStore } from '@/stores/authStore'
 import { useSupportedExchanges } from '@/india_legacy/hooks/useSupportedExchanges'
 import { onModeChange } from '@/stores/themeStore'
@@ -948,8 +949,9 @@ export default function Positions() {
                                 <Badge
                                   variant="outline"
                                   className={EXCHANGE_COLORS[position.exchange] || ''}
+                                  title={position.exchange}
                                 >
-                                  {position.exchange}
+                                  {venueLabel(position.exchange)}
                                 </Badge>
                               </TableCell>
                               {!isCrypto && (

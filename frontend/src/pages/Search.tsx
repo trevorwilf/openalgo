@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { showToast } from '@/utils/toast'
 import { Badge } from '@/components/ui/badge'
+import { venueLabel } from '@/lib/venue_labels'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -260,10 +261,10 @@ export default function Search() {
                         {row.name}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{row.exchange}</Badge>
+                        <Badge variant="outline" title={row.exchange}>{venueLabel(row.exchange)}</Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{row.brexchange}</Badge>
+                        <Badge variant="secondary" title={row.brexchange}>{venueLabel(row.brexchange)}</Badge>
                       </TableCell>
                       <TableCell className="font-mono text-sm">{row.token}</TableCell>
                       <TableCell>{row.contract_value != null && row.contract_value !== 1 ? row.contract_value : (row.lotsize ?? '-')}</TableCell>

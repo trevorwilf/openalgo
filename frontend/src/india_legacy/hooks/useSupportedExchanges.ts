@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useBrokerStore } from '@/stores/brokerStore'
 import { INDIA_LEGACY_FALLBACK_EXCHANGES } from '@/india_legacy/lib/legacy_fallback_exchanges'
+import { venueLabel } from '@/lib/venue_labels'
 
 /** Exchange option for dropdowns */
 export interface ExchangeOption {
@@ -82,18 +83,24 @@ export function useSupportedExchanges(opts: UseSupportedExchangesOptions = {}) {
       fromCap ?? (allowLegacyFallback && indiaShaped ? INDIA_LEGACY_FALLBACK_EXCHANGES : [])
     const isCrypto = capabilities?.broker_type === 'crypto'
 
-    // All exchanges from plugin.json
-    const allExchanges: ExchangeOption[] = supported.map((e) => ({ value: e, label: e }))
+    // All exchanges from plugin.json. ``venueLabel`` maps ISO 10383
+    // MIC codes (XNAS, XNYS, ARCX, ...) to the names a trader
+    // actually recognizes (NASDAQ, NYSE, NYSE Arca, ...) and passes
+    // Indian codes (NSE, BSE, NFO, ...) through unchanged.
+    const allExchanges: ExchangeOption[] = supported.map((e) => ({
+      value: e,
+      label: venueLabel(e),
+    }))
 
     // Trading exchanges: exclude _INDEX suffixed exchanges
     const tradingExchanges: ExchangeOption[] = supported
       .filter((e) => !INDEX_EXCHANGES.has(e))
-      .map((e) => ({ value: e, label: e }))
+      .map((e) => ({ value: e, label: venueLabel(e) }))
 
     // F&O exchanges: NFO, BFO, or CRYPTO (only those the broker supports)
     const fnoExchanges: ExchangeOption[] = supported
       .filter((e) => FNO_CODES.has(e))
-      .map((e) => ({ value: e, label: e }))
+      .map((e) => ({ value: e, label: venueLabel(e) }))
 
     // Exchanges shown inside /tools pages (Strategy Builder, Option Chain,
     // OI Tracker, Straddle Chart, Custom Straddle etc.). MCX and CDS are

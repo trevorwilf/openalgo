@@ -28,6 +28,7 @@ import { useLivePrice, calculateLiveStats } from '@/hooks/useLivePrice'
 import { usePageVisibility } from '@/hooks/usePageVisibility'
 import { useFormatCurrency } from '@/lib/format/currency'
 import { cn, sanitizeCSV } from '@/lib/utils'
+import { venueLabel } from '@/lib/venue_labels'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
 import type { Holding, HoldingsStats } from '@/types/trading'
@@ -341,7 +342,7 @@ export default function Holdings() {
                     <TableRow key={`${holding.symbol}-${holding.exchange}-${index}`}>
                       <TableCell className="font-medium">{holding.symbol}</TableCell>
                       <TableCell>
-                        <Badge variant="outline">{holding.exchange}</Badge>
+                        <Badge variant="outline" title={holding.exchange}>{venueLabel(holding.exchange)}</Badge>
                       </TableCell>
                       <TableCell className="text-right font-mono">{holding.quantity}</TableCell>
                       <TableCell className="text-right font-mono">

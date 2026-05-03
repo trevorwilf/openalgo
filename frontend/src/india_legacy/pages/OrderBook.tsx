@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { venueLabel } from '@/lib/venue_labels'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
@@ -647,7 +648,7 @@ export default function OrderBook() {
                       <TableRow key={`${order.orderid}-${index}`}>
                         <TableCell className="font-medium">{order.symbol}</TableCell>
                         <TableCell>
-                          <Badge variant="outline">{order.exchange}</Badge>
+                          <Badge variant="outline" title={order.exchange}>{venueLabel(order.exchange)}</Badge>
                         </TableCell>
                         <TableCell>
                           <Badge
@@ -739,7 +740,9 @@ export default function OrderBook() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-lg font-semibold">{modifyingOrder?.symbol}</div>
-                <div className="text-sm text-muted-foreground">{modifyingOrder?.exchange}</div>
+                <div className="text-sm text-muted-foreground" title={modifyingOrder?.exchange}>
+                  {venueLabel(modifyingOrder?.exchange)}
+                </div>
               </div>
               <div className="text-right">
                 <div className="text-xs text-muted-foreground">Order ID</div>

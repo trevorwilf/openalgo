@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/table'
 import { useFormatCurrency } from '@/lib/format/currency'
 import { cn, sanitizeCSV } from '@/lib/utils'
+import { venueLabel } from '@/lib/venue_labels'
 import { useAuthStore } from '@/stores/authStore'
 import { useSupportedExchanges } from '@/india_legacy/hooks/useSupportedExchanges'
 import { onModeChange } from '@/stores/themeStore'
@@ -526,7 +527,7 @@ export default function TradeBook() {
                     <TableRow key={`${trade.orderid}-${index}`}>
                       <TableCell className="font-medium">{trade.symbol}</TableCell>
                       <TableCell>
-                        <Badge variant="outline">{trade.exchange}</Badge>
+                        <Badge variant="outline" title={trade.exchange}>{venueLabel(trade.exchange)}</Badge>
                       </TableCell>
                       {!isCrypto && (
                       <TableCell>
