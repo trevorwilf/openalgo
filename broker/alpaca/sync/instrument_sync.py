@@ -28,6 +28,9 @@ from typing import Any, Iterable
 import httpx
 
 from broker.alpaca.api.auth_api import AlpacaAuth, authenticate
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
 from database import instruments_repo
 from database.instruments_repo import (
     BrokerMapRow,
@@ -148,7 +151,21 @@ def sync_instruments(
     """
     _venues_for_us()
     if assets is None:
-        rows = fetch_assets(auth=auth, client=client)
+        rows = list(fetch_assets(auth=auth, client=client, asset_class="us_equity"))
+        # Crypto sync — Alpaca exposes spot crypto pairs on a separate
+        # asset_class slice. They live on the synthetic
+        # ``ALPACA_CRYPTO`` venue (see ``plugin.json``
+        # supported_venue_codes) and carry slash-separated symbols
+        # like ``BTC/USD`` / ``ETH/BTC``. Crypto markets are 24/7 so
+        # the sync runs every refresh — there's no daily-cutoff risk.
+        try:
+            crypto_rows = list(
+                fetch_assets(auth=auth, client=client, asset_class="crypto")
+            )
+        except Exception:  # pragma: no cover — best-effort
+            logger.exception("Alpaca crypto asset fetch failed; skipping crypto sync")
+            crypto_rows = []
+        rows.extend(crypto_rows)
     else:
         rows = list(assets)
 
@@ -163,17 +180,30 @@ def sync_instruments(
         symbol = row.get("symbol")
         if not symbol:
             continue
-        venue = _normalize_venue(row.get("exchange"))
+        is_crypto = (row.get("class") or "").lower() == "crypto"
+        if is_crypto:
+            venue = "ALPACA_CRYPTO"
+            asset_class = "SPOT"
+            tick_size = Decimal("0.0001")  # finer than equities
+            currency = "USD"
+            quantity_precision = 9  # crypto fractionable by default
+        else:
+            venue = _normalize_venue(row.get("exchange"))
+            asset_class = "EQUITY"
+            tick_size = Decimal("0.01")
+            currency = "USD"
+            quantity_precision = 9 if row.get("fractionable") else 0
+
         existing = instruments_get_by_venue_symbol(venue, symbol)
         if existing is None:
             created = instruments_create(
                 venue_code=venue,
                 canonical_symbol=symbol,
-                asset_class="EQUITY",
+                asset_class=asset_class,
                 instrument_kind="CASH",
-                tick_size=Decimal("0.01"),
-                quantity_precision=9 if row.get("fractionable") else 0,
-                currency="USD",
+                tick_size=tick_size,
+                quantity_precision=quantity_precision,
+                currency=currency,
                 display_name=row.get("name"),
                 metadata={
                     "alpaca_id": row.get("id"),
@@ -182,6 +212,9 @@ def sync_instruments(
                     "shortable": row.get("shortable"),
                     "easy_to_borrow": row.get("easy_to_borrow"),
                     "fractionable": row.get("fractionable"),
+                    "min_order_size": row.get("min_order_size"),
+                    "min_trade_increment": row.get("min_trade_increment"),
+                    "price_increment": row.get("price_increment"),
                 },
             )
             new_instruments += 1
