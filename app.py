@@ -528,6 +528,19 @@ def setup_environment(app):
         except Exception as e:  # never block app startup on this hook
             logger.exception("v6 Phase 5-bis bootstrap failed: %s", e)
 
+        # Promoted-lane adapter registration for non-India brokers.
+        # The v2 dispatch matrix (ADR 0023, invariant 5) returns 503
+        # for non-India brokers without a registered adapter. Each
+        # promoted broker provides an ``install_<broker>_adapters``
+        # function that registers its quote/bar/position/balance
+        # adapters at startup.
+        try:
+            from broker.alpaca.api.install import install_alpaca_adapters
+
+            install_alpaca_adapters()
+        except Exception as e:  # never block app startup on this hook
+            logger.exception("Alpaca adapter installation failed: %s", e)
+
     # Setup ngrok cleanup handlers (always register, regardless of ngrok being enabled)
     # This ensures proper cleanup on shutdown even if ngrok is enabled/disabled via UI
     # The actual tunnel creation happens in the __main__ block below

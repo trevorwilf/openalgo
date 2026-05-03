@@ -292,8 +292,46 @@ def init_db():
 
     init_db_with_logging(Base, engine, "Sandbox DB", logger)
 
+    # Additive column migrations for SQLite. ``create_all`` only adds
+    # missing tables, never columns — so when v5 Phase 4 added
+    # ``region_code`` / ``currency`` / ``provider_code`` to the three
+    # sandbox tables (orders, positions, funds) any pre-existing
+    # ``db/sandbox.db`` is missing those columns and every read fails
+    # with ``OperationalError: no such column``. This block backfills
+    # the columns on existing DBs without dropping data.
+    _backfill_additive_columns()
+
     # Initialize default configuration
     init_default_config()
+
+
+def _backfill_additive_columns() -> None:
+    """Add the v5 region/currency/provider columns to the three
+    sandbox tables when missing. Idempotent — safe to call on every
+    startup.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    expected_cols = {
+        "region_code": "VARCHAR(20)",
+        "currency": "VARCHAR(8)",
+        "provider_code": "VARCHAR(50)",
+    }
+    target_tables = ("sandbox_orders", "sandbox_positions", "sandbox_funds")
+
+    with engine.begin() as conn:
+        for table in target_tables:
+            if table not in inspector.get_table_names():
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table)}
+            for col_name, col_type in expected_cols.items():
+                if col_name in existing:
+                    continue
+                logger.info(
+                    f"Sandbox DB: backfilling {table}.{col_name} ({col_type})"
+                )
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}"))
 
 
 def init_default_config():

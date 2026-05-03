@@ -94,3 +94,7 @@ frontend/dist
 # Windows NUL file
 nul
 
+# testing results
+frontend/test-results-live/*
+frontend/playwright-report-live/*
+test-results-live/*
