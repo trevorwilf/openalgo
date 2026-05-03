@@ -336,6 +336,36 @@ def _placeorder() -> tuple[Any, int]:
 
     inner = resp_dict.get("data") or resp_dict
     order_id = inner.get("order_id") or ""
+
+    # Publish OrderPlacedEvent so the SocketIO subscriber pushes a
+    # live update to the React UI's order book without polling. The
+    # async trade_updates stream catches externally-initiated orders;
+    # this synchronous publish covers the self-initiated path so the
+    # UI updates the instant the bridge returns.
+    try:
+        from events import OrderPlacedEvent
+        from utils.event_bus import bus
+
+        bus.publish(
+            OrderPlacedEvent(
+                mode="live",
+                api_type="placeorder",
+                strategy=str(body.get("strategy") or "ui"),
+                symbol=str(body.get("symbol") or "").upper(),
+                exchange=str(body.get("exchange") or "XNAS").upper(),
+                action=str(body.get("action") or "").upper(),
+                quantity=int(float(body.get("quantity") or 0)),
+                pricetype=str(body.get("price_type") or body.get("pricetype") or "").upper(),
+                product=str(body.get("product") or "MIS").upper(),
+                orderid=order_id,
+                request_data=body,
+                response_data={"orderid": order_id},
+                api_key=str(body.get("apikey") or ""),
+            )
+        )
+    except Exception:  # noqa: BLE001 - never break the order path on observability
+        logger.exception("v1 bridge: OrderPlacedEvent publish failed")
+
     return (
         jsonify(_v1_envelope(orderid=order_id)),
         200,
@@ -363,6 +393,25 @@ def _cancelorder() -> tuple[Any, int]:
     except Exception as e:  # noqa: BLE001
         logger.exception("v1 bridge cancel failed: %s", e)
         return jsonify(_v1_error(str(e))), 502
+
+    # Synchronous event so the React orderbook updates immediately.
+    try:
+        from events import OrderCancelledEvent
+        from utils.event_bus import bus
+
+        bus.publish(
+            OrderCancelledEvent(
+                mode="live",
+                api_type="cancelorder",
+                orderid=order_id,
+                status="canceled",
+                request_data={"orderid": order_id},
+                response_data={"status": "success"},
+                api_key=str(body.get("apikey") or ""),
+            )
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("v1 bridge: OrderCancelledEvent publish failed")
 
     return jsonify(_v1_envelope(orderid=order_id)), 200
 
