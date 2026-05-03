@@ -33,7 +33,12 @@ from domain.enums import (
 from domain.errors import UnsupportedCapability
 
 
-_SUPPORTED_VENUES = {"XNAS", "XNYS", "ARCX", "BATS"}
+_SUPPORTED_VENUES = {"XNAS", "XNYS", "ARCX", "BATS", "CRYPTO"}
+# Branch M — Alpaca's crypto symbol grammar uses '/' (BTC/USD) where
+# OpenAlgo's canonical form uses '-' (BTC-USD). The translator
+# substitutes at to_native time and the streaming adapter does the
+# inverse on inbound frames.
+_CRYPTO_VENUES = {"CRYPTO"}
 # Branch K — Alpaca supports REGULAR + extended-hours sessions
 # (PRE_MARKET 04:00-09:30 ET, POST_MARKET 16:00-20:00 ET). The
 # OpenAlgo EXTENDED session covers both pre and post; flag it as
@@ -218,6 +223,16 @@ class AlpacaOrderTranslator:
                 else (order.instrument.canonical_symbol or "")
             )
         )
+        # Branch M — crypto symbols: OpenAlgo canonical form uses '-'
+        # (BTC-USD), Alpaca's REST API uses '/' (BTC/USD). Substitute
+        # only when routing to the CRYPTO venue so equity tickers
+        # that happen to contain '-' are unaffected.
+        if (
+            instrument is not None
+            and instrument.venue_code in _CRYPTO_VENUES
+            and "-" in symbol
+        ):
+            symbol = symbol.replace("-", "/")
         side = "buy" if order.side == OrderSide.BUY else "sell"
         body: dict[str, Any] = {
             "symbol": symbol,
@@ -288,7 +303,14 @@ class AlpacaOrderTranslator:
                 body["trail_price"] = str(offset)
 
         # Branch K — extended-hours flag for pre/post-market orders.
-        if order.session in _EXTENDED_HOURS_SESSIONS:
+        # Branch M — crypto trades 24/7 with no auction phases; the
+        # extended_hours flag is silently dropped when routing to
+        # CRYPTO so the operator can submit identical orders for
+        # equity / crypto without re-clearing the field.
+        if (
+            order.session in _EXTENDED_HOURS_SESSIONS
+            and (instrument is None or instrument.venue_code not in _CRYPTO_VENUES)
+        ):
             body["extended_hours"] = True
 
         if order.client_order_id:
