@@ -595,6 +595,79 @@ def _history() -> tuple[Any, int]:
     return jsonify(_v1_envelope(data=rows)), 200
 
 
+def _depth() -> tuple[Any, int]:
+    """``POST /api/v1/depth`` — order-book depth for a symbol.
+
+    Alpaca's free IEX feed doesn't expose multi-level book depth — only
+    top-of-book bid/ask. We synthesize a single-level depth response
+    so the React MarketDepthPanel renders something useful (and
+    non-empty). Operators with a SIP subscription get the same call
+    pattern; future work can fetch deeper levels when the broker
+    plugin advertises that capability.
+    """
+    auth_token, broker, err = _api_key_to_auth()
+    if err:
+        return jsonify(_v1_error(err)), 401
+    if broker != "alpaca":
+        return jsonify(_v1_error("v1 bridge not implemented for this broker")), 501
+
+    body = request.get_json(silent=True) or {}
+    sym = (body.get("symbol") or "").upper()
+    ex = _alias_venue(body.get("exchange"))
+    if not sym:
+        return jsonify(_v1_error("symbol required")), 400
+
+    try:
+        from broker.alpaca.api.auth_api import auth_handle_from_token
+        from broker.alpaca.api.quote_api import AlpacaQuoteAdapter
+        from domain.instrument_ref import InstrumentRef
+        from services.instrument_resolution import resolve_instrument
+
+        auth = auth_handle_from_token(auth_token)
+        adapter = AlpacaQuoteAdapter(auth=auth)
+        ref = InstrumentRef(venue_code=ex, canonical_symbol=sym)
+        resolved = resolve_instrument(ref, broker_code="alpaca")
+        if resolved is None:
+            return jsonify(_v1_error(f"instrument not in universe: {sym}@{ex}")), 404
+        account_ctx = {
+            "broker_code": "alpaca",
+            "auth_token": auth_token,
+            "base_currency": "USD",
+        }
+        quote = adapter.get_quote(resolved, account_ctx)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("v1 bridge depth failed: %s", e)
+        return jsonify(_v1_error(str(e))), 502
+
+    last = float(quote.last) if quote.last is not None else 0.0
+    bid = float(quote.bid) if quote.bid is not None else 0.0
+    ask = float(quote.ask) if quote.ask is not None else 0.0
+    bid_size = float(quote.bid_size) if quote.bid_size is not None else 0.0
+    ask_size = float(quote.ask_size) if quote.ask_size is not None else 0.0
+
+    return (
+        jsonify(
+            _v1_envelope(
+                data={
+                    "asks": [{"price": ask, "quantity": int(ask_size)}],
+                    "bids": [{"price": bid, "quantity": int(bid_size)}],
+                    "high": last,
+                    "low": last,
+                    "ltp": last,
+                    "ltq": 0,
+                    "oi": 0,
+                    "open": last,
+                    "prev_close": last,
+                    "totalbuyqty": int(bid_size),
+                    "totalsellqty": int(ask_size),
+                    "volume": 0,
+                }
+            )
+        ),
+        200,
+    )
+
+
 def _quotes() -> tuple[Any, int]:
     auth_token, broker, err = _api_key_to_auth()
     if err:
@@ -788,6 +861,8 @@ BRIDGES: dict[str, BridgeFn] = {
     "/api/v1/quotes/": _quotes,
     "/api/v1/multiquotes": _multiquotes,
     "/api/v1/multiquotes/": _multiquotes,
+    "/api/v1/depth": _depth,
+    "/api/v1/depth/": _depth,
     "/api/v1/history": _history,
     "/api/v1/history/": _history,
 }
