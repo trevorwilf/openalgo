@@ -22,6 +22,9 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+_TRADE_UPDATES_CLIENT = None  # type: ignore[var-annotated]
+
+
 def install_alpaca_adapters() -> None:
     """Register every Alpaca promoted-lane adapter."""
     try:
@@ -51,10 +54,55 @@ def install_alpaca_adapters() -> None:
     register_broker_balance_adapter(AlpacaBalanceAdapter())
     register_broker_translator(AlpacaOrderTranslator())
     _seed_alpaca_order_rules()
+    _start_trade_updates_stream()
     logger.info(
         "Alpaca promoted-lane adapters registered: "
-        "quote/bar/position/balance/translator/rules"
+        "quote/bar/position/balance/translator/rules/trade_updates"
     )
+
+
+def _start_trade_updates_stream() -> None:
+    """Connect to Alpaca's broker stream and republish every order
+    state change onto the OpenAlgo event bus.
+
+    The bus already has a SocketIO subscriber that pushes events to
+    the React UI, so this gives the operator real-time fill / cancel
+    notifications without polling. Best-effort — failure to start
+    the stream logs a warning but does NOT block startup (the UI
+    falls back to manual refresh).
+    """
+    import os
+
+    if os.environ.get("ALPACA_TRADE_UPDATES_DISABLED", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        logger.info(
+            "Alpaca trade_updates stream disabled via env var "
+            "ALPACA_TRADE_UPDATES_DISABLED"
+        )
+        return
+
+    try:
+        from broker.alpaca.streaming.alpaca_trade_updates import (
+            AlpacaTradeUpdatesClient,
+            publish_trade_update_to_bus,
+        )
+
+        global _TRADE_UPDATES_CLIENT
+        client = AlpacaTradeUpdatesClient(on_event=publish_trade_update_to_bus)
+        client.start(timeout=10.0)
+        _TRADE_UPDATES_CLIENT = client
+        logger.info("Alpaca trade_updates stream started")
+    except Exception as e:  # noqa: BLE001 - never block startup
+        logger.warning(
+            "Alpaca trade_updates stream failed to start: %s — "
+            "live order events from external sources will NOT reach "
+            "the UI until restart. Self-initiated orders still emit "
+            "events synchronously.",
+            e,
+        )
 
 
 def _seed_alpaca_order_rules() -> None:
