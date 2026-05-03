@@ -22,6 +22,21 @@ from domain.errors import UnsupportedCapability
 
 
 _SUPPORTED_VENUES = {"XNAS", "XNYS", "ARCX", "BATS"}
+# Branch K — Alpaca supports REGULAR + extended-hours sessions
+# (PRE_MARKET 04:00-09:30 ET, POST_MARKET 16:00-20:00 ET). The
+# OpenAlgo EXTENDED session covers both pre and post; flag it as
+# extended_hours=true and let Alpaca route by clock.
+_SUPPORTED_SESSIONS = {
+    Session.REGULAR,
+    Session.PRE_MARKET,
+    Session.POST_MARKET,
+    Session.EXTENDED,
+}
+_EXTENDED_HOURS_SESSIONS = {
+    Session.PRE_MARKET,
+    Session.POST_MARKET,
+    Session.EXTENDED,
+}
 _SUPPORTED_TYPES = {
     OrderType.MARKET,
     OrderType.LIMIT,
@@ -121,15 +136,39 @@ class AlpacaOrderTranslator:
                     f"{order.time_in_force.value}"
                 ),
             )
-        if order.session != Session.REGULAR:
+        if order.session not in _SUPPORTED_SESSIONS:
             raise UnsupportedCapability(
                 broker_code=self.broker_code,
                 capability_name="session",
                 details=(
-                    f"Alpaca MVP is regular-session only, got "
-                    f"{order.session.value}"
+                    f"Alpaca supports REGULAR / PRE_MARKET / POST_MARKET / "
+                    f"EXTENDED sessions; got {order.session.value}"
                 ),
             )
+        # Alpaca's extended-hours flag is only valid on LIMIT-priced
+        # orders with TIF=DAY (per their REST docs). Fail-fast if the
+        # combination is illegal — saves a round-trip to the broker.
+        if order.session in _EXTENDED_HOURS_SESSIONS:
+            if order.order_type not in {OrderType.LIMIT}:
+                raise UnsupportedCapability(
+                    broker_code=self.broker_code,
+                    capability_name="extended_hours_order_type",
+                    details=(
+                        "Alpaca extended-hours orders must be type=LIMIT "
+                        "(per Alpaca REST docs); got "
+                        f"{order.order_type.value}"
+                    ),
+                )
+            if order.time_in_force != TimeInForce.DAY:
+                raise UnsupportedCapability(
+                    broker_code=self.broker_code,
+                    capability_name="extended_hours_time_in_force",
+                    details=(
+                        "Alpaca extended-hours orders must use TIF=DAY "
+                        "(per Alpaca REST docs); got "
+                        f"{order.time_in_force.value}"
+                    ),
+                )
         if order.quantity_unit == QuantityUnit.LOTS:
             raise UnsupportedCapability(
                 broker_code=self.broker_code,
@@ -220,6 +259,10 @@ class AlpacaOrderTranslator:
                 body["trail_percent"] = str(offset)
             else:
                 body["trail_price"] = str(offset)
+
+        # Branch K — extended-hours flag for pre/post-market orders.
+        if order.session in _EXTENDED_HOURS_SESSIONS:
+            body["extended_hours"] = True
 
         if order.client_order_id:
             body["client_order_id"] = order.client_order_id
