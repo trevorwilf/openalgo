@@ -98,6 +98,202 @@ def test_client_subscribe_payload_is_idempotent():
 
 
 # ---------------------------------------------------------------------------
+# Branch H — reconnect with exponential backoff + automatic resubscribe.
+# ---------------------------------------------------------------------------
+
+
+def test_replay_subscriptions_emits_payload_for_active_sets():
+    sent = []
+    client = AlpacaWebSocketClient(auth=_fake_auth())
+    client._send = lambda payload: sent.append(payload)  # type: ignore[method-assign]
+    client._ws = MagicMock()
+    # Manually populate the active sets (as if subscribe() ran before
+    # a disconnect).
+    client._sub_trades.add("AAPL")
+    client._sub_quotes.add("AAPL")
+    client._replay_subscriptions()
+    assert len(sent) == 1
+    assert sent[0]["action"] == "subscribe"
+    assert sent[0]["trades"] == ["AAPL"]
+    assert sent[0]["quotes"] == ["AAPL"]
+
+
+def test_replay_subscriptions_no_op_when_sets_empty():
+    sent = []
+    client = AlpacaWebSocketClient(auth=_fake_auth())
+    client._send = lambda payload: sent.append(payload)  # type: ignore[method-assign]
+    client._ws = MagicMock()
+    client._replay_subscriptions()
+    assert sent == []
+
+
+def test_authenticated_frame_replays_subscriptions_on_reconnect():
+    """After a reconnect, the 'authenticated' success frame triggers
+    a resubscribe so the broker resumes the prior topic state.
+    """
+    sent = []
+    status_events = []
+    client = AlpacaWebSocketClient(
+        auth=_fake_auth(),
+        on_status=lambda kind, frame: status_events.append((kind, frame)),
+    )
+    client._send = lambda payload: sent.append(payload)  # type: ignore[method-assign]
+    client._ws = MagicMock()
+    # Simulate a prior subscribe before the disconnect.
+    client._sub_trades.add("AAPL")
+    client._sub_quotes.add("AAPL")
+    # Simulate the reader loop incrementing the attempt counter.
+    client._reconnect_attempt = 2
+    # The auth-success frame fires _replay_subscriptions + emits
+    # ``reconnected``.
+    client._dispatch({"T": "success", "msg": "authenticated"})
+    assert any(s == "subscribe" for s in (p.get("action") for p in sent))
+    assert ("reconnected", {"attempt": 2}) in status_events
+    # Counter resets so a future reconnect numbers from 1 again.
+    assert client._reconnect_attempt == 0
+
+
+def test_authenticated_frame_does_not_emit_reconnected_on_first_connect():
+    status_events = []
+    client = AlpacaWebSocketClient(
+        auth=_fake_auth(),
+        on_status=lambda kind, frame: status_events.append((kind, frame)),
+    )
+    client._send = lambda payload: None  # type: ignore[method-assign]
+    client._ws = MagicMock()
+    client._dispatch({"T": "success", "msg": "authenticated"})
+    # On a fresh connect we never saw a reconnect event.
+    assert all(kind != "reconnected" for kind, _ in status_events)
+
+
+def test_reconnect_disabled_skips_loop():
+    """When ``reconnect=False`` is passed, the reader exits after
+    the first run_forever returns.
+    """
+    import threading
+    import time
+
+    status_events = []
+    client = AlpacaWebSocketClient(
+        auth=_fake_auth(),
+        reconnect=False,
+        on_status=lambda kind, frame: status_events.append((kind, frame)),
+    )
+
+    fake_ws_calls = {"opened": 0}
+
+    class _FakeWS:
+        def __init__(self, *args, **kwargs):
+            fake_ws_calls["opened"] += 1
+
+        def run_forever(self):
+            # Simulate the broker dropping the socket immediately.
+            return None
+
+        def close(self):
+            return None
+
+    import broker.alpaca.streaming.alpaca_websocket as mod
+
+    original = mod.websocket.WebSocketApp
+    mod.websocket.WebSocketApp = _FakeWS  # type: ignore[assignment]
+    try:
+        client._stop_requested.clear()
+        t = threading.Thread(target=client._reader_loop, daemon=True)
+        t.start()
+        t.join(timeout=2.0)
+        assert not t.is_alive()
+        # Reconnect disabled → only one open attempt.
+        assert fake_ws_calls["opened"] == 1
+    finally:
+        mod.websocket.WebSocketApp = original  # type: ignore[assignment]
+
+
+def test_reconnect_loop_retries_until_max_attempts():
+    """With a small max_attempts cap, the loop opens N+1 sockets
+    (initial + N retries) then gives up.
+    """
+    import threading
+
+    client = AlpacaWebSocketClient(
+        auth=_fake_auth(),
+        reconnect=True,
+        reconnect_max_attempts=2,
+        reconnect_initial_delay=0.0,
+        reconnect_max_delay=0.0,
+        reconnect_backoff_factor=1.0,
+    )
+
+    fake_ws_calls = {"opened": 0}
+
+    class _FakeWS:
+        def __init__(self, *args, **kwargs):
+            fake_ws_calls["opened"] += 1
+
+        def run_forever(self):
+            return None
+
+        def close(self):
+            return None
+
+    import broker.alpaca.streaming.alpaca_websocket as mod
+
+    original = mod.websocket.WebSocketApp
+    mod.websocket.WebSocketApp = _FakeWS  # type: ignore[assignment]
+    try:
+        client._stop_requested.clear()
+        t = threading.Thread(target=client._reader_loop, daemon=True)
+        t.start()
+        t.join(timeout=3.0)
+        assert not t.is_alive()
+        # max_attempts=2 → initial + 2 retries = 3 connect attempts.
+        assert fake_ws_calls["opened"] == 3
+    finally:
+        mod.websocket.WebSocketApp = original  # type: ignore[assignment]
+
+
+def test_stop_interrupts_reconnect_backoff():
+    """Calling stop() during the backoff sleep returns promptly
+    without waiting out the full delay.
+    """
+    import threading
+    import time
+
+    client = AlpacaWebSocketClient(
+        auth=_fake_auth(),
+        reconnect=True,
+        reconnect_initial_delay=10.0,  # would block 10s if not interruptible
+        reconnect_max_delay=10.0,
+    )
+
+    class _FakeWS:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run_forever(self):
+            return None
+
+        def close(self):
+            return None
+
+    import broker.alpaca.streaming.alpaca_websocket as mod
+
+    original = mod.websocket.WebSocketApp
+    mod.websocket.WebSocketApp = _FakeWS  # type: ignore[assignment]
+    try:
+        client._stop_requested.clear()
+        t = threading.Thread(target=client._reader_loop, daemon=True)
+        t.start()
+        # Give the loop a moment to enter its backoff sleep, then stop.
+        time.sleep(0.3)
+        client._stop_requested.set()
+        t.join(timeout=2.0)
+        assert not t.is_alive()
+    finally:
+        mod.websocket.WebSocketApp = original  # type: ignore[assignment]
+
+
+# ---------------------------------------------------------------------------
 # AlpacaWebSocketAdapter — mode gating + ZMQ publish path.
 # ---------------------------------------------------------------------------
 
