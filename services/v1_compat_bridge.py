@@ -212,8 +212,9 @@ def _positionbook() -> tuple[Any, int]:
 
 def _holdings() -> tuple[Any, int]:
     """Alpaca's snapshot doesn't carry T+N holdings the way Indian
-    cash markets do. Return an empty holdings list with empty
-    statistics so the UI table renders without errors.
+    cash markets do. Return an empty holdings list with statistics
+    as numeric zeros so the React UI's ``.toFixed()`` calls don't
+    throw a runtime error.
     """
     auth_token, broker, err = _api_key_to_auth()
     if err:
@@ -225,10 +226,12 @@ def _holdings() -> tuple[Any, int]:
                 data={
                     "holdings": [],
                     "statistics": {
-                        "totalholdingvalue": "0",
-                        "totalinvvalue": "0",
-                        "totalpnlpercentage": "0",
-                        "totalprofitandloss": "0",
+                        # Numeric, not stringified — the React Holdings
+                        # page calls `.toFixed()` on each of these.
+                        "totalholdingvalue": 0,
+                        "totalinvvalue": 0,
+                        "totalpnlpercentage": 0,
+                        "totalprofitandloss": 0,
                     },
                 }
             )
