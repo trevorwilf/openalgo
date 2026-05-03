@@ -4,6 +4,30 @@ import sys
 from dotenv import load_dotenv
 
 
+def _configure_stdio_encoding() -> None:
+    """Reconfigure stdout/stderr to UTF-8 with replace-on-error.
+
+    On Windows the default console code page is cp1252 which cannot
+    encode emoji or other non-Latin1 codepoints. Without this, the
+    decorative ``🔄`` / ``✅`` / ``⚠️`` characters used in the version
+    check below raise ``UnicodeEncodeError`` and the ``except``
+    branch reports them as "Could not parse version numbers", which
+    is misleading.
+
+    Python 3.7+ exposes ``reconfigure`` on the wrapped streams; older
+    Python does not so we fail gracefully.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        except (AttributeError, ValueError, OSError):
+            # Stream not text-like or already configured — skip.
+            pass
+
+
+_configure_stdio_encoding()
+
+
 def configure_llvmlite_paths() -> None:
     """
     Configure LLVMLITE/NUMBA paths to avoid 'failed to map segment' errors.
