@@ -141,3 +141,132 @@ def test_alpaca_live_mode_supersedes_alpaca_paper(monkeypatch):
     auth = authenticate()
     assert auth.base_url == LIVE_BASE_URL
     assert auth.is_paper is False
+
+
+# ---------------------------------------------------------------------------
+# authenticate_broker — framework hook used by blueprints/brlogin.py
+# ---------------------------------------------------------------------------
+
+
+def test_authenticate_broker_returns_error_when_no_credentials():
+    from broker.alpaca.api.auth_api import authenticate_broker
+
+    auth_token, err = authenticate_broker()
+    assert auth_token is None
+    assert err is not None
+    assert "credentials missing" in err.lower()
+
+
+def test_authenticate_broker_happy_path(monkeypatch):
+    """With valid keys + a 200 from /v2/account, returns a JSON token."""
+    import json as _json
+
+    import httpx
+
+    from broker.alpaca.api import auth_api
+
+    monkeypatch.setenv("ALPACA_API_KEY", "ak-1")
+    monkeypatch.setenv("ALPACA_API_SECRET", "sk-1")
+
+    def _fake_get(self, url, *args, **kwargs):
+        return httpx.Response(
+            200,
+            json={
+                "id": "fake-acct-id",
+                "account_number": "PA12345",
+                "currency": "USD",
+                "status": "ACTIVE",
+                "trading_blocked": False,
+                "transfers_blocked": False,
+                "account_blocked": False,
+            },
+            request=httpx.Request("GET", "https://paper-api.alpaca.markets/v2/account"),
+        )
+
+    monkeypatch.setattr(httpx.Client, "get", _fake_get)
+
+    auth_token, err = auth_api.authenticate_broker()
+    assert err is None
+    payload = _json.loads(auth_token)
+    assert payload["api_key"] == "ak-1"
+    assert payload["is_paper"] is True
+    assert payload["account_id"] == "fake-acct-id"
+    assert payload["account_number"] == "PA12345"
+
+
+def test_authenticate_broker_rejects_blocked_account(monkeypatch):
+    import httpx
+
+    from broker.alpaca.api import auth_api
+
+    monkeypatch.setenv("ALPACA_API_KEY", "ak-1")
+    monkeypatch.setenv("ALPACA_API_SECRET", "sk-1")
+
+    def _fake_get(self, url, *args, **kwargs):
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "currency": "USD",
+                "account_blocked": True,
+            },
+            request=httpx.Request("GET", "https://paper-api.alpaca.markets/v2/account"),
+        )
+
+    monkeypatch.setattr(httpx.Client, "get", _fake_get)
+    auth_token, err = auth_api.authenticate_broker()
+    assert auth_token is None
+    assert "blocked" in err.lower()
+
+
+def test_authenticate_broker_handles_401(monkeypatch):
+    import httpx
+
+    from broker.alpaca.api import auth_api
+
+    monkeypatch.setenv("ALPACA_API_KEY", "ak-bad")
+    monkeypatch.setenv("ALPACA_API_SECRET", "sk-bad")
+
+    def _fake_get(self, url, *args, **kwargs):
+        return httpx.Response(
+            401,
+            json={"message": "unauthorized"},
+            request=httpx.Request("GET", "https://paper-api.alpaca.markets/v2/account"),
+        )
+
+    monkeypatch.setattr(httpx.Client, "get", _fake_get)
+    auth_token, err = auth_api.authenticate_broker()
+    assert auth_token is None
+    assert "401" in err
+
+
+def test_auth_handle_from_token_round_trip(monkeypatch):
+    """The token emitted by authenticate_broker round-trips into an
+    :class:`AlpacaAuth` carrying the same key + base URL.
+    """
+    import json as _json
+
+    import httpx
+
+    from broker.alpaca.api import auth_api
+    from broker.alpaca.api.auth_api import auth_handle_from_token
+
+    monkeypatch.setenv("ALPACA_API_KEY", "ak-1")
+    monkeypatch.setenv("ALPACA_API_SECRET", "sk-1")
+    monkeypatch.setattr(
+        httpx.Client,
+        "get",
+        lambda self, *a, **kw: httpx.Response(
+            200,
+            json={"id": "x", "currency": "USD"},
+            request=httpx.Request("GET", "https://paper-api.alpaca.markets/v2/account"),
+        ),
+    )
+
+    auth_token, err = auth_api.authenticate_broker()
+    assert err is None
+    handle = auth_handle_from_token(auth_token)
+    assert handle.base_url == "https://paper-api.alpaca.markets"
+    assert handle.headers["APCA-API-KEY-ID"] == "ak-1"
+    assert handle.headers["APCA-API-SECRET-KEY"] == "sk-1"
+    assert handle.is_paper is True

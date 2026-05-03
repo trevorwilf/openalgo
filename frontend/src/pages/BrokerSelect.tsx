@@ -15,6 +15,7 @@ import { useAuthStore } from '@/stores/authStore'
 
 // All supported brokers with their display names and auth types
 const allBrokers = [
+  { id: 'alpaca', name: 'Alpaca Markets', authType: 'api_key' },
   { id: 'fivepaisa', name: '5 Paisa', authType: 'totp' },
   { id: 'fivepaisaxts', name: '5 Paisa (XTS)', authType: 'totp' },
   { id: 'aliceblue', name: 'Alice Blue', authType: 'totp' },
@@ -127,6 +128,13 @@ export default function BrokerSelect() {
 
     // Build login URL based on broker type (matching original broker.html logic)
     switch (selectedBroker) {
+      case 'alpaca':
+        // Alpaca uses API-key + secret headers (no OAuth). The
+        // /alpaca/callback route validates the env-resolved keys
+        // against /v2/account and establishes the session.
+        loginUrl = '/alpaca/callback'
+        break
+
       case 'fivepaisa':
       case 'fivepaisaxts':
       case 'aliceblue':
