@@ -22,9 +22,27 @@ def test_india_venues_always_return_19800(venue):
         )
 
 
+def test_none_venue_is_fail_closed():
+    """Phase 1 T-07 — venue_local_offset_seconds(None) raises
+    VenueResolutionError. The prior implicit Asia/Kolkata fallback for
+    a missing venue code was removed so callers must pass an explicit
+    venue.
+    """
+    from domain.errors import VenueResolutionError
+
+    with pytest.raises(VenueResolutionError):
+        venue_local_offset_seconds(None)
+
+
 def test_unknown_venue_falls_back_to_india_default():
+    """Unknown but explicit venue code still returns the India default
+    (19800). Per the implementation docstring this is the last
+    remaining implicit-India fallback inside the helper, retained
+    because ``database.historify_db`` SQL bucketing requires a numeric
+    offset. A future region-plugin-driven venue catalog will replace
+    this lookup (see ADR 0023).
+    """
     assert venue_local_offset_seconds("UNKNOWN_VENUE") == 19800
-    assert venue_local_offset_seconds(None) == 19800
 
 
 def test_xnys_summer_uses_dst_offset():

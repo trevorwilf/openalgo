@@ -86,12 +86,19 @@ def test_non_india_broker_accepts_explicit_value(mcp_module, monkeypatch):
     assert mcp_module._resolve_default("XNAS", "NSE", field_name="exchange") == "XNAS"
 
 
-def test_unknown_broker_falls_back_to_legacy(mcp_module, monkeypatch):
+def test_unknown_broker_is_fail_closed(mcp_module, monkeypatch):
+    """Phase 1 T-06 — when capabilities() returns None and no
+    MCP_FORCE_REGION_FOR_TESTS env override is set, _is_india_broker
+    fail-closes by raising MissingRegionContext rather than silently
+    inheriting India defaults. The prior backward-compat fallback was
+    removed.
+    """
+    from domain.errors import MissingRegionContext
+
     monkeypatch.delenv("MCP_FORCE_REGION_FOR_TESTS", raising=False)
     mcp_module._connected_broker_caps.cache_clear()
-    # capabilities() returns None per the fixture stub → unknown.
-    # _is_india_broker treats unknown as India for backward compat.
-    assert mcp_module._is_india_broker() is True
+    with pytest.raises(MissingRegionContext):
+        mcp_module._is_india_broker()
 
 
 def test_place_order_india_default_substituted(mcp_module, monkeypatch):
