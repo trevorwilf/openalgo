@@ -155,12 +155,27 @@ class SensitiveDataFilter(logging.Filter):
             if hasattr(record, "args") and record.args:
                 filtered_args = []
                 for arg in record.args:
-                    filtered_arg = str(arg)
+                    # Only convert to string if a sensitive pattern actually
+                    # matches. Unconditional ``str(arg)`` would break ``%d``
+                    # / ``%f`` formatting because Python's % operator is
+                    # type-strict for numeric placeholders.
+                    arg_str = str(arg)
+                    redacted = arg_str
                     for pattern, replacement in SENSITIVE_PATTERNS:
-                        filtered_arg = re.sub(
-                            pattern, replacement, filtered_arg, flags=re.IGNORECASE
+                        redacted = re.sub(
+                            pattern, replacement, redacted, flags=re.IGNORECASE
                         )
-                    filtered_args.append(filtered_arg)
+                    if redacted == arg_str:
+                        # No sensitive data found — keep the original arg
+                        # (and its original type) so that ``%d`` / ``%f``
+                        # formatting in the log message continues to work.
+                        filtered_args.append(arg)
+                    else:
+                        # Redaction occurred — emit the redacted string.
+                        # The log message must use ``%s`` for any field
+                        # that may carry sensitive data (this is already
+                        # true for every existing call site we've audited).
+                        filtered_args.append(redacted)
                 record.args = tuple(filtered_args)
         except Exception:
             # If filtering fails, don't block the log message
