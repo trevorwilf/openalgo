@@ -103,25 +103,33 @@ ALPACA_TO_SIDE: dict[str, OrderSide] = {
     "sell": OrderSide.SELL,
 }
 
-# Order type: OpenAlgo OrderType ↔ Alpaca lowercase string. The order
-# translator currently supports MARKET + LIMIT; STOP / STOP_LIMIT /
-# TRAILING_STOP are listed here for forward compatibility — adding a
-# new supported type means widening the SUPPORTED_ORDER_TYPES set
-# below AND the validate() check in order_api.py.
+# Order type: OpenAlgo OrderType ↔ Alpaca lowercase string. Branch I
+# widened the supported set to include STOP / STOP_LIMIT /
+# TRAILING_STOP; the translator now requires trigger_price for
+# STOP / STOP_LIMIT and trailing_offset for TRAILING_STOP per the
+# domain validator.
 ORDER_TYPE_TO_ALPACA: dict[OrderType, str] = {
     OrderType.MARKET: "market",
     OrderType.LIMIT: "limit",
-    # Forward-compat (not in SUPPORTED_ORDER_TYPES yet):
-    # OrderType.STOP_MARKET: "stop",
-    # OrderType.STOP_LIMIT: "stop_limit",
-    # OrderType.TRAILING_STOP: "trailing_stop",
+    OrderType.STOP: "stop",
+    OrderType.STOP_LIMIT: "stop_limit",
+    OrderType.TRAILING_STOP: "trailing_stop",
 }
 ALPACA_TO_ORDER_TYPE: dict[str, OrderType] = {
     "market": OrderType.MARKET,
     "limit": OrderType.LIMIT,
+    "stop": OrderType.STOP,
+    "stop_limit": OrderType.STOP_LIMIT,
+    "trailing_stop": OrderType.TRAILING_STOP,
 }
 SUPPORTED_ORDER_TYPES: frozenset[OrderType] = frozenset(
-    {OrderType.MARKET, OrderType.LIMIT}
+    {
+        OrderType.MARKET,
+        OrderType.LIMIT,
+        OrderType.STOP,
+        OrderType.STOP_LIMIT,
+        OrderType.TRAILING_STOP,
+    }
 )
 
 # Time in force: OpenAlgo TimeInForce ↔ Alpaca lowercase string.

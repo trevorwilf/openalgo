@@ -61,7 +61,8 @@ def test_validate_market_day_ok():
     AlpacaOrderTranslator().validate(_order(), _Resolved(), _ctx())
 
 
-def test_validate_rejects_stop_order():
+def test_validate_accepts_stop_order():
+    """Branch I — STOP is now a supported order type."""
     from domain.enums import OrderType as OT
 
     order = NormalizedOrderRequest(
@@ -72,6 +73,47 @@ def test_validate_rejects_stop_order():
         quantity_unit=QuantityUnit.WHOLE,
         trigger_price=Decimal("100.00"),
         time_in_force=TimeInForce.DAY,
+    )
+    AlpacaOrderTranslator().validate(order, _Resolved(), _ctx())
+
+
+def test_validate_accepts_stop_limit_order():
+    order = NormalizedOrderRequest(
+        instrument=InstrumentRef(venue_code="XNAS", canonical_symbol="AAPL"),
+        side=OrderSide.BUY,
+        order_type=OrderType.STOP_LIMIT,
+        quantity=Decimal("1"),
+        quantity_unit=QuantityUnit.WHOLE,
+        price=Decimal("99.50"),
+        trigger_price=Decimal("100.00"),
+        time_in_force=TimeInForce.DAY,
+    )
+    AlpacaOrderTranslator().validate(order, _Resolved(), _ctx())
+
+
+def test_validate_accepts_trailing_stop_order():
+    order = NormalizedOrderRequest(
+        instrument=InstrumentRef(venue_code="XNAS", canonical_symbol="AAPL"),
+        side=OrderSide.SELL,
+        order_type=OrderType.TRAILING_STOP,
+        quantity=Decimal("1"),
+        quantity_unit=QuantityUnit.WHOLE,
+        trigger_price=Decimal("100.00"),
+        trailing_offset=Decimal("1.50"),
+        time_in_force=TimeInForce.DAY,
+    )
+    AlpacaOrderTranslator().validate(order, _Resolved(), _ctx())
+
+
+def test_validate_rejects_market_on_open():
+    """ON_OPEN / ON_CLOSE are not yet declared in supported_order_types."""
+    order = NormalizedOrderRequest(
+        instrument=InstrumentRef(venue_code="XNAS", canonical_symbol="AAPL"),
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET_ON_OPEN,
+        quantity=Decimal("1"),
+        quantity_unit=QuantityUnit.WHOLE,
+        time_in_force=TimeInForce.OPG,  # OPG required for *_ON_OPEN
     )
     with pytest.raises(UnsupportedCapability):
         AlpacaOrderTranslator().validate(order, _Resolved(), _ctx())
@@ -141,6 +183,77 @@ def test_to_native_limit_with_price_and_gtc():
     assert body["type"] == "limit"
     assert body["limit_price"] == "175.50"
     assert body["time_in_force"] == "gtc"
+
+
+# ---- Branch I — STOP / STOP_LIMIT / TRAILING_STOP ----------------------
+
+
+def _stop_order(order_type, *, price=None, trigger=None, trail=None):
+    return NormalizedOrderRequest(
+        instrument=InstrumentRef(venue_code="XNAS", canonical_symbol="AAPL"),
+        side=OrderSide.SELL,
+        order_type=order_type,
+        quantity=Decimal("1"),
+        quantity_unit=QuantityUnit.WHOLE,
+        price=Decimal(price) if price is not None else None,
+        trigger_price=Decimal(trigger) if trigger is not None else None,
+        trailing_offset=Decimal(trail) if trail is not None else None,
+        time_in_force=TimeInForce.DAY,
+    )
+
+
+def test_to_native_stop_emits_stop_price():
+    body = AlpacaOrderTranslator().to_native(
+        _stop_order(OrderType.STOP, trigger="180.00"),
+        _Resolved(),
+        _ctx(),
+    )
+    assert body["type"] == "stop"
+    assert body["stop_price"] == "180.00"
+    assert "limit_price" not in body
+    assert "trail_price" not in body
+    assert "trail_percent" not in body
+
+
+def test_to_native_stop_limit_emits_both_prices():
+    body = AlpacaOrderTranslator().to_native(
+        _stop_order(OrderType.STOP_LIMIT, price="179.50", trigger="180.00"),
+        _Resolved(),
+        _ctx(),
+    )
+    assert body["type"] == "stop_limit"
+    assert body["stop_price"] == "180.00"
+    assert body["limit_price"] == "179.50"
+
+
+def test_to_native_trailing_stop_default_to_trail_price():
+    body = AlpacaOrderTranslator().to_native(
+        _stop_order(OrderType.TRAILING_STOP, trigger="180.00", trail="1.50"),
+        _Resolved(),
+        _ctx(),
+    )
+    assert body["type"] == "trailing_stop"
+    assert body["trail_price"] == "1.50"
+    assert "trail_percent" not in body
+
+
+def test_to_native_trailing_stop_percent_via_extra_hint():
+    """Operators flip percent semantics via order.extra['alpaca_trail_unit']."""
+    order = NormalizedOrderRequest(
+        instrument=InstrumentRef(venue_code="XNAS", canonical_symbol="AAPL"),
+        side=OrderSide.SELL,
+        order_type=OrderType.TRAILING_STOP,
+        quantity=Decimal("1"),
+        quantity_unit=QuantityUnit.WHOLE,
+        trigger_price=Decimal("180.00"),
+        trailing_offset=Decimal("0.5"),
+        time_in_force=TimeInForce.DAY,
+        extra={"alpaca_trail_unit": "percent"},
+    )
+    body = AlpacaOrderTranslator().to_native(order, _Resolved(), _ctx())
+    assert body["type"] == "trailing_stop"
+    assert body["trail_percent"] == "0.5"
+    assert "trail_price" not in body
 
 
 def test_from_native_order_response_happy():

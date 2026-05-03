@@ -13,7 +13,7 @@
     "supported_regions": ["us"],
     "supported_venue_codes": ["XNAS", "XNYS", "ARCX", "BATS"],
     "supported_asset_classes": ["EQUITY", "ETF"],
-    "supported_order_types": ["MARKET", "LIMIT"],
+    "supported_order_types": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT", "TRAILING_STOP"],
     "supported_time_in_force": ["DAY", "GTC"],
     "supported_sessions": ["REGULAR"],
     "supported_quantity_units": ["WHOLE", "FRACTIONAL", "NOTIONAL"],
