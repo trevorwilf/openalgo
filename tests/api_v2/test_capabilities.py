@@ -8,11 +8,17 @@ from unittest import mock
 def test_capabilities_returns_rich_shape(client, flask_app) -> None:
     from domain.capabilities import BrokerCapabilities, infer_capabilities_from_legacy
 
+    # Phase 1 T-03 — legacy India plugins must declare
+    # supported_regions=['india'] explicitly. Without it,
+    # infer_capabilities_from_legacy treats the plugin as non-India and
+    # the strict-mode validation requires market_families /
+    # default_currency / base_currency.
     fake = BrokerCapabilities(
         **infer_capabilities_from_legacy(
             {
                 "broker_type": "IN_stock",
                 "supported_exchanges": ["NSE", "BSE"],
+                "supported_regions": ["india"],
                 "leverage_config": False,
             },
             broker_code="zerodha",
@@ -63,11 +69,13 @@ def test_capabilities_404_for_unknown_broker(client, flask_app) -> None:
 def test_capabilities_serializes_pydantic_model(client, flask_app) -> None:
     from domain.capabilities import BrokerCapabilities, infer_capabilities_from_legacy
 
+    # Phase 1 T-03 — must declare supported_regions=['india'] explicitly.
     caps = BrokerCapabilities(
         **infer_capabilities_from_legacy(
             {
                 "broker_type": "IN_stock",
                 "supported_exchanges": ["NSE", "BSE", "NFO"],
+                "supported_regions": ["india"],
                 "leverage_config": False,
             },
             broker_code="zerodha",
