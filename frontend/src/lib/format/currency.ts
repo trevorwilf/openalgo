@@ -12,6 +12,7 @@
 
 import { useMemo } from 'react'
 
+import { CURRENCY_LOCALE_MAP } from '@/hooks/useRegionCapabilities'
 import { useBrokerStore } from '@/stores/brokerStore'
 import type { Currency } from '@/types/capabilities'
 
