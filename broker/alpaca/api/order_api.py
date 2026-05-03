@@ -22,8 +22,23 @@ from domain.errors import UnsupportedCapability
 
 
 _SUPPORTED_VENUES = {"XNAS", "XNYS", "ARCX", "BATS"}
-_SUPPORTED_TYPES = {OrderType.MARKET, OrderType.LIMIT}
+_SUPPORTED_TYPES = {
+    OrderType.MARKET,
+    OrderType.LIMIT,
+    OrderType.STOP,
+    OrderType.STOP_LIMIT,
+    OrderType.TRAILING_STOP,
+}
 _SUPPORTED_TIF = {TimeInForce.DAY, TimeInForce.GTC}
+
+# Branch I — OpenAlgo OrderType → Alpaca REST 'type' string.
+_ORDER_TYPE_NATIVE: dict[OrderType, str] = {
+    OrderType.MARKET: "market",
+    OrderType.LIMIT: "limit",
+    OrderType.STOP: "stop",
+    OrderType.STOP_LIMIT: "stop_limit",
+    OrderType.TRAILING_STOP: "trailing_stop",
+}
 
 
 class AlpacaOrderTranslator:
@@ -107,7 +122,7 @@ class AlpacaOrderTranslator:
         body: dict[str, Any] = {
             "symbol": symbol,
             "side": side,
-            "type": "market" if order.order_type == OrderType.MARKET else "limit",
+            "type": _ORDER_TYPE_NATIVE[order.order_type],
             "time_in_force": (
                 "day" if order.time_in_force == TimeInForce.DAY else "gtc"
             ),
@@ -117,14 +132,54 @@ class AlpacaOrderTranslator:
         else:
             body["qty"] = str(order.quantity)
 
-        if order.order_type == OrderType.LIMIT:
+        # LIMIT and STOP_LIMIT carry a limit price.
+        if order.order_type in {OrderType.LIMIT, OrderType.STOP_LIMIT}:
             if order.price is None:
                 raise UnsupportedCapability(
                     broker_code=self.broker_code,
                     capability_name="limit_price",
-                    details="LIMIT order requires a price",
+                    details=(
+                        f"{order.order_type.value} order requires a price"
+                    ),
                 )
             body["limit_price"] = str(order.price)
+
+        # STOP and STOP_LIMIT carry a stop trigger.
+        if order.order_type in {OrderType.STOP, OrderType.STOP_LIMIT}:
+            if order.trigger_price is None:
+                # The domain validator prevents this from happening,
+                # but the explicit guard makes the failure mode clear
+                # if a future caller bypasses NormalizedOrderRequest.
+                raise UnsupportedCapability(
+                    broker_code=self.broker_code,
+                    capability_name="stop_price",
+                    details=(
+                        f"{order.order_type.value} order requires a "
+                        "trigger_price"
+                    ),
+                )
+            body["stop_price"] = str(order.trigger_price)
+
+        # TRAILING_STOP carries a trailing offset. OpenAlgo's
+        # ``trailing_offset`` is a single Decimal — by default it
+        # maps to Alpaca's ``trail_price`` (dollar amount). The
+        # operator can flip to percent semantics by setting
+        # ``order.extra["alpaca_trail_unit"] = "percent"``.
+        if order.order_type == OrderType.TRAILING_STOP:
+            offset = order.trailing_offset
+            if offset is None:
+                raise UnsupportedCapability(
+                    broker_code=self.broker_code,
+                    capability_name="trailing_offset",
+                    details="TRAILING_STOP order requires trailing_offset",
+                )
+            unit = (
+                getattr(order, "extra", {}) or {}
+            ).get("alpaca_trail_unit", "price")
+            if unit == "percent":
+                body["trail_percent"] = str(offset)
+            else:
+                body["trail_price"] = str(offset)
 
         if order.client_order_id:
             body["client_order_id"] = order.client_order_id
