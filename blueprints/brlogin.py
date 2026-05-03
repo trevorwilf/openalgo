@@ -487,6 +487,15 @@ def broker_callback(broker, para=None):
         auth_token, error_message = auth_function(code)
         forward_url = "broker.html"
 
+    elif broker == "alpaca":
+        # Alpaca uses API-key + secret headers — no OAuth handshake
+        # and no per-request token. authenticate_broker() validates
+        # against /v2/account and returns a JSON blob carrying the
+        # session credentials.
+        logger.debug("Alpaca broker - validating API key + secret")
+        auth_token, error_message = auth_function(None)
+        forward_url = "broker.html"
+
     elif broker == "dhan_sandbox":
         code = "dhan_sandbox"
         logger.debug(f"Dhan Sandbox broker - The code is {code}")

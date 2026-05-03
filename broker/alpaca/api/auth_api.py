@@ -144,11 +144,113 @@ def authenticate() -> AlpacaAuth:
     )
 
 
+def authenticate_broker(code: str | None = None) -> tuple[str | None, str | None]:
+    """Framework hook for ``blueprints/brlogin.py``.
+
+    The plugin loader looks up ``authenticate_broker`` in
+    ``broker/<name>/api/auth_api.py`` and the brlogin ``broker_callback``
+    invokes it to start a session. Alpaca's auth is API-key + secret in
+    headers — there is no OAuth handshake — so this function:
+
+      1. Resolves credentials via :func:`load_credentials` (which
+         honors the dual-source convention — explicit ``ALPACA_API_KEY``
+         pair OR the generic ``BROKER_API_KEY[_MARKET]`` pair plus
+         ``ALPACA_LIVE_MODE``).
+      2. Hits ``GET /v2/account`` once to confirm the keys actually
+         work end-to-end. A 200 means we have a valid session.
+      3. Returns ``(auth_token, None)`` on success or
+         ``(None, error_message)`` on failure.
+
+    The returned ``auth_token`` is a JSON blob carrying the resolved
+    base URL + key pair. Order-routing modules deserialize it via
+    :func:`auth_handle_from_token` to rebuild an :class:`AlpacaAuth`
+    handle without re-reading env vars (so a session started in
+    paper mode stays paper for its lifetime even if the operator
+    flips ``ALPACA_LIVE_MODE`` mid-session).
+
+    The ``code`` parameter is unused — kept for signature parity with
+    OAuth-based brokers.
+    """
+    import json as _json
+
+    import httpx as _httpx
+
+    try:
+        api_key, api_secret, is_paper = load_credentials()
+    except ValueError as exc:
+        return None, str(exc)
+
+    base_url = PAPER_BASE_URL if is_paper else LIVE_BASE_URL
+    headers = {
+        "APCA-API-KEY-ID": api_key,
+        "APCA-API-SECRET-KEY": api_secret,
+    }
+
+    try:
+        with _httpx.Client(
+            base_url=base_url,
+            headers=headers,
+            timeout=_httpx.Timeout(10.0, connect=5.0),
+        ) as client:
+            resp = client.get("/v2/account")
+    except _httpx.HTTPError as exc:
+        return None, f"Network error reaching Alpaca: {exc}"
+
+    if resp.status_code == 401:
+        return None, "Alpaca rejected the API key / secret (401). Verify your credentials."
+    if resp.status_code == 403:
+        return None, "Alpaca returned 403. The key is valid but lacks permissions for this account."
+    if resp.status_code >= 400:
+        return None, f"Alpaca /v2/account returned HTTP {resp.status_code}: {resp.text[:200]}"
+
+    body = resp.json() if resp.content else {}
+    if body.get("account_blocked"):
+        return None, "Alpaca account is blocked — contact Alpaca support."
+    if body.get("trading_blocked"):
+        return None, "Alpaca trading is blocked on this account."
+
+    auth_token = _json.dumps(
+        {
+            "api_key": api_key,
+            "api_secret": api_secret,
+            "is_paper": is_paper,
+            "base_url": base_url,
+            "data_base_url": DATA_BASE_URL,
+            "account_id": body.get("id"),
+            "account_number": body.get("account_number"),
+            "currency": body.get("currency"),
+        }
+    )
+    return auth_token, None
+
+
+def auth_handle_from_token(auth_token: str) -> AlpacaAuth:
+    """Rebuild an :class:`AlpacaAuth` from the token emitted by
+    :func:`authenticate_broker`.
+
+    Order / quote / bar modules call this when they need the auth
+    handle for a session that was established earlier.
+    """
+    import json as _json
+
+    payload = _json.loads(auth_token)
+    return AlpacaAuth(
+        base_url=payload["base_url"],
+        data_base_url=payload.get("data_base_url", DATA_BASE_URL),
+        headers={
+            "APCA-API-KEY-ID": payload["api_key"],
+            "APCA-API-SECRET-KEY": payload["api_secret"],
+        },
+    )
+
+
 __all__ = [
     "AlpacaAuth",
     "DATA_BASE_URL",
     "LIVE_BASE_URL",
     "PAPER_BASE_URL",
+    "auth_handle_from_token",
     "authenticate",
+    "authenticate_broker",
     "load_credentials",
 ]
