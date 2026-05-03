@@ -163,6 +163,24 @@ class Orders(Resource):
         )
         if rows is None:
             return err_payload, err_status
+
+        # Enrich each row with the canonical status when the broker
+        # translator implements ``normalize_order_status``. Native
+        # status is preserved untouched so consumers that need the
+        # broker's own vocabulary can still read it.
+        normalize = getattr(promoted, "normalize_order_status", None)
+        if callable(normalize):
+            for r in rows:
+                native = r.get("status")
+                if native is None:
+                    continue
+                try:
+                    r["canonical_status"] = normalize(native).value
+                    r["native_status"] = native
+                except Exception:  # noqa: BLE001
+                    # Translator implementations should never raise,
+                    # but if one does the response still ships.
+                    r["canonical_status"] = "UNKNOWN"
         return ok({"orders": rows, "count": len(rows)}), 200
 
     def post(self):

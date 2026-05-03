@@ -205,6 +205,87 @@ class AuthMode(StrEnum):
     SESSION_TOKEN = "SESSION_TOKEN"
 
 
+class OrderStatus(StrEnum):
+    """Canonical, broker-agnostic order lifecycle states.
+
+    Vocabulary intentionally mirrors FIX 4.4 OrdStatus (tag 39) so the
+    promoted lane stays interoperable with the international standard
+    most institutional brokers (US, EU, APAC) speak fluently. The
+    sequence is:
+
+        PENDING_NEW   → broker has received the order, not yet acked
+        NEW           → acked by exchange, sitting in the book unfilled
+        WORKING       → live and actively being executed (US / Schwab term)
+        PARTIALLY_FILLED → some quantity filled, more remaining
+        FILLED        → complete fill — terminal success
+        DONE_FOR_DAY  → day order ran out of session without filling
+        CANCELED      → operator-canceled (terminal)
+        EXPIRED       → time-in-force expired (terminal)
+        REJECTED      → broker rejected the order outright (terminal)
+        SUSPENDED     → held by the broker (compliance / margin / etc.)
+        TRIGGER_PENDING → stop / SL trigger condition not yet met
+                           (legacy Indian behavior)
+        PENDING_CANCEL → cancel requested, not yet effective
+        PENDING_REPLACE → modify requested, not yet effective
+        REPLACED      → modified — original superseded by a new id
+        ACCEPTED_FOR_BIDDING → OTC-style auction acceptance
+        CALCULATED    → broker calculated execution but not yet routed
+        UNKNOWN       → broker reported a state we don't recognize
+
+    Per-broker translators map their native vocabulary to these values
+    via :meth:`BrokerOrderTranslator.normalize_order_status`.
+    Display layers (legacy India UI, modern v2 UI, telegram bot, etc.)
+    consume the canonical enum and render whatever language the
+    surface needs (``services.order_status_display``).
+    """
+
+    PENDING_NEW = "PENDING_NEW"
+    NEW = "NEW"
+    WORKING = "WORKING"
+    PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    FILLED = "FILLED"
+    DONE_FOR_DAY = "DONE_FOR_DAY"
+    CANCELED = "CANCELED"
+    EXPIRED = "EXPIRED"
+    REJECTED = "REJECTED"
+    SUSPENDED = "SUSPENDED"
+    TRIGGER_PENDING = "TRIGGER_PENDING"
+    PENDING_CANCEL = "PENDING_CANCEL"
+    PENDING_REPLACE = "PENDING_REPLACE"
+    REPLACED = "REPLACED"
+    ACCEPTED_FOR_BIDDING = "ACCEPTED_FOR_BIDDING"
+    CALCULATED = "CALCULATED"
+    UNKNOWN = "UNKNOWN"
+
+    @property
+    def is_terminal(self) -> bool:
+        """True when no further state transitions are expected."""
+        return self in {
+            OrderStatus.FILLED,
+            OrderStatus.CANCELED,
+            OrderStatus.EXPIRED,
+            OrderStatus.REJECTED,
+            OrderStatus.DONE_FOR_DAY,
+            OrderStatus.REPLACED,
+        }
+
+    @property
+    def is_open(self) -> bool:
+        """True while the order can still take or place fills."""
+        return self in {
+            OrderStatus.PENDING_NEW,
+            OrderStatus.NEW,
+            OrderStatus.WORKING,
+            OrderStatus.PARTIALLY_FILLED,
+            OrderStatus.SUSPENDED,
+            OrderStatus.TRIGGER_PENDING,
+            OrderStatus.PENDING_CANCEL,
+            OrderStatus.PENDING_REPLACE,
+            OrderStatus.ACCEPTED_FOR_BIDDING,
+            OrderStatus.CALCULATED,
+        }
+
+
 class IdentifierType(StrEnum):
     """Categories of alternative identifier that can resolve an instrument."""
 
@@ -229,6 +310,7 @@ __all__ = [
     "MarketFamily",
     "OptionRight",
     "OrderSide",
+    "OrderStatus",
     "OrderType",
     "PositionEffect",
     "QuantityUnit",

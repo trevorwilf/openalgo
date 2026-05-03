@@ -276,6 +276,7 @@ def _tradebook() -> tuple[Any, int]:
     if broker == "alpaca":
         try:
             from broker.alpaca.api.order_api import AlpacaOrderTranslator
+            from domain.enums import OrderStatus
 
             translator = AlpacaOrderTranslator()
             rows = translator.list_orders_via_token(auth_token, status="closed")
@@ -283,13 +284,16 @@ def _tradebook() -> tuple[Any, int]:
             logger.exception("v1 bridge tradebook failed: %s", e)
             return jsonify(_v1_error(str(e))), 502
 
-        # Tradebook = filled fills only.
-        trades = [
-            _alpaca_order_to_v1(r, kind="trade")
-            for r in rows
-            if (r.get("status") or "").lower() in ("filled", "partially_filled")
-            and (r.get("filled_qty") or "0") not in ("0", "0.0")
-        ]
+        # Tradebook = orders that produced fills, regardless of broker
+        # vocabulary. Use the canonical status to filter.
+        trades: list[dict[str, Any]] = []
+        for r in rows:
+            canonical = AlpacaOrderTranslator.normalize_order_status(r.get("status"))
+            if canonical not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
+                continue
+            if (r.get("filled_qty") or "0") in ("0", "0.0"):
+                continue
+            trades.append(_alpaca_order_to_v1(r, kind="trade"))
         return jsonify(_v1_envelope(data=trades)), 200
 
     return jsonify(_v1_error("v1 bridge not implemented for this broker")), 501
@@ -432,9 +436,22 @@ def _quotes() -> tuple[Any, int]:
 
 def _alpaca_order_to_v1(row: dict, *, kind: str = "order") -> dict[str, Any]:
     """Translate an Alpaca order row into the v1 orderbook/tradebook
-    shape the React UI expects."""
+    shape the React UI expects.
+
+    Status mapping goes through the canonical
+    :class:`domain.enums.OrderStatus` so the legacy display vocabulary
+    ("open" / "complete" / "cancelled" / "rejected" / "trigger pending")
+    matches what the Indian React components rendered for v1 brokers.
+    The native Alpaca string is preserved under ``native_status`` for
+    debugging.
+    """
+    from broker.alpaca.api.order_api import AlpacaOrderTranslator
+    from services.order_status_display import legacy_v1_display
+
     qty_filled = row.get("filled_qty") or "0"
     qty_total = row.get("qty") or "0"
+    native_status = row.get("status") or ""
+    canonical = AlpacaOrderTranslator.normalize_order_status(native_status)
     base = {
         "orderid": row.get("id"),
         "symbol": row.get("symbol"),
@@ -445,7 +462,9 @@ def _alpaca_order_to_v1(row: dict, *, kind: str = "order") -> dict[str, Any]:
         "price": row.get("limit_price") or row.get("filled_avg_price") or "0",
         "trigger_price": row.get("stop_price") or "0",
         "average_price": row.get("filled_avg_price") or "0",
-        "order_status": row.get("status"),
+        "order_status": legacy_v1_display(canonical),
+        "canonical_status": canonical.value,
+        "native_status": native_status,
         "order_type": (row.get("type") or "").upper(),
         "product": "MIS",
         "timestamp": row.get("created_at"),
@@ -458,14 +477,11 @@ def _alpaca_order_to_v1(row: dict, *, kind: str = "order") -> dict[str, Any]:
 
 
 def _v1_order_stats(orders: list[dict]) -> dict[str, Any]:
-    open_count = sum(
-        1
-        for o in orders
-        if o["order_status"] in ("new", "accepted", "pending_new", "partially_filled")
-    )
-    filled_count = sum(1 for o in orders if o["order_status"] == "filled")
+    """Compute orderbook summary counts from the legacy display vocab."""
+    open_count = sum(1 for o in orders if o["order_status"] == "open")
+    filled_count = sum(1 for o in orders if o["order_status"] == "complete")
     cancelled_count = sum(
-        1 for o in orders if o["order_status"] in ("canceled", "expired", "rejected")
+        1 for o in orders if o["order_status"] in ("cancelled", "rejected")
     )
     return {
         "total_buy_orders": sum(1 for o in orders if o["action"] == "BUY"),

@@ -25,6 +25,7 @@ from domain.broker_translator import AccountContext
 from domain.enums import (
     ComboType,
     OrderSide,
+    OrderStatus,
     OrderType,
     QuantityUnit,
     Session,
@@ -446,13 +447,65 @@ class AlpacaOrderTranslator:
     ) -> dict[str, Any]:
         if "id" not in payload:
             raise ValueError("Alpaca order response missing `id`")
+        native_status = payload.get("status", "new")
+        canonical = self.normalize_order_status(native_status)
         return {
             "order_id": payload["id"],
-            "status": payload.get("status", "new"),
+            "status": canonical.value,
+            "native_status": native_status,
             "filled_quantity": _opt_decimal(payload.get("filled_qty")),
             "filled_avg_price": _opt_decimal(payload.get("filled_avg_price")),
             "native": payload,
         }
+
+    # ---- BrokerOrderTranslator status normalization --------------------
+    #
+    # Maps Alpaca's native status vocabulary to the canonical
+    # ``domain.enums.OrderStatus`` (FIX-aligned). Enumerates every
+    # value documented in Alpaca's API:
+    # https://docs.alpaca.markets/docs/orders-at-alpaca#order-lifecycle
+    #
+    # The classmethod form lets ops scripts and tests call this without
+    # constructing a translator instance.
+
+    _NATIVE_STATUS_MAP: dict[str, OrderStatus] = {
+        # Pre-acceptance
+        "pending_new": OrderStatus.PENDING_NEW,
+        "new": OrderStatus.NEW,
+        "accepted": OrderStatus.NEW,            # Alpaca acks then leaves NEW until working
+        "accepted_for_bidding": OrderStatus.ACCEPTED_FOR_BIDDING,
+        # Live in book
+        "held": OrderStatus.SUSPENDED,
+        "suspended": OrderStatus.SUSPENDED,
+        "stopped": OrderStatus.SUSPENDED,        # Alpaca's "stopped" — broker held
+        "calculated": OrderStatus.CALCULATED,
+        "partially_filled": OrderStatus.PARTIALLY_FILLED,
+        # Terminal — success
+        "filled": OrderStatus.FILLED,
+        "done_for_day": OrderStatus.DONE_FOR_DAY,
+        # Replace / cancel
+        "pending_cancel": OrderStatus.PENDING_CANCEL,
+        "pending_replace": OrderStatus.PENDING_REPLACE,
+        "replaced": OrderStatus.REPLACED,
+        # Terminal — failure / withdrawal
+        "canceled": OrderStatus.CANCELED,
+        "cancelled": OrderStatus.CANCELED,       # spelling tolerated
+        "expired": OrderStatus.EXPIRED,
+        "rejected": OrderStatus.REJECTED,
+    }
+
+    @classmethod
+    def normalize_order_status(cls, native: str | None) -> OrderStatus:
+        """Map an Alpaca native status string to canonical ``OrderStatus``.
+
+        Returns :attr:`OrderStatus.UNKNOWN` for any value Alpaca starts
+        emitting that's not in ``_NATIVE_STATUS_MAP`` — operators
+        watching that value in dashboards will see it grow and can
+        update the map.
+        """
+        if not native:
+            return OrderStatus.UNKNOWN
+        return cls._NATIVE_STATUS_MAP.get(native.lower().strip(), OrderStatus.UNKNOWN)
 
     # ---- Direct helpers (used by Phase 7 / ops tools) ------------------
 
@@ -667,13 +720,28 @@ def modify_order(
     if not orderid:
         return {"status": "error", "message": "orderid required"}, 400
 
+    def _is_set(value: Any) -> bool:
+        """Treat 0 / "0" / "" / None as "not set" so the legacy
+        UI's habit of defaulting these to 0 doesn't leak through to
+        Alpaca as an explicit zero (which Alpaca rejects with
+        ``stop price must be > 0`` etc.).
+        """
+        if value is None or value == "":
+            return False
+        try:
+            return float(value) != 0.0
+        except (TypeError, ValueError):
+            return bool(str(value).strip())
+
     patch_body: dict[str, Any] = {}
-    if "quantity" in data and data["quantity"]:
+    if _is_set(data.get("quantity")):
         patch_body["qty"] = str(data["quantity"])
-    if "price" in data and data["price"] not in (None, "", "0"):
+    if _is_set(data.get("price")):
         patch_body["limit_price"] = str(data["price"])
-    if "trigger_price" in data and data["trigger_price"] not in (None, "", "0"):
+    if _is_set(data.get("trigger_price")):
         patch_body["stop_price"] = str(data["trigger_price"])
+    if not patch_body:
+        return {"status": "error", "message": "no modifiable fields supplied"}, 400
 
     try:
         auth = auth_handle_from_token(auth_token)
@@ -700,9 +768,176 @@ def get_order_book(auth_token: str) -> tuple[dict[str, Any], int]:
         return {"status": "error", "message": str(e)}, 500
 
 
+def close_all_positions(api_key: Any, auth_token: str) -> tuple[Any, int]:
+    """Liquidate every open position. Alpaca exposes
+    ``DELETE /v2/positions`` which submits a closing order for each
+    position atomically and returns the resulting order list.
+
+    Used by ``services.close_position_service.close_position_with_auth``.
+    Signature mirrors the legacy India shape ``(response_code, status_code)``
+    so the existing service layer can dispatch into Alpaca without
+    branching.
+
+    ``api_key`` is unused — the auth handle is rebuilt from the
+    session ``auth_token`` so paper-vs-live mode is honored
+    independently of ambient env state.
+    """
+    del api_key  # not used; kept for legacy signature parity
+    from broker.alpaca.api.auth_api import auth_handle_from_token
+
+    try:
+        auth = auth_handle_from_token(auth_token)
+        with httpx.Client(
+            base_url=auth.base_url,
+            headers=dict(auth.headers),
+            timeout=httpx.Timeout(15.0, connect=5.0),
+        ) as c:
+            r = c.delete("/v2/positions")
+        if r.status_code in (200, 207):
+            return {"status": "success", "data": r.json() if r.content else []}, 200
+        if r.status_code == 204:
+            return {"status": "success", "data": []}, 200
+        return {"status": "error", "message": r.text[:300] or f"HTTP {r.status_code}"}, r.status_code
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": str(e)}, 500
+
+
+def get_open_position(symbol: str, exchange: str, product: str, auth_token: str) -> Any:
+    """Return the current open position quantity (positive = long,
+    negative = short, 0 = flat) for a symbol on a venue. Used by the
+    `/close_position` UI flow which must know the current direction
+    before submitting an opposing order.
+
+    Alpaca's ``GET /v2/positions/<symbol>`` returns 404 when flat.
+    """
+    del exchange, product  # Alpaca position lookup is symbol-keyed only
+    from broker.alpaca.api.auth_api import auth_handle_from_token
+
+    auth = auth_handle_from_token(auth_token)
+    with httpx.Client(
+        base_url=auth.base_url,
+        headers=dict(auth.headers),
+        timeout=httpx.Timeout(10.0, connect=5.0),
+    ) as c:
+        r = c.get(f"/v2/positions/{symbol.upper()}")
+    if r.status_code == 404:
+        return "0"
+    r.raise_for_status()
+    body = r.json() or {}
+    qty = body.get("qty") or "0"
+    side = (body.get("side") or "long").lower()
+    if side == "short" and not str(qty).startswith("-"):
+        return f"-{qty}"
+    return str(qty)
+
+
+def place_smartorder_api(
+    order_data: dict[str, Any], auth_token: str
+) -> tuple[Any, dict[str, Any], str | None]:
+    """Smart-order entry point used by the `/close_position` UI flow.
+
+    The legacy contract: when ``position_size`` is ``"0"`` the operator
+    wants to flatten the position. For Alpaca that maps to
+    ``DELETE /v2/positions/<symbol>``, which Alpaca implements as
+    "submit a closing market order for the full quantity". The closing
+    order's id is returned so the UI can render the resulting flatten
+    order in the order book.
+
+    For non-zero ``position_size`` the legacy semantics are
+    "rebalance to target" — out of MVP scope for Alpaca paper
+    trading. Returns a structured error so the UI surfaces it
+    instead of silently failing.
+    """
+    from broker.alpaca.api.auth_api import auth_handle_from_token
+
+    symbol = (order_data.get("symbol") or "").upper()
+    position_size = str(order_data.get("position_size", "")).strip()
+
+    if not symbol:
+        return None, {"message": "symbol required"}, None
+    if position_size and position_size != "0":
+        return None, {
+            "message": (
+                "place_smartorder for non-zero position_size is not "
+                "implemented for Alpaca yet — use POST /api/v2/orders "
+                "to place a normal order, or DELETE /v2/positions/"
+                f"{symbol} to flatten."
+            )
+        }, None
+
+    try:
+        auth = auth_handle_from_token(auth_token)
+        with httpx.Client(
+            base_url=auth.base_url,
+            headers=dict(auth.headers),
+            timeout=httpx.Timeout(10.0, connect=5.0),
+        ) as c:
+            r = c.delete(f"/v2/positions/{symbol}")
+    except Exception as e:  # noqa: BLE001
+        return None, {"message": str(e)}, None
+
+    if r.status_code in (200, 207):
+        body = r.json() if r.content else {}
+        # Alpaca's body shape: {"id": "...closing-order-id", ...}
+        order_id = body.get("id")
+        return r, {"message": f"Position {symbol} flatten submitted"}, order_id
+    if r.status_code == 404:
+        return r, {"message": f"No open position in {symbol}"}, None
+    return r, {"message": f"HTTP {r.status_code}: {r.text[:200]}"}, None
+
+
+def cancel_all_orders_api(
+    order_data: dict[str, Any], auth_token: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Cancel every open order. Returns ``(canceled, failed)`` lists.
+
+    Used by ``services.cancel_all_order_service`` (which is invoked
+    from the React UI's "Cancel All" button). Alpaca exposes
+    ``DELETE /v2/orders`` which atomically cancels every open order
+    and returns a per-order status report — much more efficient than
+    iterating cancels client-side.
+    """
+    from broker.alpaca.api.auth_api import auth_handle_from_token
+
+    auth = auth_handle_from_token(auth_token)
+    canceled: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+
+    try:
+        with httpx.Client(
+            base_url=auth.base_url,
+            headers=dict(auth.headers),
+            timeout=httpx.Timeout(15.0, connect=5.0),
+        ) as c:
+            r = c.delete("/v2/orders")
+        # 207 Multi-Status is what Alpaca actually returns; their docs
+        # describe the response as an array of {id, status} per order.
+        if r.status_code in (200, 207):
+            for entry in r.json() or []:
+                oid = entry.get("id")
+                http_code = entry.get("status")
+                if isinstance(http_code, int) and http_code < 300:
+                    canceled.append({"orderid": oid})
+                else:
+                    failed.append({"orderid": oid, "reason": entry.get("body")})
+        elif r.status_code == 204:
+            # Nothing to cancel — empty success.
+            pass
+        else:
+            failed.append({"orderid": None, "reason": f"HTTP {r.status_code}: {r.text[:200]}"})
+    except Exception as e:  # noqa: BLE001
+        failed.append({"orderid": None, "reason": str(e)})
+
+    return canceled, failed
+
+
 __all__ = [
     "AlpacaOrderTranslator",
+    "cancel_all_orders_api",
     "cancel_order",
+    "close_all_positions",
+    "get_open_position",
     "get_order_book",
     "modify_order",
+    "place_smartorder_api",
 ]
