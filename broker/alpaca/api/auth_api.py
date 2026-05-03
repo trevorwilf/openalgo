@@ -1,12 +1,33 @@
 """Alpaca authentication — header-based key pair (no OAuth).
 
-Two env vars drive it:
+Two precedence-ordered credential sources:
 
-- ``ALPACA_API_KEY`` (APCA-API-KEY-ID)
-- ``ALPACA_API_SECRET`` (APCA-API-SECRET-KEY)
+1. **Explicit Alpaca-prefixed env vars** (recommended for multi-broker
+   shared environments):
 
-There is no token refresh flow — keys are long-lived. The base URL is
-selected by ``ALPACA_PAPER`` (default ``1``): paper vs live.
+       ALPACA_API_KEY      (APCA-API-KEY-ID)
+       ALPACA_API_SECRET   (APCA-API-SECRET-KEY)
+       ALPACA_PAPER=1      (default — paper-api.alpaca.markets)
+       ALPACA_PAPER=0      (live — api.alpaca.markets)
+
+2. **Generic OpenAlgo BROKER_API_* convention** (used when an
+   OpenAlgo deployment dedicates the single ``BROKER`` slot to
+   Alpaca). Paper keys go in the regular slots, live keys in the
+   ``_MARKET`` slots:
+
+       BROKER_API_KEY            (paper key)
+       BROKER_API_SECRET         (paper secret)
+       BROKER_API_KEY_MARKET     (live key)
+       BROKER_API_SECRET_MARKET  (live secret)
+       ALPACA_LIVE_MODE=1        → use _MARKET pair + live URL
+       ALPACA_LIVE_MODE=0        → use regular pair + paper URL (default)
+
+If both source families are populated, the explicit
+``ALPACA_API_KEY/ALPACA_API_SECRET`` pair wins. If neither is set
+``load_credentials`` raises ``ValueError``.
+
+There is no token refresh flow — keys are long-lived. Key validity
+is confirmed later when the account endpoint is hit.
 """
 
 from __future__ import annotations
@@ -19,6 +40,40 @@ from typing import Mapping
 PAPER_BASE_URL = "https://paper-api.alpaca.markets"
 LIVE_BASE_URL = "https://api.alpaca.markets"
 DATA_BASE_URL = "https://data.alpaca.markets"
+
+
+# Sentinel placeholder values that the .sample.env ships and that
+# users sometimes leave unchanged. Treating them as "missing" gives
+# a clearer error than letting them through to the broker.
+_PLACEHOLDER_VALUES = frozenset({
+    "",
+    "YOUR_BROKER_API_KEY",
+    "YOUR_BROKER_API_SECRET",
+    "YOUR_BROKER_MARKET_API_KEY",
+    "YOUR_BROKER_MARKET_API_SECRET",
+    "YOUR_ALPACA_API_KEY",
+    "YOUR_ALPACA_API_SECRET",
+})
+
+
+def _is_real(value: str | None) -> bool:
+    return bool(value) and value not in _PLACEHOLDER_VALUES
+
+
+def _resolve_is_paper() -> bool:
+    """Determine paper vs live mode.
+
+    ``ALPACA_LIVE_MODE`` takes precedence (1 → live; anything else →
+    paper). When unset, fall back to ``ALPACA_PAPER`` (0 → live;
+    anything else → paper). Default is paper.
+    """
+    live_mode = os.environ.get("ALPACA_LIVE_MODE")
+    if live_mode is not None:
+        return live_mode.strip().lower() not in ("1", "true", "yes", "on")
+    paper = os.environ.get("ALPACA_PAPER")
+    if paper is not None:
+        return paper.strip() != "0"
+    return True
 
 
 @dataclass(frozen=True)
@@ -38,16 +93,36 @@ def load_credentials() -> tuple[str, str, bool]:
     """Read API credentials from environment.
 
     Returns ``(api_key, api_secret, is_paper)``. Raises
-    ``ValueError`` if either key is missing.
+    ``ValueError`` if no credential pair can be resolved for the
+    chosen mode.
     """
+    is_paper = _resolve_is_paper()
+
+    # Source 1: explicit Alpaca-prefixed (always wins when set).
     key = os.environ.get("ALPACA_API_KEY")
     secret = os.environ.get("ALPACA_API_SECRET")
-    if not key or not secret:
-        raise ValueError(
-            "ALPACA_API_KEY and ALPACA_API_SECRET must both be set"
-        )
-    is_paper = os.environ.get("ALPACA_PAPER", "1") != "0"
-    return key, secret, is_paper
+
+    if not (_is_real(key) and _is_real(secret)):
+        # Source 2: generic BROKER_API_* convention.
+        if is_paper:
+            key = os.environ.get("BROKER_API_KEY")
+            secret = os.environ.get("BROKER_API_SECRET")
+            slot_label = "BROKER_API_KEY/BROKER_API_SECRET"
+        else:
+            key = os.environ.get("BROKER_API_KEY_MARKET")
+            secret = os.environ.get("BROKER_API_SECRET_MARKET")
+            slot_label = "BROKER_API_KEY_MARKET/BROKER_API_SECRET_MARKET"
+
+        if not (_is_real(key) and _is_real(secret)):
+            mode_label = "paper" if is_paper else "live"
+            raise ValueError(
+                f"Alpaca {mode_label} credentials missing. Set either "
+                "ALPACA_API_KEY/ALPACA_API_SECRET (with ALPACA_PAPER "
+                "controlling mode) or "
+                f"{slot_label} (with ALPACA_LIVE_MODE controlling mode)."
+            )
+
+    return key, secret, is_paper  # type: ignore[return-value]
 
 
 def authenticate() -> AlpacaAuth:
