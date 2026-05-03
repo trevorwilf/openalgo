@@ -181,7 +181,15 @@ describe('PlaceOrderDialogV2 — Alpaca / XNAS / AAPL', () => {
     expect(url).toBe('/api/v2/orders')
     const body = JSON.parse((init as RequestInit).body as string)
     expect(body.apikey).toBe('KEY-42')
-    expect(body.instrument.canonical_symbol).toBe('AAPL')
+    // Instrument fixture has ``instrument_id`` set, so the body uses
+    // *only* the id form. ``InstrumentRef`` rejects mixed shapes
+    // ("got multiple") — sending venue_code+canonical_symbol alongside
+    // an id is the bug item 3 of the v6 polish round fixed.
+    expect(body.instrument.instrument_id).toBe(
+      '00000000-0000-0000-0000-000000000001',
+    )
+    expect(body.instrument.canonical_symbol).toBeUndefined()
+    expect(body.instrument.venue_code).toBeUndefined()
     expect(body.side).toBe('BUY')
     expect(body.order_type).toBe('MARKET')
     expect(body.quantity_unit).toBe('WHOLE')
