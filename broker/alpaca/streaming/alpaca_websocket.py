@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -44,6 +45,13 @@ logger = get_logger(__name__)
 
 # Default to the free IEX feed; SIP requires a paid Alpaca subscription.
 DEFAULT_FEED_URL = "wss://stream.data.alpaca.markets/v2/iex"
+
+# Reconnect tunables — Branch H. Exponential backoff capped at
+# RECONNECT_MAX_DELAY. ``RECONNECT_MAX_ATTEMPTS=0`` means unlimited.
+RECONNECT_INITIAL_DELAY = 1.0
+RECONNECT_MAX_DELAY = 30.0
+RECONNECT_BACKOFF_FACTOR = 2.0
+RECONNECT_MAX_ATTEMPTS = 0  # 0 = unlimited
 
 
 class AlpacaWebSocketClient:
@@ -71,6 +79,12 @@ class AlpacaWebSocketClient:
         on_bar: Callable[[dict[str, Any]], None] | None = None,
         on_status: Callable[[str, dict[str, Any]], None] | None = None,
         on_error: Callable[[Exception], None] | None = None,
+        *,
+        reconnect: bool = True,
+        reconnect_max_attempts: int = RECONNECT_MAX_ATTEMPTS,
+        reconnect_initial_delay: float = RECONNECT_INITIAL_DELAY,
+        reconnect_max_delay: float = RECONNECT_MAX_DELAY,
+        reconnect_backoff_factor: float = RECONNECT_BACKOFF_FACTOR,
     ) -> None:
         self._auth = auth
         self._feed_url = feed_url
@@ -80,15 +94,28 @@ class AlpacaWebSocketClient:
         self._on_status = on_status
         self._on_error = on_error
 
+        # Branch H — reconnect tunables.
+        self._reconnect = reconnect
+        self._reconnect_max_attempts = reconnect_max_attempts
+        self._reconnect_initial_delay = reconnect_initial_delay
+        self._reconnect_max_delay = reconnect_max_delay
+        self._reconnect_backoff_factor = reconnect_backoff_factor
+
         self._ws: websocket.WebSocketApp | None = None
         self._thread: threading.Thread | None = None
         self._authenticated = threading.Event()
         self._closed = threading.Event()
         self._lock = threading.Lock()
+        # Set when the operator calls ``stop()``. The reconnect loop
+        # consults this to decide whether a clean WS close should
+        # trigger a retry or end the loop.
+        self._stop_requested = threading.Event()
+        # Track reconnect attempts so on_status observers can see
+        # ``RECONNECTING`` events with the attempt count.
+        self._reconnect_attempt = 0
 
-        # Active subscription sets — used to resubscribe after reconnect
-        # (reconnect is a future enhancement; the sets are tracked now
-        # so the API surface is stable).
+        # Active subscription sets — replayed to the broker after each
+        # reconnect.
         self._sub_trades: set[str] = set()
         self._sub_quotes: set[str] = set()
         self._sub_bars: set[str] = set()
@@ -101,36 +128,50 @@ class AlpacaWebSocketClient:
         Blocks until the server confirms ``authenticated`` or the
         timeout elapses, whichever comes first. Raises ``TimeoutError``
         if auth doesn't complete within ``timeout`` seconds.
+
+        After the first successful connect, the reader thread keeps
+        running and re-establishes the connection (with exponential
+        backoff + automatic resubscribe) when the broker drops the
+        socket — unless ``reconnect=False`` was passed at
+        construction.
         """
-        auth = self._resolve_auth()
+        self._stop_requested.clear()
         self._authenticated.clear()
         self._closed.clear()
+        self._reconnect_attempt = 0
 
-        self._ws = websocket.WebSocketApp(
-            self._feed_url,
-            on_open=self._on_open,
-            on_message=self._on_message,
-            on_error=self._on_ws_error,
-            on_close=self._on_close,
-            header={
-                "APCA-API-KEY-ID": auth.headers["APCA-API-KEY-ID"],
-                "APCA-API-SECRET-KEY": auth.headers["APCA-API-SECRET-KEY"],
-            },
-        )
+        # Spawn the reader thread; it runs the connect→run_forever→
+        # backoff loop in a single place. The first connect happens
+        # synchronously inside that thread; the call below blocks
+        # until auth completes (or timeout).
         self._thread = threading.Thread(
-            target=self._ws.run_forever,
+            target=self._reader_loop,
             name="alpaca-ws-reader",
             daemon=True,
         )
         self._thread.start()
 
         if not self._authenticated.wait(timeout=timeout):
+            # Tear down the partially-started loop so stop() doesn't
+            # hang when the caller raises.
+            self._stop_requested.set()
+            try:
+                if self._ws is not None:
+                    self._ws.close()
+            except Exception:  # pragma: no cover
+                pass
             raise TimeoutError(
                 f"Alpaca WS auth did not complete within {timeout}s"
             )
 
     def stop(self, timeout: float = 5.0) -> None:
-        """Close the socket and wait for the reader thread to exit."""
+        """Close the socket and wait for the reader thread to exit.
+
+        Idempotent — calling ``stop()`` multiple times is safe. The
+        reader thread sees ``_stop_requested`` and exits the
+        reconnect loop on its next iteration.
+        """
+        self._stop_requested.set()
         if self._ws is not None:
             try:
                 self._ws.close()
@@ -139,6 +180,119 @@ class AlpacaWebSocketClient:
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=timeout)
         self._closed.set()
+
+    # -- reader loop (Branch H — reconnect with exponential backoff) -------
+
+    def _reader_loop(self) -> None:
+        """Run the WS reader with reconnect-on-close.
+
+        Each iteration: open a fresh ``WebSocketApp`` against the
+        feed URL, run it to completion (returns when the broker or
+        ``stop()`` closes the socket), then decide whether to retry.
+        Reconnect is suppressed when ``reconnect=False`` was passed
+        or ``stop()`` was called.
+
+        Backoff: ``initial`` × ``factor`` ^ attempt, capped at
+        ``max_delay``. Auth + resubscribe happen on every connect;
+        the active subscription sets are never cleared so a clean
+        reconnect resumes the prior topic state automatically.
+        """
+        delay = self._reconnect_initial_delay
+        first = True
+
+        while not self._stop_requested.is_set():
+            if first:
+                first = False
+            else:
+                self._reconnect_attempt += 1
+                if (
+                    self._reconnect_max_attempts > 0
+                    and self._reconnect_attempt > self._reconnect_max_attempts
+                ):
+                    logger.error(
+                        "Alpaca WS reconnect: max attempts (%d) reached; giving up",
+                        self._reconnect_max_attempts,
+                    )
+                    break
+                if self._on_status is not None:
+                    try:
+                        self._on_status(
+                            "reconnecting",
+                            {
+                                "attempt": self._reconnect_attempt,
+                                "delay_seconds": delay,
+                            },
+                        )
+                    except Exception:  # pragma: no cover
+                        logger.exception("alpaca on_status handler raised")
+                logger.info(
+                    "Alpaca WS reconnect attempt %d in %.1fs",
+                    self._reconnect_attempt,
+                    delay,
+                )
+                # Sleep in short slices so stop() can interrupt
+                # promptly without waiting out the full backoff.
+                slept = 0.0
+                while slept < delay and not self._stop_requested.is_set():
+                    time.sleep(min(0.25, delay - slept))
+                    slept += 0.25
+                if self._stop_requested.is_set():
+                    break
+                delay = min(
+                    delay * self._reconnect_backoff_factor,
+                    self._reconnect_max_delay,
+                )
+
+            # Open a fresh WS and block until it closes.
+            self._authenticated.clear()
+            try:
+                auth = self._resolve_auth()
+                self._ws = websocket.WebSocketApp(
+                    self._feed_url,
+                    on_open=self._on_open,
+                    on_message=self._on_message,
+                    on_error=self._on_ws_error,
+                    on_close=self._on_close,
+                    header={
+                        "APCA-API-KEY-ID": auth.headers["APCA-API-KEY-ID"],
+                        "APCA-API-SECRET-KEY": auth.headers["APCA-API-SECRET-KEY"],
+                    },
+                )
+                self._ws.run_forever()
+            except Exception as exc:  # noqa: BLE001 - boundary for the loop
+                logger.exception("Alpaca WS reader iteration crashed: %s", exc)
+                if self._on_error is not None:
+                    try:
+                        self._on_error(exc)
+                    except Exception:  # pragma: no cover
+                        logger.exception("alpaca on_error handler raised")
+
+            # Loop back unless stop() was called or reconnect disabled.
+            if not self._reconnect or self._stop_requested.is_set():
+                break
+
+        self._closed.set()
+
+    def _replay_subscriptions(self) -> None:
+        """Send the current ``_sub_*`` sets to the broker.
+
+        Called by ``_on_open`` after a (re)auth so the broker resumes
+        the prior subscription state without the operator having to
+        call subscribe() again.
+        """
+        with self._lock:
+            payload: dict[str, Any] = {"action": "subscribe"}
+            if self._sub_trades:
+                payload["trades"] = sorted(self._sub_trades)
+            if self._sub_quotes:
+                payload["quotes"] = sorted(self._sub_quotes)
+            if self._sub_bars:
+                payload["bars"] = sorted(self._sub_bars)
+        if len(payload) > 1:
+            try:
+                self._send(payload)
+            except Exception:  # pragma: no cover
+                logger.exception("alpaca resubscribe failed")
 
     # -- subscriptions ------------------------------------------------------
 
@@ -240,6 +394,21 @@ class AlpacaWebSocketClient:
             msg = frame.get("msg")
             if msg == "authenticated":
                 self._authenticated.set()
+                # Branch H — after a (re)auth, replay the active
+                # subscriptions so the broker resumes the prior topic
+                # state. On the first connect this is a no-op (sets
+                # are empty); after a reconnect it re-arms them.
+                self._replay_subscriptions()
+                if self._reconnect_attempt > 0 and self._on_status is not None:
+                    try:
+                        self._on_status(
+                            "reconnected",
+                            {"attempt": self._reconnect_attempt},
+                        )
+                    except Exception:  # pragma: no cover
+                        logger.exception("alpaca on_status handler raised")
+                # Reset for the next disconnect cycle.
+                self._reconnect_attempt = 0
             if self._on_status is not None:
                 try:
                     self._on_status("success", frame)
