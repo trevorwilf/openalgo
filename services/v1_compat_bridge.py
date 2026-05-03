@@ -74,6 +74,46 @@ def _v1_envelope(status: str = "success", **fields: Any) -> dict[str, Any]:
     return {"status": status, **fields}
 
 
+# ---------------------------------------------------------------------------
+# Venue aliasing — accept the friendly US-exchange names the typical
+# US trader knows (NASDAQ / NYSE / AMEX / BATS / ARCA) in addition to
+# their canonical ISO 10383 MIC codes (XNAS / XNYS / ARCX / BATS).
+# ---------------------------------------------------------------------------
+
+_VENUE_ALIASES = {
+    "NASDAQ": "XNAS",
+    "NSDQ": "XNAS",
+    "NMS": "XNAS",
+    "OTC": "XNAS",
+    "NYSE": "XNYS",
+    "NYS": "XNYS",
+    "AMEX": "XNYS",
+    "ASE": "XNYS",
+    "ARCA": "ARCX",
+    "ARC": "ARCX",
+    "BATS": "BATS",
+    "BZX": "BATS",
+    "CBOE": "BATS",
+    # India-shaped codes occasionally leak in through legacy URL
+    # construction; default to NASDAQ so the API at least resolves
+    # rather than 404'ing.
+    "NSE": "XNAS",
+    "BSE": "XNYS",
+}
+
+
+def _alias_venue(raw: str | None) -> str:
+    """Map a user-friendly exchange string to a canonical MIC code.
+
+    Returns the input upper-cased if no alias matches, so canonical
+    MIC codes (XNAS, XNYS, …) pass through unchanged.
+    """
+    if not raw:
+        return "XNAS"
+    upper = raw.upper().strip()
+    return _VENUE_ALIASES.get(upper, upper)
+
+
 def _v1_error(message: str, code: str | None = None) -> dict[str, Any]:
     return {
         "status": "error",
@@ -337,10 +377,7 @@ def _quotes() -> tuple[Any, int]:
     if not symbol:
         return jsonify(_v1_error("symbol required")), 400
 
-    venue = exchange or "XNAS"
-    if exchange in ("NSE", "BSE"):
-        # India-shaped exchange codes don't map; default to XNAS for compat.
-        venue = "XNAS"
+    venue = _alias_venue(exchange) if exchange else "XNAS"
 
     try:
         from broker.alpaca.api.auth_api import auth_handle_from_token
@@ -447,9 +484,7 @@ def _v1_order_to_normalized(body: dict) -> Any:
     from domain.orders import NormalizedOrderRequest
 
     symbol = (body.get("symbol") or "").upper()
-    exchange = (body.get("exchange") or "XNAS").upper()
-    if exchange in ("NSE", "BSE"):
-        exchange = "XNAS"  # India-shaped exchange code → default US venue
+    exchange = _alias_venue(body.get("exchange") or "XNAS")
     action = (body.get("action") or "BUY").upper()
     pricetype = (body.get("price_type") or body.get("pricetype") or "MARKET").upper()
     quantity = body.get("quantity") or "1"

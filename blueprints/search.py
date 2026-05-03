@@ -101,10 +101,92 @@ def search():
     return render_template("search.html", results=results_dicts)
 
 
+def _active_broker_is_non_india() -> bool:
+    """Return True when the session's broker plugin declares
+    ``supported_regions`` excluding ``india``. Falls back to False
+    (legacy India behavior) on any error so existing flows are
+    untouched.
+    """
+    try:
+        broker = session.get("broker")
+        if not broker:
+            return False
+        from utils.plugin_loader import get_broker_capabilities
+
+        caps = get_broker_capabilities(broker)
+        if caps is None:
+            return False
+        regions = {str(r).strip().lower() for r in (caps.supported_regions or [])}
+        if not regions:
+            return False
+        return "india" not in regions
+    except Exception:  # pragma: no cover - defensive
+        return False
+
+
+def _alias_venue_code(raw: str | None) -> str | None:
+    """Translate user-friendly US exchange names to canonical MIC
+    codes (NASDAQ → XNAS, NYSE → XNYS, etc.). Returns ``None`` for
+    empty input so the search treats it as "all venues".
+    """
+    if not raw:
+        return None
+    try:
+        from services.v1_compat_bridge import _alias_venue
+
+        return _alias_venue(raw)
+    except Exception:  # pragma: no cover - defensive
+        return raw.upper().strip()
+
+
+def _instruments_search_response(query: str | None, exchange: str | None) -> list[dict]:
+    """Render the same response shape as the legacy Indian
+    ``enhanced_search_symbols`` path, but sourced from the canonical
+    ``instruments`` table — so non-India brokers (Alpaca etc.) can
+    actually find symbols.
+    """
+    from database.instruments_repo import instruments_search
+
+    venue = _alias_venue_code(exchange)
+    rows = instruments_search(
+        venue_code=venue,
+        query=query,
+        limit=50,
+    )
+    out: list[dict] = []
+    for r in rows:
+        out.append(
+            {
+                "symbol": r.canonical_symbol,
+                "brsymbol": r.canonical_symbol,
+                "name": r.display_name or r.canonical_symbol,
+                "exchange": r.venue_code,
+                "brexchange": r.venue_code,
+                "token": str(r.instrument_id),
+                "expiry": "",
+                "strike": 0,
+                "lotsize": int(r.lot_size or 1),
+                "contract_value": 0,
+                "instrumenttype": r.asset_class or "EQUITY",
+                "freeze_qty": 1,
+            }
+        )
+    return out
+
+
 @search_bp.route("/api/search")
 @check_session_validity
 def api_search():
     """API endpoint for AJAX search suggestions with FNO filters"""
+    # Non-India brokers (e.g. Alpaca) sourced from the canonical
+    # `instruments` table — the legacy `enhanced_search_symbols`
+    # reads from `SymToken` which is empty for them.
+    if _active_broker_is_non_india():
+        query = request.args.get("q", "").strip() or None
+        exchange = request.args.get("exchange") or None
+        results_dicts = _instruments_search_response(query, exchange)
+        return jsonify({"results": results_dicts})
+
     query = request.args.get("q", "").strip() or None
     exchange = request.args.get("exchange")
 
