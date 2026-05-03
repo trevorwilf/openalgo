@@ -300,6 +300,12 @@ class AlpacaOrderTranslator:
             ComboType.OTO: 2,
             ComboType.OCO: 2,
             ComboType.OTOCO: 3,
+            # BRACKET is the canonical name for parent + take-profit
+            # + stop-loss. At Alpaca it serializes to the same
+            # `order_class=bracket` as OTOCO; the translator accepts
+            # either form so operators using the clearer name don't
+            # have to translate it themselves.
+            ComboType.BRACKET: 3,
         }[combo.combo_type]
         if len(combo.legs) != expected_legs:
             raise UnsupportedCapability(
@@ -331,9 +337,9 @@ class AlpacaOrderTranslator:
                     ),
                 )
 
-        # OTOCO / bracket: leg[1] must be the LIMIT take_profit and
+        # OTOCO / BRACKET: leg[1] must be the LIMIT take_profit and
         # leg[2] must be the STOP / STOP_LIMIT stop_loss.
-        if combo.combo_type == ComboType.OTOCO:
+        if combo.combo_type in (ComboType.OTOCO, ComboType.BRACKET):
             tp_leg = combo.legs[1]
             sl_leg = combo.legs[2]
             if tp_leg.order_type != OrderType.LIMIT:
@@ -386,7 +392,7 @@ class AlpacaOrderTranslator:
         body = self._to_native_single_leg(combo, parent_inst, account_ctx)
         body["order_class"] = COMBO_TYPE_TO_ALPACA[combo.combo_type]
 
-        if combo.combo_type == ComboType.OTOCO:
+        if combo.combo_type in (ComboType.OTOCO, ComboType.BRACKET):
             tp_leg = combo.legs[1]
             sl_leg = combo.legs[2]
             body["take_profit"] = _build_take_profit(tp_leg)
