@@ -65,14 +65,36 @@ def _venues_for_us() -> None:
         )
 
 
+def _venue_for_crypto() -> None:
+    """Branch M — ensure the synthetic CRYPTO venue exists.
+
+    Alpaca's crypto desk is broker-namespaced (no MIC code); CRYPTO
+    is OpenAlgo's canonical placeholder for 24/7 crypto SPOT.
+    """
+    venues_upsert(
+        venue_code="CRYPTO",
+        market_family="CRYPTO",
+        country_code="US",
+        base_currency="USD",
+        timezone_name="America/New_York",
+    )
+
+
 def fetch_assets(
     auth: AlpacaAuth | None = None,
     client: httpx.Client | None = None,
+    *,
+    asset_class: str = "us_equity",
 ) -> list[dict]:
-    """Return the list of active tradable US equities from Alpaca."""
+    """Return the list of active tradable Alpaca assets.
+
+    ``asset_class`` selects which slice of /v2/assets to fetch.
+    Branch M added ``"crypto"`` alongside the existing
+    ``"us_equity"`` default.
+    """
     if auth is None:
         auth = authenticate()
-    params = {"status": "active", "asset_class": "us_equity"}
+    params = {"status": "active", "asset_class": asset_class}
     if client is not None:
         r = client.get("/v2/assets", params=params)
     else:

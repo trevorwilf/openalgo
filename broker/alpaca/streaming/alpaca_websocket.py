@@ -45,6 +45,8 @@ logger = get_logger(__name__)
 
 # Default to the free IEX feed; SIP requires a paid Alpaca subscription.
 DEFAULT_FEED_URL = "wss://stream.data.alpaca.markets/v2/iex"
+# Branch M — crypto WebSocket feed (separate endpoint; 24/7).
+CRYPTO_FEED_URL = "wss://stream.data.alpaca.markets/v1beta3/crypto/us"
 
 # Reconnect tunables — Branch H. Exponential backoff capped at
 # RECONNECT_MAX_DELAY. ``RECONNECT_MAX_ATTEMPTS=0`` means unlimited.

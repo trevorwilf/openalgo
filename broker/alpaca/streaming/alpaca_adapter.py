@@ -23,9 +23,28 @@ from typing import Any
 
 from broker.alpaca.api.auth_api import AlpacaAuth, authenticate
 from broker.alpaca.streaming.alpaca_websocket import (
+    CRYPTO_FEED_URL,
     DEFAULT_FEED_URL,
     AlpacaWebSocketClient,
 )
+
+
+# Branch M — feed selection. ``ALPACA_STREAM_FEED`` overrides the
+# default IEX feed:
+#
+#   iex     — wss://stream.data.alpaca.markets/v2/iex     (free, default)
+#   sip     — wss://stream.data.alpaca.markets/v2/sip     (paid SIP)
+#   crypto  — wss://stream.data.alpaca.markets/v1beta3/crypto/us
+#
+# A single adapter instance subscribes to a single feed; mixing
+# equity and crypto subscriptions in one adapter is not supported
+# (Alpaca's wire protocol uses one URL per asset family). Spawn a
+# second adapter for the other family.
+_FEED_URLS: dict[str, str] = {
+    "iex": "wss://stream.data.alpaca.markets/v2/iex",
+    "sip": "wss://stream.data.alpaca.markets/v2/sip",
+    "crypto": CRYPTO_FEED_URL,
+}
 from utils.logging import get_logger
 from websocket_proxy.base_adapter import BaseBrokerWebSocketAdapter
 
@@ -94,7 +113,7 @@ class AlpacaWebSocketAdapter(BaseBrokerWebSocketAdapter):
             raise RuntimeError(
                 "AlpacaWebSocketAdapter.connect() before initialize()"
             )
-        feed_url = os.environ.get("ALPACA_STREAM_BASE", DEFAULT_FEED_URL)
+        feed_url = self._resolve_feed_url()
         self._ws = AlpacaWebSocketClient(
             auth=self._auth,
             feed_url=feed_url,
@@ -135,23 +154,86 @@ class AlpacaWebSocketAdapter(BaseBrokerWebSocketAdapter):
         if self._ws is None:
             return {"status": "error", "code": "not_connected"}
 
-        # Track the broader of LTP / Quote per symbol so consumer
-        # downgrades don't lose the bid/ask publish.
-        prior = self._modes.get(symbol, 0)
-        self._modes[symbol] = max(prior, mode)
+        # Branch M — refuse to subscribe to a symbol on the wrong
+        # feed. CRYPTO venues only flow over the crypto feed; equity
+        # venues only over IEX / SIP. Mixed-asset adapters are not
+        # supported (Alpaca uses one URL per asset family).
+        feed_kind = self._feed_kind()
+        is_crypto_venue = exchange.upper() == "CRYPTO"
+        if is_crypto_venue and feed_kind != "crypto":
+            return {
+                "status": "error",
+                "code": "feed_mismatch",
+                "message": (
+                    f"Cannot subscribe to CRYPTO venue {symbol!r} on the "
+                    f"{feed_kind!r} feed; set ALPACA_STREAM_FEED=crypto "
+                    "and reconnect, or use a separate adapter instance."
+                ),
+            }
+        if not is_crypto_venue and feed_kind == "crypto":
+            return {
+                "status": "error",
+                "code": "feed_mismatch",
+                "message": (
+                    f"Cannot subscribe to equity venue {exchange!r} on the "
+                    "crypto feed; set ALPACA_STREAM_FEED=iex (or sip) and "
+                    "reconnect."
+                ),
+            }
+
+        # Branch M — translate OpenAlgo's BTC-USD into Alpaca's
+        # BTC/USD wire form for crypto subscriptions.
+        broker_symbol = (
+            symbol.replace("-", "/") if is_crypto_venue and "-" in symbol else symbol
+        )
+        # Track the broader of LTP / Quote per the BROKER's symbol
+        # form so the inbound frame's S field matches.
+        prior = self._modes.get(broker_symbol, 0)
+        self._modes[broker_symbol] = max(prior, mode)
 
         if prior == 0:
             # First subscription for this symbol — open both trade
             # and quote channels at the broker. The mode gate at
             # publish time decides which payloads we forward.
-            self._ws.subscribe(trades=[symbol], quotes=[symbol])
+            self._ws.subscribe(
+                trades=[broker_symbol], quotes=[broker_symbol]
+            )
         return {
             "status": "ok",
             "symbol": symbol,
+            "broker_symbol": broker_symbol,
             "exchange": exchange,
             "mode": mode,
+            "feed": feed_kind,
             "broker_subscribed": ["trades", "quotes"],
         }
+
+    # ---- feed selection helpers (Branch M) ------------------------------
+
+    def _resolve_feed_url(self) -> str:
+        """Pick the WS URL based on ``ALPACA_STREAM_FEED`` (default iex).
+
+        ``ALPACA_STREAM_BASE`` is honored as a full-URL override for
+        backwards compatibility — operators using the old env var
+        keep working.
+        """
+        explicit = os.environ.get("ALPACA_STREAM_BASE")
+        if explicit:
+            return explicit
+        feed = os.environ.get("ALPACA_STREAM_FEED", "iex").strip().lower()
+        return _FEED_URLS.get(feed, DEFAULT_FEED_URL)
+
+    def _feed_kind(self) -> str:
+        """Return ``iex`` / ``sip`` / ``crypto`` for the current connection.
+
+        Used by subscribe() to gate cross-feed subscriptions.
+        """
+        url = self._resolve_feed_url()
+        if "/crypto/" in url:
+            return "crypto"
+        if url.endswith("/sip"):
+            return "sip"
+        return "iex"
 
     def unsubscribe(
         self,
