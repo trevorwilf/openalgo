@@ -88,6 +88,21 @@ def enforce_india_only():
         # through — preserves bit-identical India behavior.
         return None
 
+    # v1 → v2 compat bridge for non-India brokers. The bridge re-shapes
+    # the request and dispatches through /api/v2 internally so the
+    # legacy India services are NEVER invoked (ADR 0023, invariant 5
+    # spirit preserved). If no bridge entry matches the path, fall
+    # through to the 410 Gone behavior.
+    try:
+        from services.v1_compat_bridge import try_bridge
+
+        bridged = try_bridge(broker, path)
+    except Exception:  # pragma: no cover — bridge must never crash the lane guard
+        logger.exception("v1 compat bridge raised; falling back to 410")
+        bridged = None
+    if bridged is not None:
+        return bridged
+
     from domain.errors import ErrorCode
 
     payload = {

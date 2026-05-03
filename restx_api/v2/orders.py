@@ -85,9 +85,86 @@ def _broker_lane_check(broker: str) -> tuple[Any | None, int | None]:
 api = Namespace("orders", description="Normalized order placement")
 
 
+def _list_orders_via_translator(promoted, auth_token: str, status: str):
+    """Try the optional list_orders_via_token hook on a translator.
+
+    Returns ``(rows | None, error_payload | None, http_status | None)``.
+    Translators that don't implement the hook return None for rows
+    so the caller can return 501.
+    """
+    fn = getattr(promoted, "list_orders_via_token", None)
+    if not callable(fn):
+        return None, error(
+            "unimplemented",
+            f"broker {promoted.broker_code!r} translator does not implement list_orders_via_token",
+            details={"broker_code": promoted.broker_code},
+        ), 501
+    try:
+        rows = fn(auth_token, status=status)
+    except Exception as e:  # noqa: BLE001 — last-resort guard
+        logger.exception("list_orders failed for %s: %s", promoted.broker_code, e)
+        return None, error("broker_error", str(e)), 502
+    return rows, None, None
+
+
+def _ensure_promoted(broker: str | None):
+    """Return ``(promoted, error_payload, http_status)``.
+
+    Mirrors the per-broker flag + translator-registered check used by
+    POST /api/v2/orders, so list/get/cancel return the same fail-closed
+    error envelopes for the same conditions.
+    """
+    if not broker:
+        return None, error("bad_request", "broker not resolved from session"), 400
+    flag_on = is_enabled(f"API_V2_{broker.upper()}")
+    if not flag_on:
+        lane_err, lane_status = _broker_lane_check(broker)
+        if lane_err is not None:
+            return None, lane_err, lane_status
+        return None, error(
+            "promoted_lane_required",
+            f"order management on /api/v2 requires API_V2_{broker.upper()}=1",
+            details={"broker_code": broker},
+        ), 503
+    promoted = get_broker_translator(broker)
+    if promoted is None:
+        return None, error(
+            "translator_not_registered",
+            f"Promoted lane is enabled for broker {broker!r} but no "
+            "BrokerOrderTranslator is registered.",
+            details={"broker_code": broker, "flag": f"API_V2_{broker.upper()}"},
+        ), 503
+    return promoted, None, None
+
+
 @api.route("")
 @api.route("/")
 class Orders(Resource):
+    def get(self):
+        """List orders for the authenticated broker session.
+
+        Query params:
+          status: ``open`` (default), ``closed``, or ``all``.
+        """
+        auth_token, broker, auth_err = resolve_auth()
+        if auth_err is not None:
+            return error("unauthorized", auth_err), 401
+
+        promoted, err_payload, err_status = _ensure_promoted(broker)
+        if promoted is None:
+            return err_payload, err_status
+
+        status = (request.args.get("status") or "open").lower()
+        if status not in ("open", "closed", "all"):
+            return error("bad_request", "status must be one of: open, closed, all"), 400
+
+        rows, err_payload, err_status = _list_orders_via_translator(
+            promoted, auth_token, status
+        )
+        if rows is None:
+            return err_payload, err_status
+        return ok({"orders": rows, "count": len(rows)}), 200
+
     def post(self):
         auth_token, broker, auth_err = resolve_auth()
         if auth_err is not None:
@@ -167,6 +244,59 @@ class Orders(Resource):
             return _dispatch_legacy(
                 normalized, broker=broker, auth_token=auth_token, body=body
             )
+
+
+@api.route("/<string:order_id>")
+class OrderById(Resource):
+    """GET /api/v2/orders/<id> — order status; DELETE — cancel."""
+
+    def get(self, order_id: str):
+        auth_token, broker, auth_err = resolve_auth()
+        if auth_err is not None:
+            return error("unauthorized", auth_err), 401
+
+        promoted, err_payload, err_status = _ensure_promoted(broker)
+        if promoted is None:
+            return err_payload, err_status
+
+        fn = getattr(promoted, "get_order_via_token", None)
+        if not callable(fn):
+            return error(
+                "unimplemented",
+                f"broker {broker!r} translator does not implement get_order_via_token",
+                details={"broker_code": broker},
+            ), 501
+        try:
+            row = fn(auth_token, order_id)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("get_order failed for %s/%s: %s", broker, order_id, e)
+            return error("broker_error", str(e)), 502
+        if not row:
+            return error("not_found", f"order {order_id} not found"), 404
+        return ok({"order": row}), 200
+
+    def delete(self, order_id: str):
+        auth_token, broker, auth_err = resolve_auth()
+        if auth_err is not None:
+            return error("unauthorized", auth_err), 401
+
+        promoted, err_payload, err_status = _ensure_promoted(broker)
+        if promoted is None:
+            return err_payload, err_status
+
+        fn = getattr(promoted, "cancel_order_via_token", None)
+        if not callable(fn):
+            return error(
+                "unimplemented",
+                f"broker {broker!r} translator does not implement cancel_order_via_token",
+                details={"broker_code": broker},
+            ), 501
+        try:
+            fn(auth_token, order_id)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("cancel_order failed for %s/%s: %s", broker, order_id, e)
+            return error("broker_error", str(e)), 502
+        return ok({"order_id": order_id, "status": "canceled"}), 200
 
 
 def _capability_precheck(normalized, capabilities) -> Any | None:

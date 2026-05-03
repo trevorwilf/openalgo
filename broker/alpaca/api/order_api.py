@@ -467,6 +467,58 @@ class AlpacaOrderTranslator:
     def cancel_order(self, order_id: str) -> None:
         self._delete(f"/v2/orders/{order_id}")
 
+    # ---- Session-bound order management for /api/v2 dispatcher ---------
+    #
+    # These take the OpenAlgo session ``auth_token`` (the JSON blob the
+    # broker callback emits) and rebuild an :class:`AlpacaAuth` from
+    # it via :func:`auth_handle_from_token` so paper-vs-live mode is
+    # honored for the lifetime of the session, regardless of what the
+    # current ``ALPACA_PAPER`` / ``ALPACA_LIVE_MODE`` env vars say.
+
+    def list_orders_via_token(
+        self,
+        auth_token: str,
+        *,
+        status: str = "open",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """GET /v2/orders with the session's auth handle."""
+        from broker.alpaca.api.auth_api import auth_handle_from_token
+
+        auth = auth_handle_from_token(auth_token)
+        with httpx.Client(**self._client_kwargs(auth)) as c:
+            r = c.get(f"/v2/orders?status={status}&limit={limit}")
+        r.raise_for_status()
+        return r.json() or []
+
+    def get_order_via_token(
+        self,
+        auth_token: str,
+        order_id: str,
+    ) -> dict[str, Any]:
+        """GET /v2/orders/<id>."""
+        from broker.alpaca.api.auth_api import auth_handle_from_token
+
+        auth = auth_handle_from_token(auth_token)
+        with httpx.Client(**self._client_kwargs(auth)) as c:
+            r = c.get(f"/v2/orders/{order_id}")
+        r.raise_for_status()
+        return r.json()
+
+    def cancel_order_via_token(
+        self,
+        auth_token: str,
+        order_id: str,
+    ) -> None:
+        """DELETE /v2/orders/<id>. Returns None on 204 / 200; raises on other status."""
+        from broker.alpaca.api.auth_api import auth_handle_from_token
+
+        auth = auth_handle_from_token(auth_token)
+        with httpx.Client(**self._client_kwargs(auth)) as c:
+            r = c.delete(f"/v2/orders/{order_id}")
+        if r.status_code not in (200, 204):
+            r.raise_for_status()
+
     # ---- HTTP plumbing -------------------------------------------------
 
     def _resolve_auth(self) -> AlpacaAuth:
