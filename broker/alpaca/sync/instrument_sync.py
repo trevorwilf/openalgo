@@ -109,17 +109,20 @@ def fetch_assets(
 
 
 def _normalize_venue(exchange: str | None) -> str:
-    if not exchange:
-        return "XNAS"
-    mapping = {
-        "NASDAQ": "XNAS",
-        "NYSE": "XNYS",
-        "ARCA": "ARCX",
-        "BATS": "BATS",
-        "AMEX": "XNYS",
-        "OTC": "XNAS",  # best-effort; fold OTC into XNAS for routing
-    }
-    return mapping.get(exchange.upper(), exchange.upper())
+    """Map an Alpaca exchange string to the canonical OpenAlgo venue.
+
+    Branch N — delegates to ``mapping.transform_data.venue_from_alpaca_exchange``;
+    the legacy fallback (return XNAS for missing / unknown values)
+    is preserved here so existing callers don't see a behavior shift.
+    """
+    from broker.alpaca.mapping.transform_data import (
+        venue_from_alpaca_exchange,
+    )
+
+    venue = venue_from_alpaca_exchange(exchange)
+    if venue is not None:
+        return venue
+    return (exchange or "XNAS").upper() or "XNAS"
 
 
 def _sync_version() -> int:

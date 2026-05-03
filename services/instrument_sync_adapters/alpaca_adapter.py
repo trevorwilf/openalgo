@@ -46,16 +46,13 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Alpaca exchange string → OpenAlgo canonical venue_code.
-# Mirror of broker/alpaca/sync/instrument_sync._normalize_venue.
-_EXCHANGE_TO_VENUE: dict[str, str] = {
-    "NASDAQ": "XNAS",
-    "NYSE": "XNYS",
-    "ARCA": "ARCX",
-    "BATS": "BATS",
-    "AMEX": "XNYS",  # AMEX merged into NYSE; route as XNYS
-    "OTC": "XNAS",   # best-effort; fold OTC into XNAS for routing
-}
+# Branch N — single source of truth for the Alpaca exchange ↔ venue
+# mapping lives in ``broker.alpaca.mapping.transform_data``. This
+# adapter imports the canonical table rather than maintaining a
+# parallel inline copy.
+from broker.alpaca.mapping.transform_data import (
+    ALPACA_EXCHANGE_TO_VENUE as _EXCHANGE_TO_VENUE,
+)
 
 
 class AlpacaAdapter:
