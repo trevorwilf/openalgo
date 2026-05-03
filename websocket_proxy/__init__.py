@@ -99,7 +99,10 @@ from broker.wisdom.streaming.wisdom_adapter import WisdomWebSocketAdapter
 # Import the zerodha_adapter
 from broker.zerodha.streaming.zerodha_adapter import ZerodhaWebSocketAdapter
 
-# AliceBlue adapter will be loaded dynamically
+# AliceBlue and Alpaca adapters are loaded dynamically by
+# _get_adapter_class in broker_factory.py — registering them eagerly
+# here would create a circular import (Alpaca's adapter module imports
+# websocket_proxy.base_adapter, which loads __init__.py first).
 
 # Register adapters
 register_adapter("angel", AngelWebSocketAdapter)
