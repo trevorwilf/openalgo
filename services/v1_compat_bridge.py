@@ -797,7 +797,23 @@ def _v1_order_stats(orders: list[dict]) -> dict[str, Any]:
 
 
 def _v1_order_to_normalized(body: dict) -> Any:
-    """Map a v1 placeorder body to a NormalizedOrderRequest."""
+    """Map a v1 placeorder body to a NormalizedOrderRequest.
+
+    Handles three Alpaca-specific shapes the legacy v1 contract didn't
+    cover:
+
+    * **Fractional shares** — ``quantity`` may now be a decimal (e.g.
+      ``"0.5"``); when fractional, ``quantity_unit`` is ``FRACTIONAL``
+      so the v2 dispatcher's broker-rule check passes.
+    * **Notional orders** — ``notional=true`` (or non-empty
+      ``"notional"`` field) flips ``quantity_unit`` to ``NOTIONAL``
+      so ``quantity`` is interpreted as a USD amount instead of a
+      share count.
+    * **Extended hours** — the v1 caller can pass ``extended_hours=true``
+      to place pre/post-market orders (Alpaca's ``extended_hours``
+      bit). Passes through to the canonical
+      ``NormalizedOrderRequest.extended_hours`` field.
+    """
     from decimal import Decimal
 
     from domain.instrument_ref import InstrumentRef
@@ -820,14 +836,39 @@ def _v1_order_to_normalized(body: dict) -> Any:
     }
     order_type = pricetype_map.get(pricetype, pricetype)
 
+    # ---- quantity_unit selection ----------------------------------
+    notional_flag = body.get("notional")
+    is_notional = (
+        bool(notional_flag) and str(notional_flag).strip().lower() not in ("0", "false", "")
+    )
+
+    if is_notional:
+        quantity_unit = "NOTIONAL"
+    else:
+        # Detect fractional via the quantity string's content rather
+        # than a flag — operators may submit ``"0.5"`` or ``"1.25"``
+        # without setting any explicit "fractional" toggle.
+        try:
+            qty_decimal = Decimal(str(quantity))
+            quantity_unit = "FRACTIONAL" if qty_decimal != qty_decimal.to_integral_value() else "WHOLE"
+        except Exception:  # noqa: BLE001
+            quantity_unit = "WHOLE"
+
+    # ---- extended_hours flag --------------------------------------
+    eh_raw = body.get("extended_hours")
+    extended_hours = bool(eh_raw) and str(eh_raw).strip().lower() not in (
+        "0", "false", "",
+    )
+
     return NormalizedOrderRequest(
         instrument=InstrumentRef(venue_code=exchange, canonical_symbol=symbol),
         side=action,
         order_type=order_type,
         quantity=Decimal(str(quantity)),
-        quantity_unit="WHOLE",
+        quantity_unit=quantity_unit,
         price=(Decimal(str(price)) if price not in (None, "", "0") and order_type != "MARKET" else None),
         time_in_force="DAY",
+        extended_hours=extended_hours,
     )
 
 
