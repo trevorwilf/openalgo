@@ -211,17 +211,55 @@ class AlpacaWebSocketAdapter(BaseBrokerWebSocketAdapter):
     # ---- feed selection helpers (Branch M) ------------------------------
 
     def _resolve_feed_url(self) -> str:
-        """Pick the WS URL based on ``ALPACA_STREAM_FEED`` (default iex).
+        """Pick the WS URL.
 
-        ``ALPACA_STREAM_BASE`` is honored as a full-URL override for
-        backwards compatibility — operators using the old env var
-        keep working.
+        Resolution order:
+
+        1. ``ALPACA_STREAM_BASE`` env var, when set:
+
+           * If it already ends in a recognized feed suffix
+             (``/iex``, ``/sip``, ``/v1beta3/crypto/us``, …), it is
+             treated as a *complete* URL and returned verbatim.
+           * Otherwise it is treated as a *base* URL and the feed
+             suffix derived from ``ALPACA_STREAM_FEED`` (default
+             ``iex``) is appended. This is what most operators
+             actually want and avoids the 404-on-handshake trap when
+             the env var is ``wss://stream.data.alpaca.markets/v2``
+             (no feed suffix).
+
+        2. Otherwise, the canonical map keyed on
+           ``ALPACA_STREAM_FEED`` (default ``iex``).
         """
-        explicit = os.environ.get("ALPACA_STREAM_BASE")
-        if explicit:
-            return explicit
+        explicit = os.environ.get("ALPACA_STREAM_BASE", "").strip()
         feed = os.environ.get("ALPACA_STREAM_FEED", "iex").strip().lower()
+        if explicit:
+            return self._compose_feed_url(explicit, feed)
         return _FEED_URLS.get(feed, DEFAULT_FEED_URL)
+
+    @staticmethod
+    def _compose_feed_url(base: str, feed: str) -> str:
+        """Combine ``ALPACA_STREAM_BASE`` with the feed selector.
+
+        If ``base`` already names a feed (ends with ``/iex``, ``/sip``,
+        or contains ``/v1beta3/crypto/``), it's returned verbatim. If
+        the base is a bare ``…/v2`` or trailing-slash URL, we append
+        ``feed``.
+        """
+        clean = base.rstrip("/")
+        if clean.endswith(("/iex", "/sip")) or "/v1beta3/crypto/" in clean:
+            return clean
+        # Bare ``/v2`` (or similar) — append the feed selector.
+        if clean.endswith("/v2"):
+            if feed == "crypto":
+                # Crypto lives on a different version path; if the
+                # operator pinned ``/v2`` AND asked for crypto we
+                # ignore the base and use the crypto canonical URL.
+                return CRYPTO_FEED_URL
+            return f"{clean}/{feed}"
+        # Any other shape — append /v2/<feed> as a best-effort
+        # default. Equivalent to the legacy "treat as override"
+        # behavior for unusual values.
+        return f"{clean}/{feed}" if not clean.endswith(f"/{feed}") else clean
 
     def _feed_kind(self) -> str:
         """Return ``iex`` / ``sip`` / ``crypto`` for the current connection.
