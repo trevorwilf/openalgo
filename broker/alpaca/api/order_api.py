@@ -4,8 +4,13 @@ Implements :class:`~domain.broker_translator.BrokerOrderTranslator` for
 the promoted-lane ``/api/v2/orders`` dispatcher, plus the direct
 HTTP helpers ``place_order``, ``get_order_status``, ``cancel_order``.
 
-Scope (MVP): cash equities, regular session only, MARKET and LIMIT
-order types, DAY and GTC time-in-force. No extended hours.
+Scope (post-Branches I/J/K/L):
+  * US equities + ETFs (XNAS, XNYS, ARCX, BATS).
+  * Order types: MARKET, LIMIT, STOP, STOP_LIMIT, TRAILING_STOP,
+    MARKET_ON_OPEN, LIMIT_ON_OPEN, MARKET_ON_CLOSE, LIMIT_ON_CLOSE.
+  * Time in force: DAY, GTC, IOC, FOK, OPG, ATC.
+  * Sessions: REGULAR, PRE_MARKET, POST_MARKET, EXTENDED.
+  * Combo orders: SINGLE, OTO, OCO, OTOCO (bracket).
 """
 
 from __future__ import annotations
@@ -17,7 +22,14 @@ import httpx
 
 from broker.alpaca.api.auth_api import AlpacaAuth, authenticate
 from domain.broker_translator import AccountContext
-from domain.enums import OrderSide, OrderType, QuantityUnit, Session, TimeInForce
+from domain.enums import (
+    ComboType,
+    OrderSide,
+    OrderType,
+    QuantityUnit,
+    Session,
+    TimeInForce,
+)
 from domain.errors import UnsupportedCapability
 
 
@@ -60,6 +72,21 @@ _SUPPORTED_TIF = {
     TimeInForce.FOK,
     TimeInForce.OPG,
     TimeInForce.ATC,
+}
+
+# Branch L — supported combo / bracket types. Alpaca's ``order_class``
+# field carries the parent strategy; SINGLE means no order_class
+# (default ``simple``).
+_SUPPORTED_COMBO_TYPES = {
+    ComboType.SINGLE,
+    ComboType.OTO,
+    ComboType.OCO,
+    ComboType.OTOCO,
+}
+_COMBO_TYPE_NATIVE: dict[ComboType, str] = {
+    ComboType.OTO: "oto",
+    ComboType.OCO: "oco",
+    ComboType.OTOCO: "bracket",
 }
 
 # Branch I — OpenAlgo OrderType → Alpaca REST 'type' string.
@@ -269,6 +296,181 @@ class AlpacaOrderTranslator:
 
         return body
 
+    # ---- Branch L — combo / bracket order surface ---------------------
+
+    def validate_combo(
+        self,
+        combo: Any,
+        instruments_by_leg: list[Any],
+        account_ctx: AccountContext,
+    ) -> None:
+        """Validate a NormalizedComboOrderRequest against Alpaca's
+        bracket / OCO / OTO constraints before serializing.
+
+        Reuses validate() for each leg's per-leg constraints (venue,
+        order type, etc.) then layers combo-specific shape checks:
+
+          * combo_type must be one of SINGLE / OTO / OCO / OTOCO.
+          * SINGLE: exactly 1 leg.
+          * OTO: 2 legs (parent + child).
+          * OCO: 2 legs (parent LIMIT + stop child).
+          * OTOCO (bracket): 3 legs (parent + take_profit LIMIT + stop_loss).
+        """
+        if combo.combo_type not in _SUPPORTED_COMBO_TYPES:
+            raise UnsupportedCapability(
+                broker_code=self.broker_code,
+                capability_name="combo_type",
+                details=(
+                    f"Alpaca supports SINGLE / OTO / OCO / OTOCO; got "
+                    f"{combo.combo_type.value}"
+                ),
+            )
+        expected_legs = {
+            ComboType.SINGLE: 1,
+            ComboType.OTO: 2,
+            ComboType.OCO: 2,
+            ComboType.OTOCO: 3,
+        }[combo.combo_type]
+        if len(combo.legs) != expected_legs:
+            raise UnsupportedCapability(
+                broker_code=self.broker_code,
+                capability_name="combo_leg_count",
+                details=(
+                    f"Alpaca {combo.combo_type.value} requires "
+                    f"{expected_legs} leg(s); got {len(combo.legs)}"
+                ),
+            )
+        if len(instruments_by_leg) != len(combo.legs):
+            raise ValueError(
+                "instruments_by_leg length must match combo.legs length"
+            )
+
+        # Combo-level invariant: every leg must trade the same
+        # instrument as the parent. Alpaca's bracket / OCO / OTO are
+        # tied to a single symbol (no spreads).
+        parent_symbol = instruments_by_leg[0].canonical_symbol
+        for inst in instruments_by_leg[1:]:
+            if inst.canonical_symbol != parent_symbol:
+                raise UnsupportedCapability(
+                    broker_code=self.broker_code,
+                    capability_name="combo_cross_symbol",
+                    details=(
+                        "Alpaca bracket / OCO / OTO requires every leg to "
+                        "trade the same symbol; got "
+                        f"{parent_symbol!r} vs {inst.canonical_symbol!r}"
+                    ),
+                )
+
+        # OTOCO / bracket: leg[1] must be the LIMIT take_profit and
+        # leg[2] must be the STOP / STOP_LIMIT stop_loss.
+        if combo.combo_type == ComboType.OTOCO:
+            tp_leg = combo.legs[1]
+            sl_leg = combo.legs[2]
+            if tp_leg.order_type != OrderType.LIMIT:
+                raise UnsupportedCapability(
+                    broker_code=self.broker_code,
+                    capability_name="bracket_take_profit_type",
+                    details=(
+                        "Alpaca bracket take_profit leg (legs[1]) must be "
+                        f"LIMIT; got {tp_leg.order_type.value}"
+                    ),
+                )
+            if sl_leg.order_type not in {OrderType.STOP, OrderType.STOP_LIMIT}:
+                raise UnsupportedCapability(
+                    broker_code=self.broker_code,
+                    capability_name="bracket_stop_loss_type",
+                    details=(
+                        "Alpaca bracket stop_loss leg (legs[2]) must be "
+                        f"STOP or STOP_LIMIT; got {sl_leg.order_type.value}"
+                    ),
+                )
+
+    def to_native_combo(
+        self,
+        combo: Any,
+        instruments_by_leg: list[Any],
+        account_ctx: AccountContext,
+    ) -> dict[str, Any]:
+        """Translate a NormalizedComboOrderRequest into Alpaca's
+        bracket / OCO / OTO payload shape.
+
+        Alpaca's REST API accepts a parent order with embedded
+        ``take_profit`` and ``stop_loss`` siblings:
+
+            { ...parent fields..., "order_class": "bracket",
+              "take_profit": {"limit_price": "200.00"},
+              "stop_loss":   {"stop_price": "175.00",
+                              "limit_price": "174.50"} }
+
+        SINGLE collapses to a plain order without ``order_class``.
+        """
+        if combo.combo_type == ComboType.SINGLE:
+            return self._to_native_single_leg(
+                combo, instruments_by_leg[0], account_ctx
+            )
+
+        parent_leg = combo.legs[0]
+        parent_inst = instruments_by_leg[0]
+        # Build the parent payload from a synthetic single-leg order
+        # so we reuse the to_native validation + payload assembly.
+        body = self._to_native_single_leg(combo, parent_inst, account_ctx)
+        body["order_class"] = _COMBO_TYPE_NATIVE[combo.combo_type]
+
+        if combo.combo_type == ComboType.OTOCO:
+            tp_leg = combo.legs[1]
+            sl_leg = combo.legs[2]
+            body["take_profit"] = _build_take_profit(tp_leg)
+            body["stop_loss"] = _build_stop_loss(sl_leg)
+        elif combo.combo_type == ComboType.OTO:
+            child = combo.legs[1]
+            if child.order_type == OrderType.LIMIT:
+                body["take_profit"] = _build_take_profit(child)
+            else:
+                body["stop_loss"] = _build_stop_loss(child)
+        elif combo.combo_type == ComboType.OCO:
+            # OCO pairs the parent's limit (take_profit) with a
+            # separate stop_loss leg.
+            sl_leg = combo.legs[1]
+            body["stop_loss"] = _build_stop_loss(sl_leg)
+
+        return body
+
+    def _to_native_single_leg(
+        self,
+        combo: Any,
+        instrument: Any,
+        account_ctx: AccountContext,
+    ) -> dict[str, Any]:
+        """Build the parent-order payload from combo.legs[0].
+
+        Reuses to_native() by constructing a transient-shaped object
+        with the leg's fields + the combo's TIF / session.
+        """
+        leg = combo.legs[0]
+
+        class _SyntheticOrder:
+            instrument = type(
+                "_I",
+                (),
+                {
+                    "canonical_symbol": leg.instrument_ref.canonical_symbol,
+                    "broker_native_symbol": None,
+                },
+            )()
+            side = leg.side
+            order_type = leg.order_type
+            quantity = leg.quantity
+            quantity_unit = leg.quantity_unit
+            price = leg.price
+            trigger_price = leg.trigger_price
+            trailing_offset = None
+            time_in_force = combo.time_in_force
+            session = combo.session
+            client_order_id = combo.link_id
+            extra = combo.metadata or {}
+
+        return self.to_native(_SyntheticOrder(), instrument, account_ctx)
+
     def send_native(
         self,
         native_payload: dict[str, Any],
@@ -357,6 +559,47 @@ def _opt_decimal(raw: Any) -> str | None:
         return str(Decimal(str(raw)))
     except (ArithmeticError, ValueError):
         return None
+
+
+# ---- Branch L — bracket / OCO / OTO leg builders ---------------------
+
+
+def _build_take_profit(leg: Any) -> dict[str, Any]:
+    """Alpaca's ``take_profit`` block accepts a single ``limit_price``."""
+    if leg.price is None:
+        raise UnsupportedCapability(
+            broker_code="alpaca",
+            capability_name="take_profit_price",
+            details="take_profit leg must be LIMIT with a price",
+        )
+    return {"limit_price": str(leg.price)}
+
+
+def _build_stop_loss(leg: Any) -> dict[str, Any]:
+    """Alpaca's ``stop_loss`` block accepts ``stop_price`` (required)
+    and optional ``limit_price`` for STOP_LIMIT semantics.
+    """
+    if leg.trigger_price is None:
+        raise UnsupportedCapability(
+            broker_code="alpaca",
+            capability_name="stop_loss_trigger_price",
+            details=(
+                "stop_loss leg requires trigger_price (Alpaca stop_price)"
+            ),
+        )
+    block: dict[str, Any] = {"stop_price": str(leg.trigger_price)}
+    if leg.order_type == OrderType.STOP_LIMIT:
+        if leg.price is None:
+            raise UnsupportedCapability(
+                broker_code="alpaca",
+                capability_name="stop_loss_limit_price",
+                details=(
+                    "STOP_LIMIT stop_loss leg requires both trigger_price "
+                    "and price (Alpaca stop_price + limit_price)"
+                ),
+            )
+        block["limit_price"] = str(leg.price)
+    return block
 
 
 __all__ = ["AlpacaOrderTranslator"]

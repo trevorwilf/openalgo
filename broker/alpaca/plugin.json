@@ -29,6 +29,7 @@
     "supports_extended_hours": true,
     "supports_short_selling": true,
     "supports_analyzer": true,
+    "supports_combo_types": ["SINGLE", "OTO", "OCO", "OTOCO"],
     "auth_modes": ["OAUTH"],
     "master_contract_refresh_policy": {
         "timezone": "America/New_York",
