@@ -614,4 +614,95 @@ def _build_stop_loss(leg: Any) -> dict[str, Any]:
     return block
 
 
-__all__ = ["AlpacaOrderTranslator"]
+# ---------------------------------------------------------------------------
+# Module-level legacy shims for ``services.cancel_order_service`` /
+# ``services.modify_order_service`` etc., which dynamically import
+# ``broker.<broker>.api.order_api`` and call ``cancel_order`` /
+# ``modify_order`` / ``get_order_book`` etc. as module-level functions.
+#
+# Wiring these to the new translator lets the existing Indian-shaped
+# UI endpoints (``/cancel_order``, ``/modify_order``) work for Alpaca
+# without forcing every legacy service to grow a per-broker branch.
+# Each shim is just a thin adapter: rebuild an :class:`AlpacaAuth`
+# from the session ``auth_token``, do the HTTP call, return the
+# legacy-shaped tuple ``(response_dict, http_status)``.
+#
+# These are NEVER imported from PROMOTED_CORE — only the legacy
+# services reach them (lane-isolation invariant preserved).
+# ---------------------------------------------------------------------------
+
+
+def cancel_order(orderid: str, auth_token: str) -> tuple[dict[str, Any], int]:
+    """Module-level shim — used by ``services.cancel_order_service``.
+
+    Returns ``({status, orderid?}, http_status)``. Status 200 = success.
+    """
+    try:
+        translator = AlpacaOrderTranslator()
+        translator.cancel_order_via_token(auth_token, orderid)
+        return {"status": "success", "orderid": orderid}, 200
+    except httpx.HTTPStatusError as e:
+        try:
+            payload = e.response.json()
+            msg = payload.get("message") or str(payload)
+        except Exception:  # noqa: BLE001
+            msg = e.response.text or str(e)
+        return {"status": "error", "message": msg}, e.response.status_code
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": str(e)}, 500
+
+
+def modify_order(
+    data: dict[str, Any], auth_token: str
+) -> tuple[dict[str, Any], int]:
+    """Module-level shim — used by ``services.modify_order_service``.
+
+    Alpaca's PATCH /v2/orders/<id> accepts qty / time_in_force /
+    limit_price / stop_price / trail / client_order_id. Maps the
+    legacy v1 ``modify_order`` fields onto that subset.
+    """
+    from broker.alpaca.api.auth_api import auth_handle_from_token
+
+    orderid = data.get("orderid") or data.get("order_id")
+    if not orderid:
+        return {"status": "error", "message": "orderid required"}, 400
+
+    patch_body: dict[str, Any] = {}
+    if "quantity" in data and data["quantity"]:
+        patch_body["qty"] = str(data["quantity"])
+    if "price" in data and data["price"] not in (None, "", "0"):
+        patch_body["limit_price"] = str(data["price"])
+    if "trigger_price" in data and data["trigger_price"] not in (None, "", "0"):
+        patch_body["stop_price"] = str(data["trigger_price"])
+
+    try:
+        auth = auth_handle_from_token(auth_token)
+        with httpx.Client(
+            base_url=auth.base_url,
+            headers=dict(auth.headers),
+            timeout=httpx.Timeout(10.0, connect=5.0),
+        ) as c:
+            r = c.patch(f"/v2/orders/{orderid}", json=patch_body)
+        if r.status_code >= 400:
+            return {"status": "error", "message": r.text[:500]}, r.status_code
+        return {"status": "success", "orderid": orderid}, 200
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": str(e)}, 500
+
+
+def get_order_book(auth_token: str) -> tuple[dict[str, Any], int]:
+    """Module-level shim — used by legacy ``services.orderbook_service``."""
+    try:
+        translator = AlpacaOrderTranslator()
+        rows = translator.list_orders_via_token(auth_token, status="all")
+        return {"status": "success", "data": rows}, 200
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": str(e)}, 500
+
+
+__all__ = [
+    "AlpacaOrderTranslator",
+    "cancel_order",
+    "get_order_book",
+    "modify_order",
+]
