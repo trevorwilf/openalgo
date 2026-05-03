@@ -72,18 +72,41 @@ describe('useSupportedExchanges', () => {
     expect(result.current.tradingExchanges).toEqual([])
   })
 
-  it('fallback opt-in returns the hardcoded list', () => {
-    useBrokerStore.setState({ capabilities: null, isLoaded: false })
+  it('fallback opt-in returns the hardcoded list (India-shaped cap, no venues)', () => {
+    // Phase 1 T-06: cap=null is fail-closed. The fallback only fires
+    // when the cap is non-null AND supported_regions includes 'india'
+    // AND supported_venue_codes is missing.
+    useBrokerStore.setState({
+      capabilities: { supported_regions: ['india'] } as BrokerCapabilities,
+      isLoaded: true,
+    })
     const { result } = renderHook(() => useSupportedExchanges({ allowLegacyFallback: true }))
     expect(result.current.tradingExchanges.map((e) => e.value)).toContain('NSE')
     expect(result.current.isFallback).toBe(true)
   })
 
-  it('fallback defaults to true for backward compatibility', () => {
-    useBrokerStore.setState({ capabilities: null, isLoaded: false })
+  it('fallback defaults to true for backward compatibility (India-shaped cap)', () => {
+    // Same Phase 1 T-06 semantics: cap=null is fail-closed; only an
+    // India-shaped non-null cap with no venue codes still gets the
+    // legacy fallback.
+    useBrokerStore.setState({
+      capabilities: { supported_regions: ['india'] } as BrokerCapabilities,
+      isLoaded: true,
+    })
     const { result } = renderHook(() => useSupportedExchanges())
     expect(result.current.isFallback).toBe(true)
     expect(result.current.tradingExchanges.map((e) => e.value).length).toBeGreaterThan(0)
+  })
+
+  it('cap=null is fail-closed (Phase 1 T-06): no NSE fallback, even with allowLegacyFallback', () => {
+    // The pre-T-06 behavior was "cap=null silently falls back to NSE".
+    // T-06 changed _broker_is_india_shaped(null) to return false so
+    // that fresh-install / pre-login deployments do not silently
+    // inherit India defaults. This test pins the new semantics.
+    useBrokerStore.setState({ capabilities: null, isLoaded: false })
+    const { result } = renderHook(() => useSupportedExchanges({ allowLegacyFallback: true }))
+    expect(result.current.tradingExchanges).toEqual([])
+    expect(result.current.isFallback).toBe(true)
   })
 
   it('explicit allowLegacyFallback=false returns empty when unavailable', () => {
@@ -159,12 +182,17 @@ describe('useSupportedExchanges', () => {
     expect(result.current.defaultExchange).toBe('')
   })
 
-  it('legacy India plugin (no supported_regions field) still falls back to NSE', () => {
-    // capabilities stays null but the loader hasn't yet returned data;
-    // for legacy India installs the prior behavior is preserved.
+  it('legacy India plugin missing supported_regions field is fail-closed (Phase 1 T-06)', () => {
+    // Pre-T-06 behavior: a legacy India plugin without an explicit
+    // supported_regions field silently inherited the NSE fallback
+    // when capabilities were null. T-06 made this fail-closed: the
+    // operator must either declare supported_regions=['india'] (in
+    // which case the fallback fires — see the next test) or supply
+    // venue codes; otherwise the dropdown is empty and the UI must
+    // render an "unavailable / select broker" state.
     useBrokerStore.setState({ capabilities: null, isLoaded: false })
     const { result } = renderHook(() => useSupportedExchanges({ allowLegacyFallback: true }))
-    expect(result.current.tradingExchanges.map((e) => e.value)).toContain('NSE')
+    expect(result.current.tradingExchanges).toEqual([])
   })
 
   it('explicit india supported_regions falls back to NSE when capabilities lack venue codes', () => {
