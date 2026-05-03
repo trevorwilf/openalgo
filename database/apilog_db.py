@@ -3,9 +3,7 @@
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-
-import pytz
+from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, Integer, Text, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import scoped_session, sessionmaker
@@ -76,15 +74,15 @@ def async_log_order(api_type, request_data, response_data):
         request_json = json.dumps(request_data)
         response_json = json.dumps(response_data)
 
-        # Get current time in IST
-        ist = pytz.timezone("Asia/Kolkata")
-        now_ist = datetime.now(ist)
+        # v7 Phase 1 (T-03): stamp UTC at persistence; render layer
+        # applies operator's region tz at read time.
+        now_utc = datetime.now(timezone.utc)
 
         order_log = OrderLog(
             api_type=api_type,
             request_data=request_json,
             response_data=response_json,
-            created_at=now_ist,
+            created_at=now_utc,
         )
         db_session.add(order_log)
         db_session.commit()

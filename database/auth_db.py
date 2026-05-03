@@ -234,24 +234,24 @@ class LoginAttempt(Base):
     )
 
 
-def _now_ist():
-    """Return the current wall-clock time in the configured session
-    timezone (default Asia/Kolkata for backward compatibility).
+def _now_utc():
+    """Return the current UTC timestamp for login-audit rows.
 
-    Despite the historical name, this is the timestamp used for login-
-    audit rows. Phase 4 routes it through SESSION_EXPIRY_TIMEZONE so
-    operators on non-Indian deployments can see audit timestamps in
-    their actual venue tz instead of IST.
+    v7 Phase 1 (T-03): persistence stamps UTC; the render layer
+    applies the operator's region tz at read time. Existing rows
+    written in legacy IST-anchored tz are reinterpreted on read via
+    region-tz; no migration of existing data is required (timezone-
+    aware datetimes compare correctly across mixed tz storage).
     """
-    from datetime import datetime
-    import pytz
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
 
-    tz_name = os.getenv("SESSION_EXPIRY_TIMEZONE", "Asia/Kolkata")
-    try:
-        tz = pytz.timezone(tz_name)
-    except pytz.UnknownTimeZoneError:
-        tz = pytz.timezone("Asia/Kolkata")
-    return datetime.now(tz)
+
+# Legacy alias retained as a transitional shim. Callers within
+# auth_db reference ``_now_utc`` directly post T-03; this alias
+# exists for any out-of-tree dependents that imported the old
+# private name. Remove after the operator-controlled v1 sunset.
+_now_ist = _now_utc
 
 
 def log_login_attempt(username, ip_address=None, device_info=None, status="failed",
@@ -266,7 +266,7 @@ def log_login_attempt(username, ip_address=None, device_info=None, status="faile
             login_type=login_type,
             broker=broker,
             failure_reason=failure_reason,
-            timestamp=_now_ist(),
+            timestamp=_now_utc(),
         )
         db_session.add(attempt)
         db_session.commit()
@@ -332,7 +332,7 @@ def register_session(username, session_id, device_info=None, ip_address=None, br
             if oldest:
                 db_session.delete(oldest)
 
-        now = _now_ist()
+        now = _now_utc()
         active = ActiveSession(
             username=username,
             session_id=session_id,
@@ -388,7 +388,7 @@ def update_session_last_seen(session_id):
     try:
         active = ActiveSession.query.filter_by(session_id=session_id).first()
         if active:
-            active.last_seen = _now_ist()
+            active.last_seen = _now_utc()
             db_session.commit()
     except Exception as e:
         db_session.rollback()

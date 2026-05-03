@@ -13,6 +13,7 @@ from sqlalchemy import func
 from database.apilog_db import OrderLog
 from utils.logging import get_logger
 from utils.session import check_session_validity
+from utils.venue_local_time import active_render_tz_name
 
 logger = get_logger(__name__)
 
@@ -79,7 +80,7 @@ def format_log_entry(log, ist):
 
 def get_filtered_logs(start_date=None, end_date=None, search_query=None, page=None, per_page=None):
     """Get filtered logs with pagination"""
-    ist = pytz.timezone("Asia/Kolkata")
+    ist = pytz.timezone(active_render_tz_name())
     query = OrderLog.query
 
     try:

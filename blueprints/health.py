@@ -35,7 +35,7 @@ def convert_to_ist(timestamp):
     if isinstance(timestamp, str):
         timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     utc = pytz.timezone("UTC")
-    ist = pytz.timezone("Asia/Kolkata")
+    ist = pytz.timezone(active_render_tz_name())
     if timestamp.tzinfo is None:
         timestamp = utc.localize(timestamp)
     return timestamp.astimezone(ist)
