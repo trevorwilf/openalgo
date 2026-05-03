@@ -24,7 +24,7 @@ Conventions:
 
 from __future__ import annotations
 
-from domain.enums import OrderSide, OrderType, TimeInForce
+from domain.enums import ComboType, OrderSide, OrderType, TimeInForce
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +152,42 @@ AUCTION_ORDER_TYPES: frozenset[OrderType] = frozenset(
     }
 )
 
+# Branch N — full ``OrderType → Alpaca wire string`` table including
+# the auction collapse used by the translator's ``to_native``. This
+# is the lossy-on-reverse map; ``ALPACA_TO_ORDER_TYPE`` above is the
+# round-trippable subset.
+ORDER_TYPE_NATIVE: dict[OrderType, str] = {
+    OrderType.MARKET: "market",
+    OrderType.LIMIT: "limit",
+    OrderType.STOP: "stop",
+    OrderType.STOP_LIMIT: "stop_limit",
+    OrderType.TRAILING_STOP: "trailing_stop",
+    # Auction variants collapse to plain market/limit at the wire
+    # level — the auction phase is carried by the TIF (opg / cls).
+    OrderType.MARKET_ON_OPEN: "market",
+    OrderType.LIMIT_ON_OPEN: "limit",
+    OrderType.MARKET_ON_CLOSE: "market",
+    OrderType.LIMIT_ON_CLOSE: "limit",
+}
+
+# OrderTypes that carry a limit price on the wire (entry payload's
+# ``limit_price`` field). Includes the auction LIMIT variants because
+# they collapse to type=limit.
+LIMIT_PRICED_ORDER_TYPES: frozenset[OrderType] = frozenset(
+    {
+        OrderType.LIMIT,
+        OrderType.STOP_LIMIT,
+        OrderType.LIMIT_ON_OPEN,
+        OrderType.LIMIT_ON_CLOSE,
+    }
+)
+
+# OrderTypes that carry a stop trigger on the wire (entry payload's
+# ``stop_price`` field).
+STOP_PRICED_ORDER_TYPES: frozenset[OrderType] = frozenset(
+    {OrderType.STOP, OrderType.STOP_LIMIT}
+)
+
 # Time in force: OpenAlgo TimeInForce ↔ Alpaca lowercase string.
 # Branch J — extended TIFs landed: IOC, FOK, OPG, ATC (Alpaca's
 # wire form for ATC is the lowercase ``cls`` per the REST docs).
@@ -196,6 +232,41 @@ def map_time_in_force(tif: TimeInForce) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Branch L — combo / bracket order class
+# ---------------------------------------------------------------------------
+
+# OpenAlgo ComboType → Alpaca REST ``order_class`` value. SINGLE
+# omits the field entirely (Alpaca defaults to ``simple``).
+COMBO_TYPE_TO_ALPACA: dict[ComboType, str] = {
+    ComboType.OTO: "oto",
+    ComboType.OCO: "oco",
+    ComboType.OTOCO: "bracket",
+}
+SUPPORTED_COMBO_TYPES: frozenset[ComboType] = frozenset(
+    {ComboType.SINGLE, ComboType.OTO, ComboType.OCO, ComboType.OTOCO}
+)
+
+
+# ---------------------------------------------------------------------------
+# Branch M — crypto venue + Branch K extended-hours session set
+# ---------------------------------------------------------------------------
+
+CRYPTO_VENUES: frozenset[str] = frozenset({"CRYPTO"})
+
+# Sessions that route to Alpaca's ``extended_hours=true`` flag.
+# Imported from domain.enums lazily to avoid the circular when
+# Session is imported into this module.
+from domain.enums import Session  # noqa: E402
+
+EXTENDED_HOURS_SESSIONS: frozenset[Session] = frozenset(
+    {Session.PRE_MARKET, Session.POST_MARKET, Session.EXTENDED}
+)
+SUPPORTED_SESSIONS: frozenset[Session] = frozenset(
+    {Session.REGULAR, Session.PRE_MARKET, Session.POST_MARKET, Session.EXTENDED}
+)
+
+
+# ---------------------------------------------------------------------------
 # Symbol round-trip
 # ---------------------------------------------------------------------------
 
@@ -229,9 +300,18 @@ __all__ = [
     "ALPACA_TO_ORDER_TYPE",
     "ALPACA_TO_SIDE",
     "ALPACA_TO_TIF",
+    "AUCTION_ORDER_TYPES",
+    "COMBO_TYPE_TO_ALPACA",
+    "CRYPTO_VENUES",
+    "EXTENDED_HOURS_SESSIONS",
+    "LIMIT_PRICED_ORDER_TYPES",
+    "ORDER_TYPE_NATIVE",
     "ORDER_TYPE_TO_ALPACA",
     "SIDE_TO_ALPACA",
+    "STOP_PRICED_ORDER_TYPES",
+    "SUPPORTED_COMBO_TYPES",
     "SUPPORTED_ORDER_TYPES",
+    "SUPPORTED_SESSIONS",
     "SUPPORTED_TIF",
     "SUPPORTED_VENUES",
     "TIF_TO_ALPACA",

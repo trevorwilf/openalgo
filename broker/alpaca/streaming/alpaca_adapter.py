@@ -307,25 +307,19 @@ class AlpacaWebSocketAdapter(BaseBrokerWebSocketAdapter):
 
 
 # Alpaca's frame uses an ``x`` field for the venue tape ("V" = IEX,
-# "Q" = NASDAQ, "N" = NYSE, etc.). When absent (compact frames or
-# crypto), fall back to a generic US placeholder so downstream
-# consumers always see SOMETHING. The canonical OpenAlgo venue
-# resolution lives in ``database.instruments_repo``; this is a
-# best-effort hint for clients that filter by exchange code.
-_TAPE_TO_VENUE: dict[str, str] = {
-    "V": "IEXG",
-    "Q": "XNAS",
-    "N": "XNYS",
-    "P": "ARCX",
-    "Z": "BATS",
-}
+# Branch N — single source of truth for tape → venue lives in
+# ``broker.alpaca.mapping.transform_data.ALPACA_TAPE_TO_VENUE``;
+# the adapter delegates to ``venue_from_alpaca_tape`` which falls
+# back to XNAS for unknown / missing tapes (best-effort hint for
+# clients that filter by exchange code; canonical resolution lives
+# in ``database.instruments_repo``).
 
 
 def _venue_for(frame: dict[str, Any]) -> str:
+    from broker.alpaca.mapping.transform_data import venue_from_alpaca_tape
+
     tape = frame.get("x") or frame.get("ax") or frame.get("bx")
-    if tape and tape in _TAPE_TO_VENUE:
-        return _TAPE_TO_VENUE[tape]
-    return "XNAS"
+    return venue_from_alpaca_tape(tape)
 
 
 __all__ = ["AlpacaWebSocketAdapter"]

@@ -32,94 +32,36 @@ from domain.enums import (
 )
 from domain.errors import UnsupportedCapability
 
+# Branch N — single source of truth for vocabulary mapping lives in
+# ``broker.alpaca.mapping.transform_data``. The translator imports
+# the tables it needs rather than maintaining inline duplicates.
+from broker.alpaca.mapping.transform_data import (
+    AUCTION_ORDER_TYPES,
+    COMBO_TYPE_TO_ALPACA,
+    CRYPTO_VENUES as _CRYPTO_VENUES,
+    EXTENDED_HOURS_SESSIONS as _EXTENDED_HOURS_SESSIONS,
+    LIMIT_PRICED_ORDER_TYPES as _LIMIT_PRICED,
+    ORDER_TYPE_NATIVE as _ORDER_TYPE_NATIVE,
+    STOP_PRICED_ORDER_TYPES as _STOP_PRICED,
+    SUPPORTED_COMBO_TYPES as _SUPPORTED_COMBO_TYPES,
+    SUPPORTED_ORDER_TYPES as _ROUND_TRIPPABLE_ORDER_TYPES,
+    SUPPORTED_SESSIONS as _SUPPORTED_SESSIONS,
+    SUPPORTED_TIF as _SUPPORTED_TIF,
+    SUPPORTED_VENUES as _SUPPORTED_VENUES,
+    TIF_TO_ALPACA as _TIF_NATIVE,
+)
 
-_SUPPORTED_VENUES = {"XNAS", "XNYS", "ARCX", "BATS", "CRYPTO"}
-# Branch M — Alpaca's crypto symbol grammar uses '/' (BTC/USD) where
-# OpenAlgo's canonical form uses '-' (BTC-USD). The translator
-# substitutes at to_native time and the streaming adapter does the
-# inverse on inbound frames.
-_CRYPTO_VENUES = {"CRYPTO"}
-# Branch K — Alpaca supports REGULAR + extended-hours sessions
-# (PRE_MARKET 04:00-09:30 ET, POST_MARKET 16:00-20:00 ET). The
-# OpenAlgo EXTENDED session covers both pre and post; flag it as
-# extended_hours=true and let Alpaca route by clock.
-_SUPPORTED_SESSIONS = {
-    Session.REGULAR,
-    Session.PRE_MARKET,
-    Session.POST_MARKET,
-    Session.EXTENDED,
-}
-_EXTENDED_HOURS_SESSIONS = {
-    Session.PRE_MARKET,
-    Session.POST_MARKET,
-    Session.EXTENDED,
-}
-_SUPPORTED_TYPES = {
-    OrderType.MARKET,
-    OrderType.LIMIT,
-    OrderType.STOP,
-    OrderType.STOP_LIMIT,
-    OrderType.TRAILING_STOP,
-    # Branch J — auction order types. The domain validator requires
-    # them to be paired with TIF=OPG / TIF=ATC respectively; Alpaca
-    # represents the auction itself via the time_in_force value
-    # (``opg`` / ``cls``) on a regular ``market`` / ``limit`` order.
-    OrderType.MARKET_ON_OPEN,
-    OrderType.LIMIT_ON_OPEN,
-    OrderType.MARKET_ON_CLOSE,
-    OrderType.LIMIT_ON_CLOSE,
-}
-_SUPPORTED_TIF = {
-    TimeInForce.DAY,
-    TimeInForce.GTC,
-    # Branch J — extended TIFs.
-    TimeInForce.IOC,
-    TimeInForce.FOK,
-    TimeInForce.OPG,
-    TimeInForce.ATC,
-}
 
-# Branch L — supported combo / bracket types. Alpaca's ``order_class``
-# field carries the parent strategy; SINGLE means no order_class
-# (default ``simple``).
-_SUPPORTED_COMBO_TYPES = {
-    ComboType.SINGLE,
-    ComboType.OTO,
-    ComboType.OCO,
-    ComboType.OTOCO,
-}
-_COMBO_TYPE_NATIVE: dict[ComboType, str] = {
-    ComboType.OTO: "oto",
-    ComboType.OCO: "oco",
-    ComboType.OTOCO: "bracket",
-}
+# The translator accepts ROUND-TRIPPABLE simple types PLUS the
+# auction collapse types from mapping/transform_data. Both unions
+# come from canonical tables — no inline duplicates.
+_SUPPORTED_TYPES = _ROUND_TRIPPABLE_ORDER_TYPES | AUCTION_ORDER_TYPES
 
-# Branch I — OpenAlgo OrderType → Alpaca REST 'type' string.
-# Branch J — ON_OPEN / ON_CLOSE pseudo-types collapse to plain
-# market/limit at the Alpaca side; the auction phase is carried by
-# the TIF (opg / cls).
-_ORDER_TYPE_NATIVE: dict[OrderType, str] = {
-    OrderType.MARKET: "market",
-    OrderType.LIMIT: "limit",
-    OrderType.STOP: "stop",
-    OrderType.STOP_LIMIT: "stop_limit",
-    OrderType.TRAILING_STOP: "trailing_stop",
-    OrderType.MARKET_ON_OPEN: "market",
-    OrderType.LIMIT_ON_OPEN: "limit",
-    OrderType.MARKET_ON_CLOSE: "market",
-    OrderType.LIMIT_ON_CLOSE: "limit",
-}
-
-# Branch J — TIF mapping. ``ATC`` collapses to Alpaca's lowercase
-# ``cls`` per Alpaca's REST docs.
-_TIF_NATIVE: dict[TimeInForce, str] = {
-    TimeInForce.DAY: "day",
-    TimeInForce.GTC: "gtc",
-    TimeInForce.IOC: "ioc",
-    TimeInForce.FOK: "fok",
-    TimeInForce.OPG: "opg",
-    TimeInForce.ATC: "cls",
-}
+# Translator accepts the round-trippable real venues plus the
+# synthetic CRYPTO venue. mapping/transform_data's SUPPORTED_VENUES
+# tracks round-trippable real venues only; CRYPTO is broker-
+# namespaced and lives in CRYPTO_VENUES.
+_SUPPORTED_VENUES = _SUPPORTED_VENUES | _CRYPTO_VENUES
 
 
 class AlpacaOrderTranslator:
@@ -248,12 +190,7 @@ class AlpacaOrderTranslator:
         # LIMIT, STOP_LIMIT, LIMIT_ON_OPEN, LIMIT_ON_CLOSE all carry
         # a limit price (the auction variants collapse to type=limit
         # at the wire level, so they need the same payload field).
-        _LIMIT_PRICED = {
-            OrderType.LIMIT,
-            OrderType.STOP_LIMIT,
-            OrderType.LIMIT_ON_OPEN,
-            OrderType.LIMIT_ON_CLOSE,
-        }
+        # Branch N — _LIMIT_PRICED comes from mapping/transform_data.
         if order.order_type in _LIMIT_PRICED:
             if order.price is None:
                 raise UnsupportedCapability(
@@ -266,7 +203,8 @@ class AlpacaOrderTranslator:
             body["limit_price"] = str(order.price)
 
         # STOP and STOP_LIMIT carry a stop trigger.
-        if order.order_type in {OrderType.STOP, OrderType.STOP_LIMIT}:
+        # Branch N — _STOP_PRICED comes from mapping/transform_data.
+        if order.order_type in _STOP_PRICED:
             if order.trigger_price is None:
                 # The domain validator prevents this from happening,
                 # but the explicit guard makes the failure mode clear
@@ -436,7 +374,7 @@ class AlpacaOrderTranslator:
         # Build the parent payload from a synthetic single-leg order
         # so we reuse the to_native validation + payload assembly.
         body = self._to_native_single_leg(combo, parent_inst, account_ctx)
-        body["order_class"] = _COMBO_TYPE_NATIVE[combo.combo_type]
+        body["order_class"] = COMBO_TYPE_TO_ALPACA[combo.combo_type]
 
         if combo.combo_type == ComboType.OTOCO:
             tp_leg = combo.legs[1]
