@@ -10,6 +10,7 @@ from sqlalchemy import func
 from database.traffic_db import TrafficLog, logs_session
 from limiter import limiter
 from utils.session import check_session_validity
+from utils.venue_local_time import active_render_tz_name
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ def convert_to_ist(timestamp):
     if isinstance(timestamp, str):
         timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     utc = pytz.timezone("UTC")
-    ist = pytz.timezone("Asia/Kolkata")
+    ist = pytz.timezone(active_render_tz_name())
     if timestamp.tzinfo is None:
         timestamp = utc.localize(timestamp)
     return timestamp.astimezone(ist)

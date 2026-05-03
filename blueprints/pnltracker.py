@@ -15,6 +15,7 @@ from services.history_service import get_history
 from services.tradebook_service import get_tradebook
 from utils.logging import get_logger
 from utils.session import check_session_validity
+from utils.venue_local_time import active_render_tz_name
 
 logger = get_logger(__name__)
 
@@ -30,9 +31,11 @@ def parse_trade_timestamp(timestamp_str, fallback_date=None):
     - Unix timestamp (int/float)
     - ISO format strings
 
-    Returns: timezone-aware datetime in IST, or None if parsing fails
+    Returns: timezone-aware datetime in the active region's primary
+    venue tz (resolved via :func:`utils.venue_local_time.active_render_tz_name`),
+    or None if parsing fails.
     """
-    ist = pytz.timezone("Asia/Kolkata")
+    ist = pytz.timezone(active_render_tz_name())
 
     if timestamp_str is None:
         return None
@@ -132,9 +135,10 @@ pnltracker_bp = Blueprint("pnltracker_bp", __name__, url_prefix="/")
 def convert_timestamp_to_ist(df, symbol=""):
     """
     Convert timestamp to IST with robust handling for different formats.
-    Returns the dataframe with datetime index in IST timezone.
+    Returns the dataframe with datetime index in the active region's
+    primary venue tz.
     """
-    ist = pytz.timezone("Asia/Kolkata")
+    ist = pytz.timezone(active_render_tz_name())
 
     try:
         # Try different timestamp formats
@@ -234,7 +238,7 @@ def get_pnl_data():
             ), 401
 
         # Default to today's date for historical data (will be overridden by trade date if trades exist)
-        ist = pytz.timezone("Asia/Kolkata")
+        ist = pytz.timezone(active_render_tz_name())
         today_str = datetime.now(ist).date().strftime("%Y-%m-%d")
 
         # Get tradebook data using the service (with API key)
@@ -349,7 +353,7 @@ def get_pnl_data():
             logger.info(f"First trade time: {first_trade_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
         else:
             logger.warning("Could not determine first trade time, using market open time")
-            ist = pytz.timezone("Asia/Kolkata")
+            ist = pytz.timezone(active_render_tz_name())
             first_trade_time = datetime.now(ist).replace(hour=9, minute=15, second=0, microsecond=0)
 
         # Determine the trading date from first trade time (handles overnight session spanning)
@@ -511,7 +515,7 @@ def get_pnl_data():
                         df_hist = convert_timestamp_to_ist(df_hist, symbol)
 
                         if df_hist is not None:
-                            ist = pytz.timezone("Asia/Kolkata")
+                            ist = pytz.timezone(active_render_tz_name())
                             current_time = datetime.now(ist)
 
                             # Filter to trading hours
@@ -646,7 +650,7 @@ def get_pnl_data():
         has_carryforward_positions = False
 
         if current_positions:
-            ist = pytz.timezone("Asia/Kolkata")
+            ist = pytz.timezone(active_render_tz_name())
 
             for pos_key, pos_data in current_positions.items():
                 parts = pos_key.rsplit("_", 1)
@@ -907,7 +911,7 @@ def get_pnl_data():
 
                             if df_hist is not None:
                                 # Filter to show data from first trade time onwards
-                                ist = pytz.timezone("Asia/Kolkata")
+                                ist = pytz.timezone(active_render_tz_name())
                                 current_time = datetime.now(ist)
 
                                 # For positions without trades, we still need to determine when to start
@@ -957,7 +961,7 @@ def get_pnl_data():
 
             # If we still couldn't get any historical data, create a simple flat line
             if portfolio_pnl is None:
-                ist = pytz.timezone("Asia/Kolkata")
+                ist = pytz.timezone(active_render_tz_name())
                 current_time = datetime.now(ist)
                 start_time = current_time.replace(hour=9, minute=0, second=0, microsecond=0)
                 end_time = current_time
@@ -979,7 +983,7 @@ def get_pnl_data():
             # Add zero PnL data from market open to first trade if needed
             # Skip when carry-forward positions exist (they already have data from market open)
             if first_trade_time and trades and not has_carryforward_positions:
-                ist = pytz.timezone("Asia/Kolkata")
+                ist = pytz.timezone(active_render_tz_name())
                 market_open = first_trade_time.replace(hour=9, minute=15, second=0, microsecond=0)
 
                 # Only add pre-trade data if first trade is after market open

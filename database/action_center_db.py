@@ -2,9 +2,7 @@
 
 import json
 import os
-from datetime import datetime
-
-import pytz
+from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, Index, Integer, String, Text, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import scoped_session, sessionmaker
@@ -32,15 +30,20 @@ Base.query = db_session.query_property()
 
 
 def get_ist_timestamp():
-    """Get current timestamp in IST format"""
+    """Return the current UTC timestamp as an ISO-8601 string.
+
+    v7 Phase 1 (T-03): the persistence stamp is UTC; the render
+    layer applies the operator's region tz at read time. The
+    function name is preserved as a transitional shim — callers
+    reading this back render via the active region tz, so the
+    historical "IST" suffix in the display string was misleading
+    even for India operators on non-default SESSION_EXPIRY_TIMEZONE.
+    """
     try:
-        utc_now = datetime.now(pytz.UTC)
-        ist = pytz.timezone("Asia/Kolkata")
-        ist_now = utc_now.astimezone(ist)
-        return ist_now.strftime("%Y-%m-%d %H:%M:%S IST")
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     except Exception as e:
-        logger.exception(f"Error getting IST timestamp: {e}")
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S IST")
+        logger.exception(f"Error getting UTC timestamp: {e}")
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 class PendingOrder(Base):
