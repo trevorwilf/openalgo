@@ -1,12 +1,32 @@
-import { lazy, Suspense } from 'react'
+import { lazy, type ReactNode, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Providers } from '@/app/providers'
 import { AuthSync } from '@/components/auth/AuthSync'
+import { IndiaOnlyFeature } from '@/components/IndiaOnlyFeature'
 import { FullWidthLayout } from '@/components/layout/FullWidthLayout'
 import { Layout } from '@/components/layout/Layout'
 import { PageLoader } from '@/components/ui/page-loader'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useBrokerStore } from '@/stores/brokerStore'
+
+/** Wrap an India-only route element so non-India brokers see a
+ * structured "feature unavailable" empty state instead of a page
+ * that 404s its sub-routes. */
+function IndiaOnly({
+  feature,
+  rationale,
+  children,
+}: {
+  feature: string
+  rationale?: string
+  children: ReactNode
+}) {
+  return (
+    <IndiaOnlyFeature featureName={feature} rationale={rationale}>
+      {children}
+    </IndiaOnlyFeature>
+  )
+}
 
 // Lazy load all pages for code splitting
 // Public pages
@@ -180,24 +200,154 @@ function App() {
                 <Route path="/platforms" element={<Platforms />} />
                 <Route path="/tradingview" element={<TradingView />} />
                 <Route path="/gocharting" element={<GoCharting />} />
-                <Route path="/pnl-tracker" element={<PnLTracker />} />
+                <Route
+                  path="/pnl-tracker"
+                  element={
+                    <IndiaOnly
+                      feature="Intraday P&L Tracker"
+                      rationale="The intraday P&L tracker pulls realised + unrealised values from the Indian-broker positionbook shape and renders an IST timeline. Equivalent functionality on US brokers comes from Alpaca's account snapshot widgets."
+                    >
+                      <PnLTracker />
+                    </IndiaOnly>
+                  }
+                />
                 {/* Phase 4: Sandbox & Analyzer */}
                 <Route path="/sandbox" element={<Sandbox />} />
                 <Route path="/sandbox/mypnl" element={<SandboxPnL />} />
                 <Route path="/analyzer" element={<Analyzer />} />
                 <Route path="/tools" element={<Tools />} />
-                <Route path="/optionchain" element={<OptionChain />} />
-                <Route path="/ivchart" element={<IVChart />} />
-                <Route path="/oitracker" element={<OITracker />} />
-                <Route path="/maxpain" element={<MaxPain />} />
-                <Route path="/straddle" element={<StraddleChart />} />
-                <Route path="/straddlepnl" element={<CustomStraddle />} />
-                <Route path="/volsurface" element={<VolSurface />} />
-                <Route path="/gex" element={<GEXDashboard />} />
-                <Route path="/ivsmile" element={<IVSmile />} />
-                <Route path="/oiprofile" element={<OIProfile />} />
-                <Route path="/strategybuilder" element={<StrategyBuilder />} />
-                <Route path="/strategybuilder/portfolio" element={<StrategyPortfolio />} />
+                <Route
+                  path="/optionchain"
+                  element={
+                    <IndiaOnly
+                      feature="Option Chain"
+                      rationale="The option-chain reader is keyed on Indian F&O expiry codes (NFO/BFO weekly/monthly series). US single-name and index options use a different chain structure that's not yet wired into this page."
+                    >
+                      <OptionChain />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/ivchart"
+                  element={
+                    <IndiaOnly
+                      feature="Implied Volatility Chart"
+                      rationale="IV charts source from the Indian options chain feed."
+                    >
+                      <IVChart />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/oitracker"
+                  element={
+                    <IndiaOnly
+                      feature="Open Interest Tracker"
+                      rationale="OI streams come from the NSE/BFO derivatives tape, which Indian brokers expose; US options OI plumbing isn't wired yet."
+                    >
+                      <OITracker />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/maxpain"
+                  element={
+                    <IndiaOnly
+                      feature="Max Pain"
+                      rationale="Max-pain calc consumes the Indian options-chain endpoint."
+                    >
+                      <MaxPain />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/straddle"
+                  element={
+                    <IndiaOnly
+                      feature="Straddle Chart"
+                      rationale="The straddle visualizer charts Indian F&O underlyings (NIFTY/BANKNIFTY/etc)."
+                    >
+                      <StraddleChart />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/straddlepnl"
+                  element={
+                    <IndiaOnly
+                      feature="Custom Straddle"
+                      rationale="The custom-straddle builder targets Indian F&O strike/expiry combinations."
+                    >
+                      <CustomStraddle />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/volsurface"
+                  element={
+                    <IndiaOnly
+                      feature="Volatility Surface"
+                      rationale="The vol-surface plot reads from the Indian options chain."
+                    >
+                      <VolSurface />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/gex"
+                  element={
+                    <IndiaOnly
+                      feature="Gamma Exposure (GEX) Dashboard"
+                      rationale="GEX aggregation runs over Indian-broker options-chain rows."
+                    >
+                      <GEXDashboard />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/ivsmile"
+                  element={
+                    <IndiaOnly
+                      feature="IV Smile"
+                      rationale="Plot reads the Indian options-chain feed."
+                    >
+                      <IVSmile />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/oiprofile"
+                  element={
+                    <IndiaOnly
+                      feature="OI Profile"
+                      rationale="OI-by-strike profile reads from the Indian options-chain endpoint."
+                    >
+                      <OIProfile />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/strategybuilder"
+                  element={
+                    <IndiaOnly
+                      feature="Strategy Builder"
+                      rationale="The visual strategy builder composes legs against Indian F&O underlyings + expiries; the calc model assumes NSE/BFO contract specs."
+                    >
+                      <StrategyBuilder />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/strategybuilder/portfolio"
+                  element={
+                    <IndiaOnly
+                      feature="Strategy Portfolio"
+                      rationale="Saved strategies reference Indian F&O instruments."
+                    >
+                      <StrategyPortfolio />
+                    </IndiaOnly>
+                  }
+                />
                 {/* Legacy /tools/strategy paths — redirect to the new route. */}
                 <Route
                   path="/tools/strategy"
@@ -223,13 +373,42 @@ function App() {
                 <Route path="/python/:strategyId/logs" element={<PythonStrategyLogs />} />
                 <Route path="/python/:strategyId/schedule" element={<SchedulePythonStrategy />} />
                 <Route path="/python/guide" element={<PythonStrategyGuide />} />
-                {/* Phase 6: Chartink Strategies */}
-                <Route path="/chartink" element={<ChartinkIndex />} />
-                <Route path="/chartink/new" element={<NewChartinkStrategy />} />
-                <Route path="/chartink/:strategyId" element={<ViewChartinkStrategy />} />
+                {/* Phase 6: Chartink Strategies — India-only by definition
+                    (Chartink is an Indian-equity scanner). */}
+                <Route
+                  path="/chartink"
+                  element={
+                    <IndiaOnly
+                      feature="Chartink Strategies"
+                      rationale="Chartink is an Indian-equity scanner; the integration consumes its Indian symbol vocabulary directly."
+                    >
+                      <ChartinkIndex />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/chartink/new"
+                  element={
+                    <IndiaOnly feature="Chartink Strategies">
+                      <NewChartinkStrategy />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/chartink/:strategyId"
+                  element={
+                    <IndiaOnly feature="Chartink Strategies">
+                      <ViewChartinkStrategy />
+                    </IndiaOnly>
+                  }
+                />
                 <Route
                   path="/chartink/:strategyId/configure"
-                  element={<ConfigureChartinkSymbols />}
+                  element={
+                    <IndiaOnly feature="Chartink Strategies">
+                      <ConfigureChartinkSymbols />
+                    </IndiaOnly>
+                  }
                 />
                 {/* Flow Editor */}
                 <Route path="/flow" element={<FlowIndex />} />
@@ -263,9 +442,33 @@ function App() {
               {/* Full-width protected routes */}
               <Route element={<FullWidthLayout />}>
                 <Route path="/playground" element={<Playground />} />
-                <Route path="/historify" element={<Historify />} />
-                <Route path="/historify/charts" element={<HistorifyCharts />} />
-                <Route path="/historify/charts/:symbol" element={<HistorifyCharts />} />
+                <Route
+                  path="/historify"
+                  element={
+                    <IndiaOnly
+                      feature="Historify (Historical Data Manager)"
+                      rationale="Historify's symbol picker and download scheduler are wired to the Indian-broker `BrokerData` interface (broker.<name>.api.data). For Alpaca + other promoted brokers, historical bars are available via `/api/v2/bars` directly."
+                    >
+                      <Historify />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/historify/charts"
+                  element={
+                    <IndiaOnly feature="Historify Charts">
+                      <HistorifyCharts />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/historify/charts/:symbol"
+                  element={
+                    <IndiaOnly feature="Historify Charts">
+                      <HistorifyCharts />
+                    </IndiaOnly>
+                  }
+                />
                 {/* Flow Editor (full-width for canvas) */}
                 <Route path="/flow/editor/:id" element={<FlowEditor />} />
               </Route>
