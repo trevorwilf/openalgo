@@ -47,5 +47,16 @@
     "sandbox_enabled": false,
     "analyzer_enabled": false,
     "flow_templates_enabled": false
+  },
+  "product_vocabulary": {
+    "ALL": ["DAY", "GTC", "IOC"]
+  },
+  "price_type_vocabulary": {
+    "ALL": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"]
+  },
+  "legacy_compat_shim": {
+    "valid_exchanges": ["XLON"],
+    "valid_actions": ["BUY", "SELL"],
+    "valid_time_in_force": ["DAY", "GTC", "IOC"]
   }
 }

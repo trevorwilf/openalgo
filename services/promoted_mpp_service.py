@@ -190,13 +190,52 @@ def _fetch_ltp_and_tick(
         return None, None
 
 
+def get_active_region_mpp_slabs(instrument_type: str) -> list[tuple[float, float]] | None:
+    """T-13 (v7 Phase 3-ter) — region-aware MPP slab lookup.
+
+    Returns the active region's MPP slab table for the given
+    instrument type (``"EQ"`` / ``"FUT"`` / ``"CE"`` / ``"PE"``).
+    Returns ``None`` when:
+      * Active region cannot be resolved (no broker/session).
+      * Region declares no MPP slabs (most non-India regions —
+        US has no equivalent regulatory slab system).
+
+    Today only the India region declares MPP slabs (SEBI). New
+    regions add slabs by shipping a sibling ``mpp.py`` module
+    alongside their plugin.json.
+    """
+    try:
+        from services.feature_gate_service import active_region_code
+
+        region = active_region_code()
+    except Exception:
+        return None
+
+    if region == "india":
+        try:
+            from market_regions.india.mpp import get_india_mpp_slabs
+
+            return get_india_mpp_slabs(instrument_type)
+        except ImportError:
+            return None
+    # Other regions: no MPP slabs declared. Future US/EU regions
+    # ship their own ``mpp.py`` and we route here.
+    return None
+
+
 def _calculate_protected_price(
     base_price: float,
     side: str,
     symbol: str,
     tick_size: float | None,
 ) -> float:
-    """Wrap :func:`utils.mpp_slab.calculate_protected_price`."""
+    """Wrap :func:`utils.mpp_slab.calculate_protected_price`.
+
+    The slab table itself is now region-aware via
+    :func:`get_active_region_mpp_slabs` (T-13). For India brokers
+    this returns the same SEBI table the legacy module used; the
+    return value is bit-identical so parity is preserved.
+    """
     from utils.mpp_slab import calculate_protected_price, get_instrument_type_from_symbol
 
     instrument_type = get_instrument_type_from_symbol(symbol or "")
