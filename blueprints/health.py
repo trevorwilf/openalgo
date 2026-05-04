@@ -24,6 +24,7 @@ from limiter import limiter
 from utils.health_monitor import check_db_connectivity, get_cached_health_status
 from utils.logging import get_logger
 from utils.session import check_session_validity
+from utils.venue_local_time import active_render_tz_name
 
 logger = get_logger(__name__)
 
