@@ -81,14 +81,53 @@ def get_session_based_cache_ttl():
         expiry_time = os.getenv("SESSION_EXPIRY_TIME", "03:00")
         hour, minute = map(int, expiry_time.split(":"))
 
-        # Calculate time until next session expiry. Phase 4 — anchor in
-        # SESSION_EXPIRY_TIMEZONE (default Asia/Kolkata) so US/EU
-        # deployments do not silently use IST.
-        tz_name = os.getenv("SESSION_EXPIRY_TIMEZONE", "Asia/Kolkata")
+        # T-10 (Phase 2): SESSION_EXPIRY_TIMEZONE is fail-closed for
+        # non-India deployments. The previous dual-fallback pattern
+        # silently defaulted to Asia/Kolkata even when the active
+        # broker was Alpaca / Schwab / etc., yielding wrong session
+        # expiry math for US operators. Behavior:
+        #
+        #   * env set + valid IANA tz   -> use it
+        #   * env set + invalid IANA tz -> ConfigurationError
+        #   * env unset, India region   -> silent Asia/Kolkata
+        #     (preserves current behavior per .sample.env:156-161)
+        #   * env unset, non-India      -> ConfigurationError, naming
+        #                                  the env var so the operator
+        #                                  sees a structured fix.
+        #   * env unset, region not yet
+        #     resolvable (startup, no
+        #     broker session)           -> silent Asia/Kolkata fallback
+        #                                  - fail-closed only kicks in
+        #                                  once the active region is
+        #                                  known to be non-India.
+        tz_name = os.getenv("SESSION_EXPIRY_TIMEZONE")
+        if not tz_name:
+            try:
+                from services.feature_gate_service import active_region_code
+
+                region = active_region_code()
+            except Exception:
+                region = None
+            if region and region != "india":
+                from domain.errors import ConfigurationError
+
+                raise ConfigurationError(
+                    f"SESSION_EXPIRY_TIMEZONE must be set for non-India "
+                    f"deployment (active region: {region!r}). See "
+                    f".sample.env:156-161 for the documented values.",
+                    missing_env="SESSION_EXPIRY_TIMEZONE",
+                )
+            tz_name = "Asia/Kolkata"
         try:
             tz = pytz.timezone(tz_name)
         except pytz.UnknownTimeZoneError:
-            tz = pytz.timezone("Asia/Kolkata")
+            from domain.errors import ConfigurationError
+
+            raise ConfigurationError(
+                f"SESSION_EXPIRY_TIMEZONE={tz_name!r} is not a valid "
+                f"IANA timezone name. See .sample.env:156-161.",
+                missing_env="SESSION_EXPIRY_TIMEZONE",
+            )
         now_utc = datetime.now(pytz.utc)
         now_local = now_utc.astimezone(tz)
 
@@ -114,6 +153,14 @@ def get_session_based_cache_ttl():
         return int(ttl_seconds)
 
     except Exception as e:
+        # T-10: ConfigurationError must propagate so the operator sees
+        # the structured fix-it message. Other exceptions (e.g., env
+        # parsing glitches, transient lookup failures) fall back to
+        # the 5-minute default to keep the cache layer alive.
+        from domain.errors import ConfigurationError
+
+        if isinstance(e, ConfigurationError):
+            raise
         logger.warning(f"Could not calculate session-based cache TTL, using 5-minute default: {e}")
         return 300  # Fallback to 5 minutes
 

@@ -183,6 +183,14 @@ class BrokerCapabilities(BaseModel):
     minor_unit_divisor: int | None = None
     topic_format: str | None = None
     requires_v1_compat: bool = False
+    # v7 Phase 2 (T-04) — broker-declared default venue + product code
+    # for the v1 compat bridge. Optional; when None the bridge falls
+    # back to ``supported_venue_codes[0]`` for venue and raises
+    # ``BrokerCapabilityError`` for product. New non-India plugins
+    # SHOULD declare both explicitly so the v1 UI surface knows which
+    # venue / product label to display.
+    default_venue_code: str | None = None
+    default_product_code: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -381,6 +389,10 @@ _EXPLICIT_OVERRIDE_KEYS: frozenset[str] = frozenset(
         "minor_unit_divisor",
         "topic_format",
         "requires_v1_compat",
+        # v7 Phase 2 (T-04) — broker-declared default venue + product
+        # for the v1 compat bridge.
+        "default_venue_code",
+        "default_product_code",
     }
 )
 
