@@ -127,6 +127,16 @@ Each lane reads its own value from the same source of truth.
 The Python-level hard-coded ₹1Cr fallback is now defensive (never
 fires in normal operation; only a boot-time safety net).
 
+## Frontend literal-scan cleanup (v6-4 invariant — shrink only)
+
+* ``frontend/src/components/IndiaOnlyFeature.tsx`` — dropped 6
+  inline India-exchange literals (NSE / BSE / NFO / BFO / MCX /
+  CDS) from the unavailable-state UI message. Replaced with
+  generic "Indian exchanges" phrasing — the broker name and
+  region are already shown in the same message, the per-
+  exchange list was decorative. ``npm run lint:literals`` now
+  reports 0 violations across 133 files (was 6).
+
 ## Other v8-cycle work (bug-class hygiene)
 
 A small batch of pre-existing regressions surfaced during the
@@ -173,10 +183,10 @@ Plus tooling improvements:
 
 | Metric | Count |
 |---|---|
-| Branches per item | **13+ branches**: chore/v8-c-symbol-service-v1-view, chore/v8-c-instruments-service-test, fix/alpaca-stream-mis-leak, chore/sweep-9dp-precision, feat/dashboard-region-content, feat/v8-closing-invariants, chore/v8-c-search-service-v1-view, fix/fund-manager-method-nesting, feat/dashboard-region-realized-pnl, feat/rule-enforcement-entitlements, fix/delta-v1-compat-literals, fix/sandbox-initial-funds-reconcile, docs/v8-progress |
-| Phase merges to dev (`--no-ff`) | 12 |
-| Total commits this v8 cycle | ~25 |
-| Net new tests added in v8 | **25+** across 5 test files (v8-C × 8, Dashboard build × 0, FundManager × 3, entitlements × 5, reconciliation × 1) |
+| Branches per item | **15+ branches** across the cycle |
+| Phase merges to dev (`--no-ff`) | 14 |
+| Total commits this v8 cycle | ~30 |
+| Net new tests added in v8 | **27+** across 5 test files (v8-C × 8, FundManager × 3, entitlements × 5, reconciliation × 4 updated, sweep × 0 updated) |
 | ADRs added | 0 (ADR 0032 v8-scope-placeholder shipped at end of v7) |
 | v8 closing invariants implemented | 2 of 5 (v8-C, v8-E) |
 | v8 closing invariants deferred | 3 of 5 (v8-A, v8-B, v8-D — all per ADR 0032 deferral list) |
