@@ -75,6 +75,58 @@ page-level expansion follow-up:
 </RegionContent>
 ```
 
+## Production bug fixes (this cycle, post-v7-FINAL)
+
+* **`fix(sandbox)`: FundManager methods nested inside helper.** T-16
+  inserted ``_resolve_starting_capital_default`` between the
+  ``class FundManager:`` header and the methods at module-level
+  indent. The methods at indent 4 then became NESTED FUNCTIONS
+  inside the helper. Symptom: ``FundManager(user_id)`` would
+  crash with ``TypeError: object.__init__() takes exactly one
+  argument`` because the class had only ``_lock``. Fixed by
+  moving the helper before the class declaration. Regression
+  test at ``tests/sandbox/test_fund_manager_method_shape.py``
+  pins the method list + helper position so a future drive-by
+  edit can't re-break it.
+
+## Phase 4-bis-2 close-out — entitlement-aware order rejects
+
+The ``account_ctx`` parameter on
+``services.rule_enforcement.check_order`` was reserved in v3 for
+"Phase 8 entitlement-aware rejects". v8 closes that
+reservation:
+
+  * Rules MAY declare ``metadata.required_entitlements`` (a list
+    of strings — e.g. ``["us_equity_realtime", "options_l2"]``).
+  * When provided AND ``account_ctx.entitlements`` doesn't carry
+    every required value, ``check_order`` raises
+    ``OrderRuleViolation(code="entitlement_required")`` — the
+    structured ``ENTITLEMENT_REQUIRED`` ErrorCode (added in v5
+    ADR 0029) is now wired end-to-end through the rule layer.
+
+Backward-compatible: rules without ``required_entitlements`` skip
+the check; calls without ``account_ctx`` skip the check.
+
+5 tests at ``tests/rule_enforcement/test_entitlement_required.py``
+cover the full matrix (missing / granted / partial / no rule
+requirement / no account ctx).
+
+## Sandbox capital reconciliation close-out
+
+CLAUDE.md noted the
+``IndiaSandboxProvider._INITIAL_FUNDS`` (₹10L) vs legacy
+``fund_manager.starting_capital`` (₹1Cr) mismatch as a deferred
+reconciliation. v8 declares BOTH values explicitly in
+``market_regions/india/plugin.json``:
+
+  * ``metadata.sandbox_initial_funds = "1000000.00"`` (₹10L → v2)
+  * ``metadata.sandbox_starting_capital_default
+        = "10000000.00"`` (₹1Cr → legacy)
+
+Each lane reads its own value from the same source of truth.
+The Python-level hard-coded ₹1Cr fallback is now defensive (never
+fires in normal operation; only a boot-time safety net).
+
 ## Other v8-cycle work (bug-class hygiene)
 
 A small batch of pre-existing regressions surfaced during the
@@ -121,10 +173,10 @@ Plus tooling improvements:
 
 | Metric | Count |
 |---|---|
-| Branches per item | **8 branches**: chore/v8-c-symbol-service-v1-view, chore/v8-c-instruments-service-test, fix/alpaca-stream-mis-leak, chore/sweep-9dp-precision, feat/dashboard-region-content, feat/v8-closing-invariants, chore/v8-c-search-service-v1-view |
-| Phase merges to dev (`--no-ff`) | 7 |
-| Total commits this v8 cycle | ~13 |
-| Net new tests added in v8 | **17** across 2 test files |
+| Branches per item | **13+ branches**: chore/v8-c-symbol-service-v1-view, chore/v8-c-instruments-service-test, fix/alpaca-stream-mis-leak, chore/sweep-9dp-precision, feat/dashboard-region-content, feat/v8-closing-invariants, chore/v8-c-search-service-v1-view, fix/fund-manager-method-nesting, feat/dashboard-region-realized-pnl, feat/rule-enforcement-entitlements, fix/delta-v1-compat-literals, fix/sandbox-initial-funds-reconcile, docs/v8-progress |
+| Phase merges to dev (`--no-ff`) | 12 |
+| Total commits this v8 cycle | ~25 |
+| Net new tests added in v8 | **25+** across 5 test files (v8-C × 8, Dashboard build × 0, FundManager × 3, entitlements × 5, reconciliation × 1) |
 | ADRs added | 0 (ADR 0032 v8-scope-placeholder shipped at end of v7) |
 | v8 closing invariants implemented | 2 of 5 (v8-C, v8-E) |
 | v8 closing invariants deferred | 3 of 5 (v8-A, v8-B, v8-D — all per ADR 0032 deferral list) |
