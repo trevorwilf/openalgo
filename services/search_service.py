@@ -90,8 +90,18 @@ def search_symbols(
         # Fallback to database search
         logger.debug("Cache not available, falling back to database search")
         from database.symbol import enhanced_search_symbols
+        from services.symbol_service import _v1_view_is_available
 
-        results = enhanced_search_symbols(query, exchange)
+        # v8-C — query the symtoken_v1 view when available so v1
+        # search responses don't surface T-06 broker_code /
+        # instrument_id columns. Falls back to SymToken when the
+        # operator hasn't run the broker-provenance migration.
+        if _v1_view_is_available():
+            from database.symbol import SymTokenV1Read
+
+            results = enhanced_search_symbols(query, exchange, model_cls=SymTokenV1Read)
+        else:
+            results = enhanced_search_symbols(query, exchange)
 
         if not results:
             logger.info(f"No results found for query: {query}")
