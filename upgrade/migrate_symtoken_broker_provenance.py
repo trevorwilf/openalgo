@@ -109,6 +109,26 @@ def upgrade() -> None:
                 "Backfilled broker_code=%r on %d rows", broker, result.rowcount
             )
 
+        # Phase 4-bis-4: create the v1-compatibility view that
+        # hides broker_code + instrument_id from external SQL
+        # consumers. Operators and integration scripts that select
+        # from ``symtoken_v1`` get the pre-T-06 column set.
+        # ``CREATE VIEW IF NOT EXISTS`` is supported by SQLite +
+        # PostgreSQL so this is idempotent.
+        try:
+            conn.execute(text("DROP VIEW IF EXISTS symtoken_v1"))
+            conn.execute(
+                text(
+                    "CREATE VIEW symtoken_v1 AS SELECT "
+                    "id, symbol, brsymbol, name, exchange, brexchange, "
+                    "token, expiry, strike, lotsize, instrumenttype, "
+                    "tick_size, contract_value FROM symtoken"
+                )
+            )
+            logger.info("Created view symtoken_v1 (pre-T-06 column set)")
+        except Exception as e:
+            logger.warning("Could not create symtoken_v1 view: %s", e)
+
         # Backfill instrument_id where NULL — assign a UUID4 per row.
         rows = conn.execute(
             text("SELECT id FROM symtoken WHERE instrument_id IS NULL OR instrument_id = ''")
@@ -126,12 +146,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Drop the T-06 columns. Lossy — operators are advised to
-    back up before running. The unique constraint and view are not
-    yet shipped so there's nothing else to undo."""
+    """Drop the T-06 columns + the symtoken_v1 view. Lossy —
+    operators are advised to back up before running."""
     from market_regions.india.legacy_v1.database.symbol import db_session, engine
 
     with engine.connect() as conn:
+        try:
+            conn.execute(text("DROP VIEW IF EXISTS symtoken_v1"))
+            logger.info("Dropped view symtoken_v1")
+        except Exception as e:
+            logger.warning("Could not drop symtoken_v1: %s", e)
         if _has_column(conn, "symtoken", "instrument_id"):
             conn.execute(text("ALTER TABLE symtoken DROP COLUMN instrument_id"))
             logger.info("Dropped column symtoken.instrument_id")
