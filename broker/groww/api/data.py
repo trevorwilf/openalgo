@@ -15,6 +15,63 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 # API endpoints are handled by the Groww SDK
 
+
+# T-20 (v7 Phase 3-bis-3): the India venue tz + market window come
+# from the India region plugin's session_templates instead of being
+# hard-coded throughout this file. Operators on a non-default IST
+# offset (DST exception, year-end exchange tweak, etc.) get the
+# right value without editing this broker's source.
+def _groww_ist_tz() -> "pytz.BaseTzInfo":
+    """Return the India region plugin's primary venue tz.
+
+    Falls back to ``Asia/Kolkata`` when the region plugin isn't
+    loaded (boot-time / test contexts) — bit-identical to the
+    legacy hardcoded behavior.
+    """
+    try:
+        from utils.region_loader import get_market_region, load_market_regions
+
+        india = get_market_region("india")
+        if india is None:
+            load_market_regions()
+            india = get_market_region("india")
+        if india is not None:
+            tz_name = getattr(india, "timezone_name", None)
+            if tz_name:
+                return pytz.timezone(str(tz_name))
+    except Exception:
+        pass
+    return _groww_ist_tz()
+
+
+def _groww_market_window() -> tuple[str, str]:
+    """Return ``(open_local, close_local)`` strings ``"HH:MM:SS"`` for
+    the India equity regular session. Sourced from the region
+    plugin; falls back to the legacy ``09:15:00`` / ``15:30:00``
+    when the plugin is unavailable.
+    """
+    try:
+        from utils.region_loader import get_market_region, load_market_regions
+
+        india = get_market_region("india")
+        if india is None:
+            load_market_regions()
+            india = get_market_region("india")
+        if india is not None:
+            for tmpl in india.session_templates:
+                if (
+                    tmpl.session_code == "REGULAR"
+                    and "NSE" in (tmpl.venue_codes or [])
+                ):
+                    return (
+                        tmpl.local_start_time.strftime("%H:%M:%S"),
+                        tmpl.local_end_time.strftime("%H:%M:%S"),
+                    )
+    except Exception:
+        pass
+    return ("09:15:00", "15:30:00")
+
+
 # Exchange constants for Groww API
 EXCHANGE_NSE = "NSE"  # Stock exchange code for NSE
 EXCHANGE_BSE = "BSE"  # Stock exchange code for BSE
@@ -238,7 +295,7 @@ class BrokerData:
             logger.warning("Empty DataFrame passed to fix_timestamps, returning as is")
             return df
 
-        ist_tz = pytz.timezone("Asia/Kolkata")
+        ist_tz = _groww_ist_tz()
 
         # For daily or weekly interval: Set all timestamps to 09:15 AM IST (market open time)
         # Important: Weekly timeframes should be treated like daily (first day of week at market open)
@@ -400,8 +457,8 @@ class BrokerData:
                         "exchange": groww_exchange,
                         "segment": segment,
                         "trading_symbol": trading_symbol,
-                        "start_time": f"{chunk_start} 09:15:00",
-                        "end_time": f"{chunk_end} 15:30:00",
+                        "start_time": f"{chunk_start} {_groww_market_window()[0]}",
+                        "end_time": f"{chunk_end} {_groww_market_window()[1]}",
                         "interval_in_minutes": interval_minutes,
                     },
                     debug=True,
@@ -446,7 +503,7 @@ class BrokerData:
 
             # SIMPLIFIED APPROACH: Work with the data directly
             # Create a datetime index with market open time (09:15 AM IST)
-            ist = pytz.timezone("Asia/Kolkata")
+            ist = _groww_ist_tz()
 
             # Convert based on timeframe and data format
             # Process both daily (D, 1d) and weekly (W) candles the same way
@@ -530,7 +587,7 @@ class BrokerData:
                 logger.info(f"Processing intraday data for timeframe {timeframe}")
                 rows = []
                 timestamps = []
-                ist_tz = pytz.timezone("Asia/Kolkata")
+                ist_tz = _groww_ist_tz()
 
                 # For proper market hour representation in all intraday timeframes
                 for candle in candles:
@@ -569,7 +626,7 @@ class BrokerData:
                                 else start_time.strftime("%Y-%m-%d")
                             )
                             base_dt = datetime.strptime(
-                                f"{start_str} 09:15:00", "%Y-%m-%d %H:%M:%S"
+                                f"{start_str} {_groww_market_window()[0]}", "%Y-%m-%d %H:%M:%S"
                             )
                             base_dt = ist_tz.localize(base_dt)
                             # Create proper interval based on timeframe
@@ -578,7 +635,7 @@ class BrokerData:
                             )
                             # Ensure it's within market hours
                             market_close = datetime.strptime(
-                                f"{start_str} 15:30:00", "%Y-%m-%d %H:%M:%S"
+                                f"{start_str} {_groww_market_window()[1]}", "%Y-%m-%d %H:%M:%S"
                             )
                             market_close = ist_tz.localize(market_close)
                             if dt > market_close:
@@ -675,7 +732,7 @@ class BrokerData:
                 # Log sample data for debugging
                 if not result_df.empty and "timestamp" in result_df.columns:
                     sample_timestamp = result_df["timestamp"].iloc[0]
-                    ist_tz = pytz.timezone("Asia/Kolkata")
+                    ist_tz = _groww_ist_tz()
                     sample_dt = datetime.fromtimestamp(sample_timestamp, tz=ist_tz)
                     logger.info(f"First row timestamp: {sample_timestamp} ({sample_dt})")
 
@@ -748,7 +805,7 @@ class BrokerData:
                             new_index = []
                             for dt in weekly_df.index:
                                 # Create a new datetime with the same date but at 9:15 AM
-                                ist_tz = pytz.timezone("Asia/Kolkata")
+                                ist_tz = _groww_ist_tz()
                                 market_open = datetime(dt.year, dt.month, dt.day, 9, 15, 0)
                                 market_open = ist_tz.localize(market_open)
                                 new_index.append(market_open)
@@ -805,7 +862,7 @@ class BrokerData:
 
                                 if not week_data.empty:
                                     # Create market open time for the first day of the week
-                                    ist_tz = pytz.timezone("Asia/Kolkata")
+                                    ist_tz = _groww_ist_tz()
                                     market_open = datetime(
                                         week_start.year, week_start.month, week_start.day, 9, 15, 0
                                     )
@@ -886,7 +943,7 @@ class BrokerData:
                 sample_timestamps = result_df["timestamp"].head(3).tolist()
                 sample_times = []
                 for ts in sample_timestamps:
-                    dt = datetime.fromtimestamp(ts, tz=pytz.timezone("Asia/Kolkata"))
+                    dt = datetime.fromtimestamp(ts, tz=_groww_ist_tz())
                     sample_times.append(dt.strftime("%Y-%m-%d %H:%M:%S%z"))
 
                 logger.info(f"Final format - timestamp column values: {sample_timestamps}")
