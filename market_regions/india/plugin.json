@@ -196,8 +196,7 @@
       "MCX",
       "NCDEX",
       "NSE_INDEX",
-      "BSE_INDEX",
-      "CRYPTO"
+      "BSE_INDEX"
     ],
     "valid_actions": ["BUY", "SELL"],
     "valid_time_in_force": ["DAY", "IOC"]

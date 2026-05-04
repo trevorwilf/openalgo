@@ -17,7 +17,7 @@
       "ok": false
     },
     {
-      "error": "Invalid exchange 'XNAS'. Must be one of: NSE, NFO, CDS, BSE, BFO, BCD, MCX, NCDEX, NSE_INDEX, BSE_INDEX, CRYPTO",
+      "error": "Invalid exchange 'XNAS'. Must be one of: NSE, NFO, CDS, BSE, BFO, BCD, MCX, NCDEX, NSE_INDEX, BSE_INDEX",
       "input": {
         "exchange": "XNAS",
         "symbol": "RELIANCE"
@@ -33,12 +33,12 @@
       "ok": false
     },
     {
-      "error": null,
+      "error": "Invalid exchange 'CRYPTO'. Must be one of: NSE, NFO, CDS, BSE, BFO, BCD, MCX, NCDEX, NSE_INDEX, BSE_INDEX",
       "input": {
         "exchange": "CRYPTO",
         "symbol": "BTCUSDT"
       },
-      "ok": true
+      "ok": false
     },
     {
       "error": null,

@@ -52,23 +52,34 @@ def test_crypto_region_24x7_session():
     assert sorted(sessions[0].days_of_week) == [0, 1, 2, 3, 4, 5, 6]
 
 
-def test_india_still_declares_crypto_for_compat():
-    """India's legacy_compat_shim retains CRYPTO in valid_exchanges
-    until Delta Exchange is fully migrated to the crypto region.
-    The full carve-out lands in a Phase 8 follow-up that updates
-    the broker's supported_regions and the India parity baselines
-    in lockstep."""
+def test_india_no_longer_declares_crypto():
+    """T-30 (v7 Phase 8 final): India relinquished CRYPTO when
+    Delta Exchange flipped to ``supported_regions: ["crypto"]``.
+    India's ``legacy_compat_shim.valid_exchanges`` no longer
+    includes ``"CRYPTO"`` — Delta Exchange routes through the
+    crypto region instead. The 3 affected parity baselines
+    (parity_quote, parity_history, parity_place_order_validation)
+    were regenerated to drop ``CRYPTO`` from their valid-exchange
+    error string."""
     from utils.region_loader import get_market_region
 
     india = get_market_region("india")
     assert india is not None
     shim = india.legacy_compat_shim
     valid = shim["valid_exchanges"] if isinstance(shim, dict) else shim.valid_exchanges
-    # The transitional state: India still declares CRYPTO for
-    # backward compat. This assertion CHANGES (CRYPTO removed) once
-    # the Delta Exchange migration lands.
-    assert "CRYPTO" in valid, (
-        "India temporarily retains CRYPTO in legacy_compat_shim.valid_exchanges "
-        "until the Delta Exchange supported_regions flip ships. "
-        "This is the pre-migration state."
+    assert "CRYPTO" not in valid, (
+        "T-30 carve-out: India should no longer claim CRYPTO. "
+        "Delta Exchange handles crypto via the crypto region plugin."
     )
+
+
+def test_crypto_region_owns_crypto_exchange():
+    """The crypto region declares ``CRYPTO`` as its sole valid
+    exchange post-T-30."""
+    from utils.region_loader import get_market_region
+
+    crypto = get_market_region("crypto")
+    assert crypto is not None
+    shim = crypto.legacy_compat_shim
+    valid = shim["valid_exchanges"] if isinstance(shim, dict) else shim.valid_exchanges
+    assert "CRYPTO" in valid
