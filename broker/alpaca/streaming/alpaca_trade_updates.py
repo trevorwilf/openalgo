@@ -296,13 +296,20 @@ def publish_trade_update_to_bus(event_type: str, data: dict[str, Any]) -> None:
     }
 
     if event_type in ("new", "accepted"):
+        # Product code: Alpaca has no "intraday vs delivery" axis
+        # the way Indian brokers do. The OpenAlgo OrderPlacedEvent
+        # surface still requires a product field for the v1 UI;
+        # we map Alpaca's per-order ``time_in_force`` onto the
+        # neutral product slot. ``DAY`` -> "DAY", ``GTC`` -> "GTC",
+        # etc. The v1 React order book renders this verbatim.
+        tif = (order.get("time_in_force") or "DAY").upper()
         bus.publish(
             OrderPlacedEvent(
                 strategy="alpaca-stream",
                 action=(order.get("side") or "").upper(),
                 quantity=int(float(order.get("qty") or 0)),
                 pricetype=(order.get("type") or "").upper(),
-                product="MIS",
+                product=tif,
                 orderid=order_id,
                 **common,
             )

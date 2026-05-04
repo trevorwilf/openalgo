@@ -3,7 +3,7 @@
 # Delta Exchange endpoint: GET /v2/products/{product_id}/margin_required
 
 from broker.deltaexchange.mapping.transform_data import _order_size
-from database.token_db import get_token
+from broker.deltaexchange.database.master_contract_db import get_token
 from utils.logging import get_logger
 
 logger = get_logger(__name__)

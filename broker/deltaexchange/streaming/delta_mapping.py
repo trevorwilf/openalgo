@@ -13,12 +13,11 @@ class DeltaExchangeMapper:
     All products trade on a single exchange named "CRYPTO" in OpenAlgo.
     """
 
-    # OpenAlgo exchange code → Delta Exchange exchange code
+    # OpenAlgo exchange code -> Delta Exchange exchange code.
+    # Delta only trades crypto, so CRYPTO is the only valid input;
+    # ``get_segment`` falls back to CRYPTO for any unknown value.
     EXCHANGE_SEGMENTS = {
         "CRYPTO": "CRYPTO",
-        "NSE":    "CRYPTO",   # safety alias if misconfigured
-        "BSE":    "CRYPTO",
-        "MCX":    "CRYPTO",
     }
 
     @staticmethod
