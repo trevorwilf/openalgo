@@ -65,15 +65,26 @@ _SEGMENT_TO_VENUE: dict[str, str] = {
 }
 
 
-class ZerodhaAdapter:
+from services.instrument_sync_adapters._base import BaseInstrumentSyncAdapter
+
+
+class ZerodhaAdapter(BaseInstrumentSyncAdapter):
     """Zerodha instrument sync adapter.
 
     Construct with either a local `csv_path` (tests) or a `csv_url`
     (production). Exactly one must be set.
+
+    T-26 (v7 Phase 7-bis): inherits ``venue_timezone`` / ``currency``
+    from :class:`BaseInstrumentSyncAdapter` which reads from the
+    active region plugin instead of hard-coding India values. The
+    legacy class attribute ``venue_timezone = "Asia/Kolkata"`` is
+    retained as a documented constant for any caller that imported
+    it directly — but new code uses the property which routes
+    through the region plugin.
     """
 
     broker_code = "zerodha"
-    venue_timezone = "Asia/Kolkata"
+    region_code = "india"
 
     def __init__(
         self,
@@ -195,7 +206,7 @@ class ZerodhaAdapter:
             expiration_at=expiry,
             option_right=option_right,
             strike=strike,
-            currency="INR",
+            currency=self.currency,
             display_name=display_name,
             identifiers=identifiers,
         )
