@@ -561,7 +561,12 @@ def transform_holdings_data(holdings_data):
 
             transformed_holding = {
                 "symbol": holding.get("tradingSymbol", holding.get("symbol", "")),
-                "exchange": holding.get("exchangeSegment", "NSE"),  # Default to NSE
+                # Default exchange: CRYPTO. Delta is a crypto-only
+                # broker (post-T-30), so a missing exchangeSegment
+                # never means "NSE". Mismatched holdings still get
+                # an exchange string so the v1 UI's grouper doesn't
+                # drop them.
+                "exchange": holding.get("exchangeSegment", "CRYPTO"),
                 "quantity": holding.get("totalQty", holding.get("total_qty", 0)),
                 "product": "CNC",  # Holdings are always CNC (Cash and Carry)
                 "pnl": holding.get("pnlAbsolute", 0.0),
