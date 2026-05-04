@@ -12,7 +12,9 @@
     "notes": "Matches legacy OpenAlgo defaults.",
     "flow_defaults": {
       "products": ["MIS", "CNC", "NRML"]
-    }
+    },
+    "sandbox_initial_funds": "1000000.00",
+    "sandbox_initial_funds_currency": "INR"
   },
   "venues": [
     {

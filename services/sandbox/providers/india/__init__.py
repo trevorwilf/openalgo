@@ -33,19 +33,42 @@ if TYPE_CHECKING:  # pragma: no cover
     from domain.orders import NormalizedOrderRequest
 
 REGION_CODE = "india"
+
+
+def _resolve_initial_funds_from_region_plugin() -> Decimal:
+    """T-16 (v7 Phase 4-bis-3): read sandbox initial funds from the
+    India region plugin's metadata instead of hard-coding ₹10L in
+    Python source.
+
+    Resolution chain:
+    1. ``market_regions/india/plugin.json::metadata.sandbox_initial_funds``
+       (the canonical source of truth post-T-16).
+    2. Fallback to ``Decimal("1000000.00")`` (₹10L) when the region
+       plugin isn't loaded yet — matches the legacy provider value
+       so India parity baselines stay bit-identical.
+    """
+    try:
+        from utils.region_loader import get_market_region, load_market_regions
+
+        region = get_market_region("india")
+        if region is None:
+            load_market_regions()
+            region = get_market_region("india")
+        if region is not None:
+            metadata = getattr(region, "metadata", None) or {}
+            value = metadata.get("sandbox_initial_funds")
+            if value:
+                return Decimal(str(value))
+    except Exception:
+        pass
+    return Decimal("1000000.00")
+
+
 # Phase 8 v4 (ADR 0026) framework-readiness contract value: ₹10L.
-# Pinned by ``tests/parity/baseline/parity_sandbox_india`` so this
-# is the provider-side single source of truth.
-#
-# Note on the apparent discrepancy with ``sandbox/fund_manager.py``
-# whose legacy default is ``"10000000.00"`` (₹1Cr): the legacy
-# runtime uses an operator-configurable ``starting_capital`` config
-# value with a ₹1Cr default. The provider's ``initial_funds()`` is
-# the ADR 0026 contract-surface declaration, NOT the live runtime
-# default. Both are pinned by their own tests; they're intentionally
-# decoupled. v9-bis-2 confirmed this is by design (2026-05-02) and
-# updated this comment to record the rationale.
-_INITIAL_FUNDS = Decimal("1000000.00")
+# Sourced from ``market_regions/india/plugin.json`` post-T-16.
+# Bit-identical to the legacy hard-coded value so
+# ``tests/parity/baseline/parity_sandbox_india`` stays pinned.
+_INITIAL_FUNDS = _resolve_initial_funds_from_region_plugin()
 _VENUE_TZ = "Asia/Kolkata"
 _MIS_SQUAREOFF_HHMM = (15, 15)
 

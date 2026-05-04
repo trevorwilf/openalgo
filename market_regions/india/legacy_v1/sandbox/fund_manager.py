@@ -47,17 +47,56 @@ class FundManager:
     # This prevents race conditions when multiple threads modify funds simultaneously
     _lock = threading.Lock()
 
+
+def _resolve_starting_capital_default() -> str:
+    """T-16 (v7 Phase 4-bis-3): legacy fund_manager starting capital
+    default.
+
+    The legacy ``₹1 Crore`` (``"10000000.00"``) value historically
+    differed from the v2 IndiaSandboxProvider's ``₹10L``
+    (``"1000000.00"``). The reconciliation:
+
+    1. Read from ``market_regions/india/plugin.json``
+       ``metadata.sandbox_starting_capital_default`` if declared
+       (operator-overridable per the prompt's stakeholder note).
+    2. Fall back to the legacy ``"10000000.00"`` (₹1Cr) so existing
+       India deployments without explicit configuration see no
+       behavior change.
+
+    This indirection lets a future operator set the default in ONE
+    place (the region plugin's metadata) instead of editing Python.
+    """
+    try:
+        from utils.region_loader import get_market_region, load_market_regions
+
+        region = get_market_region("india")
+        if region is None:
+            load_market_regions()
+            region = get_market_region("india")
+        if region is not None:
+            metadata = getattr(region, "metadata", None) or {}
+            value = metadata.get("sandbox_starting_capital_default")
+            if value:
+                return str(value)
+    except Exception:
+        pass
+    return "10000000.00"
+
     def __init__(self, user_id):
         self.user_id = user_id
-        # v6 Phase 2-bis sandbox — keep the legacy "10000000.00" /
-        # ₹1Cr default (operator-overridable via ``starting_capital``
-        # config). The dispatcher's
-        # ``get_sandbox_provider("india").initial_funds()`` currently
-        # returns ₹10L (Decimal "1000000.00"), which differs from
-        # this legacy default by 10×; reconciling those values is
-        # tracked as a follow-up so India parity stays bit-identical
-        # for existing installs.
-        self.starting_capital = Decimal(get_config("starting_capital", "10000000.00"))
+        # T-16 (v7 Phase 4-bis-3): the operator-configurable
+        # ``starting_capital`` row remains the source of truth for
+        # the legacy fund_manager runtime. The fallback default is
+        # now resolved via :func:`_resolve_starting_capital_default`
+        # which reads from ``market_regions/india/plugin.json``
+        # metadata, with the legacy ₹1Cr / "10000000.00" value as
+        # the final fallback for boot-time / test contexts.
+        # India parity stays bit-identical for existing installs:
+        # operators with no ``starting_capital`` config row continue
+        # to see ₹1Cr as their default.
+        self.starting_capital = Decimal(
+            get_config("starting_capital", _resolve_starting_capital_default())
+        )
 
     def initialize_funds(self):
         """Initialize funds for a new user"""
