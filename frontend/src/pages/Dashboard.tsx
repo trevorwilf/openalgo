@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { RegionContent } from '@/components/RegionContent'
 import { useBrokerRegion } from '@/hooks/useBrokerRegion'
 import { useBrokerStore } from '@/stores/brokerStore'
 import { formatCurrencyAmount } from '@/lib/format/currency'
@@ -353,24 +354,36 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Collateral */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Collateral</p>
-              <p className="text-2xl font-bold text-violet-500 dark:text-violet-400">
-                {isLoading
-                  ? '...'
-                  : marginData
-                    ? formatAmount(marginData.collateral)
-                    : '0.00'}
-              </p>
-              <Badge variant="secondary" className="mt-2">
-                Total Collateral
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Collateral — India-only concept (pledged shares for
+            margin). v8: rendered through RegionContent so non-India
+            regions don't waste a tile on a value that's always 0
+            (Alpaca, Schwab, Webull have no pledged-collateral
+            equivalent). The component pattern is the v8 v8-D
+            invariant — pages opt in to per-region content via
+            RegionContent + useBrokerRegion. */}
+        <RegionContent
+          us={null}
+          eu={null}
+          uk={null}
+        >
+          <Card>
+            <CardContent className="pt-6">
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">Collateral</p>
+                <p className="text-2xl font-bold text-violet-500 dark:text-violet-400">
+                  {isLoading
+                    ? '...'
+                    : marginData
+                      ? formatAmount(marginData.collateral)
+                      : '0.00'}
+                </p>
+                <Badge variant="secondary" className="mt-2">
+                  Total Collateral
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
+        </RegionContent>
 
         {/* Unrealized P&L */}
         <Card>
