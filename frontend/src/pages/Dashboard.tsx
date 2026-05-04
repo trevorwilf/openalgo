@@ -412,32 +412,43 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Realized P&L */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Realized P&L</p>
-              <p
-                className={cn(
-                  'text-2xl font-bold',
-                  marginData ? getPnLColor(marginData.m2mrealized) : ''
-                )}
-              >
-                {isLoading
-                  ? '...'
-                  : marginData
-                    ? formatAmount(marginData.m2mrealized)
-                    : '0.00'}
-              </p>
-              <Badge
-                variant={marginData ? getPnLBadgeVariant(marginData.m2mrealized) : 'secondary'}
-                className="mt-2"
-              >
-                Booked P&L
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Realized P&L — the v1 funds bridge returns 0.00 for
+            non-India brokers (Alpaca, Schwab, Webull don't carry
+            account-level realized P&L on their /v2/account
+            response). Hide the tile for non-India regions; India
+            keeps it. v8-D incremental — same pattern as the
+            Collateral tile above. */}
+        <RegionContent
+          us={null}
+          eu={null}
+          uk={null}
+        >
+          <Card>
+            <CardContent className="pt-6">
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">Realized P&L</p>
+                <p
+                  className={cn(
+                    'text-2xl font-bold',
+                    marginData ? getPnLColor(marginData.m2mrealized) : ''
+                  )}
+                >
+                  {isLoading
+                    ? '...'
+                    : marginData
+                      ? formatAmount(marginData.m2mrealized)
+                      : '0.00'}
+                </p>
+                <Badge
+                  variant={marginData ? getPnLBadgeVariant(marginData.m2mrealized) : 'secondary'}
+                  className="mt-2"
+                >
+                  Booked P&L
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
+        </RegionContent>
 
         {/* Utilised Margin */}
         <Card>
