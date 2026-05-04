@@ -1,16 +1,39 @@
 {
   "Plugin Name": "deltaexchange",
   "Plugin URI": "https://openalgo.in",
-  "Description": "Delta Exchange OpenAlgo Plugin \u2014 Crypto Derivatives (Futures & Options)",
+  "Description": "Delta Exchange OpenAlgo Plugin — Crypto Derivatives (Futures & Options)",
   "Version": "1.0",
   "Author": "Bashab Bhattacharjee (github.com/tradesbybashab)",
   "Author URI": "https://openalgo.in",
-  "supported_exchanges": [
-    "CRYPTO"
-  ],
+  "broker_code": "deltaexchange",
+  "broker_display_name": "Delta Exchange",
+  "supported_exchanges": ["CRYPTO"],
+  "supported_venue_codes": ["CRYPTO"],
+  "default_venue_code": "CRYPTO",
+  "default_product_code": "NRML",
   "broker_type": "crypto",
-  "supported_regions": [
-    "india"
-  ],
-  "leverage_config": true
+  "supported_regions": ["crypto"],
+  "account_context_supports": ["account_id"],
+  "market_families": ["CRYPTO"],
+  "default_currency": "USDT",
+  "base_currency": "USDT",
+  "trading_currencies": ["USDT", "USDC", "USD"],
+  "supported_asset_classes": ["SPOT", "FUTURE", "OPTION"],
+  "supported_order_types": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
+  "supported_time_in_force": ["DAY", "GTC", "IOC"],
+  "supported_sessions": ["ALL_DAY"],
+  "supported_quantity_units": ["WHOLE", "FRACTIONAL"],
+  "supports_fractional": true,
+  "supports_extended_hours": false,
+  "supports_short_selling": true,
+  "supports_analyzer": true,
+  "supports_combo_types": ["SINGLE"],
+  "auth_modes": ["API_KEY"],
+  "leverage_config": true,
+  "master_contract_refresh_policy": {
+    "timezone": "UTC",
+    "cutoff_local": "00:00",
+    "frequency": "daily",
+    "skip_if_24x7": true
+  }
 }
