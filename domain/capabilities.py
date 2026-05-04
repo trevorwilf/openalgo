@@ -43,6 +43,12 @@ _REQUIRED_EXPLICIT_FIELDS_FOR_NON_INDIA: tuple[str, ...] = (
     "market_families",
     "default_currency",
     "base_currency",
+    # T-09 (Phase 3): non-India plugins MUST declare a master-
+    # contract refresh policy. The policy schema is documented on
+    # BrokerCapabilities.master_contract_refresh_policy. Legacy
+    # India plugins continue to allow ``None`` (the IST 08:00
+    # behavior baked into auth_utils stays the silent default).
+    "master_contract_refresh_policy",
 )
 
 
