@@ -60,6 +60,38 @@ def restore_symbol_cache() -> dict:
         broker = auth_record.broker
         result["broker"] = broker
 
+        # v7 — non-India brokers store master contract data in
+        # ``instruments_repo``, not the legacy ``symtoken`` table.
+        # Skip the legacy cache restoration so the warning doesn't
+        # fire on every Alpaca / Schwab / Webull restart.
+        try:
+            from utils.plugin_loader import (
+                get_broker_capabilities,
+                load_broker_capabilities,
+            )
+
+            caps = get_broker_capabilities(broker)
+            if caps is None:
+                load_broker_capabilities()
+                caps = get_broker_capabilities(broker)
+            regions = (
+                [str(r).strip().lower() for r in (caps.supported_regions or [])]
+                if caps
+                else []
+            )
+            if regions and "india" not in regions:
+                result["success"] = True
+                result["skipped"] = True
+                result["reason"] = "non_india_broker_uses_instruments_repo"
+                logger.debug(
+                    "Symbol cache restoration skipped for non-India broker %r "
+                    "(data is in instruments_repo)",
+                    broker,
+                )
+                return result
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Region resolution for cache restoration failed: %s", e)
+
         # Get the symbol cache instance
         cache = get_cache()
 
