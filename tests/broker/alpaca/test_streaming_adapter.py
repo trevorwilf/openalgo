@@ -311,9 +311,12 @@ def test_adapter_subscribe_ltp_publishes_trade_only():
     adapter._on_trade({"S": "AAPL", "p": 189.5, "s": 100, "x": "V", "t": "t1"})
     adapter._on_quote({"S": "AAPL", "bp": 189.4, "ap": 189.6, "t": "t2"})
     # LTP-mode subscriber: trade publishes; quote frame dropped.
+    # v3 Phase 5 (T-21): topic format is venue-prefixed and
+    # capability-driven (``{venue}_{symbol}_{mode}``), not
+    # broker-prefixed.
     assert adapter.publish_market_data.call_count == 1
     topic, payload = adapter.publish_market_data.call_args.args
-    assert topic == "ALPACA:AAPL:LTP"
+    assert topic == "XNAS_AAPL_LTP"
     assert payload["ltp"] == 189.5
     assert payload["kind"] == "trade"
 
@@ -323,11 +326,12 @@ def test_adapter_subscribe_quote_publishes_both():
     adapter.subscribe("AAPL", "XNAS", mode=2)
     adapter._on_trade({"S": "AAPL", "p": 189.5, "s": 100, "x": "V"})
     adapter._on_quote({"S": "AAPL", "bp": 189.4, "ap": 189.6, "bs": 2, "as": 3})
-    # Quote-mode: both LTP topic and QUOTE topic publish.
+    # Quote-mode: both LTP topic and QUOTE topic publish. Topic
+    # format is venue-prefixed per v3 Phase 5 (T-21).
     assert adapter.publish_market_data.call_count == 2
     topics = [call.args[0] for call in adapter.publish_market_data.call_args_list]
-    assert "ALPACA:AAPL:LTP" in topics
-    assert "ALPACA:AAPL:QUOTE" in topics
+    assert "XNAS_AAPL_LTP" in topics
+    assert "XNAS_AAPL_QUOTE" in topics
 
 
 def test_adapter_depth_mode_returns_unsupported():
