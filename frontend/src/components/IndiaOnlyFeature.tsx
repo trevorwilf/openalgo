@@ -21,12 +21,11 @@ import { useBrokerStore } from '@/stores/brokerStore'
 
 interface IndiaOnlyFeatureProps {
   /** Friendly name of the feature this page provides. Shown in the
-   * unavailable-state heading ("F&O Option Chain is an Indian-
-   * exchange feature."). */
+   * unavailable-state heading. */
   featureName: string
-  /** One-sentence explanation of *why* the feature is India-only —
-   * usually a reference to NSE/BSE/NFO/BFO mechanics or the
-   * Chartink/Indian-options ecosystem. */
+  /** One-sentence explanation of why the feature is India-only —
+   * usually a reference to Indian-exchange mechanics or the
+   * Indian-options ecosystem. */
   rationale?: string
   children: ReactNode
 }
@@ -70,8 +69,7 @@ export function IndiaOnlyFeature({
           <div className="space-y-1">
             <h1 className="text-xl font-semibold">{featureName}</h1>
             <p className="text-sm text-muted-foreground">
-              This feature targets Indian exchanges (NSE / BSE / NFO /
-              BFO / MCX / CDS) and isn't available for{' '}
+              This feature targets Indian exchanges and isn't available for{' '}
               <span className="font-medium text-foreground">{brokerName}</span>
               {region !== 'unknown' && (
                 <> ({region.toUpperCase()} region)</>
