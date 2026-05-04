@@ -55,17 +55,25 @@ from broker.alpaca.mapping.transform_data import (
 )
 
 
-class AlpacaAdapter:
+from services.instrument_sync_adapters._base import USBrokerSyncAdapterBase
+
+
+class AlpacaAdapter(USBrokerSyncAdapterBase):
     """Alpaca instrument sync adapter.
 
     Construct with a local ``json_path`` (tests / fixture-driven runs)
     or with an HTTP client (production: pulls live ``/v2/assets``).
     Exactly one of the two should be set; if both are unset a runtime
     fetch via the operator's broker-resolved ``AlpacaAuth`` is used.
+
+    T-26 (v7 Phase 7-bis): inherits ``venue_timezone`` / ``currency``
+    from :class:`USBrokerSyncAdapterBase`. Both resolve through the
+    US region plugin at runtime; the legacy hard-coded
+    ``America/New_York`` / ``"USD"`` literals are removed from this
+    class.
     """
 
     broker_code = "alpaca"
-    venue_timezone = "America/New_York"
     market_family = "US_STOCK"
 
     def __init__(
@@ -189,7 +197,7 @@ class AlpacaAdapter:
             external_token=external_token,
             tick_size=tick_size,
             quantity_precision=quantity_precision,
-            currency="USD",
+            currency=self.currency,
             display_name=(raw.get("name") or "").strip() or None,
             metadata=metadata,
             identifiers=identifiers,
