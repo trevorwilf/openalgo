@@ -108,5 +108,18 @@
     "sandbox_enabled": false,
     "analyzer_enabled": false,
     "flow_templates_enabled": false
+  },
+  "product_vocabulary": {
+    "EQUITY": ["DAY", "GTC", "EXTENDED"],
+    "OPTIONS": ["DAY", "GTC"],
+    "ALL": ["DAY", "GTC", "EXTENDED", "IOC", "FOK", "OPG", "ATC"]
+  },
+  "price_type_vocabulary": {
+    "ALL": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT", "TRAILING_STOP", "MARKET_ON_OPEN", "LIMIT_ON_OPEN", "MARKET_ON_CLOSE", "LIMIT_ON_CLOSE"]
+  },
+  "legacy_compat_shim": {
+    "valid_exchanges": ["XNYS", "XNAS", "ARCX", "BATS", "IEXG", "EDGX", "EDGA"],
+    "valid_actions": ["BUY", "SELL"],
+    "valid_time_in_force": ["DAY", "GTC", "IOC", "FOK", "OPG", "ATC"]
   }
 }

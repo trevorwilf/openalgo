@@ -300,6 +300,51 @@ VENUE_SEEDS: list[dict[str, Any]] = [
 ]
 
 
+def _venues_from_region_plugins() -> list[dict[str, Any]]:
+    """T-18 (v7 Phase 3-ter): read venue seeds from each loaded
+    region plugin's plugin.json. Returns the same shape the
+    ``VENUE_SEEDS`` list uses, so :func:`seed_all` can iterate
+    across both sources.
+
+    The static ``VENUE_SEEDS`` list is preserved as the back-compat
+    seed (covers India / Crypto / US/EU reference venues today).
+    Region plugins additively contribute venues that aren't already
+    in the static list — the underlying ``venues_upsert`` /
+    ``upsert_schedule_template`` calls are idempotent so duplicates
+    are no-op.
+    """
+    out: list[dict[str, Any]] = []
+    try:
+        from utils.region_loader import load_market_regions
+    except ImportError:
+        return out
+
+    regions = load_market_regions()
+    static_codes = {v["venue_code"] for v in VENUE_SEEDS}
+    for region in regions.values():
+        for venue in getattr(region, "venues", []) or []:
+            code = getattr(venue, "venue_code", None)
+            if not code or code in static_codes:
+                continue
+            templates: list[tuple] = []
+            for tmpl in region.get_sessions_for(code):
+                start_t = tmpl.local_start_time
+                end_t = tmpl.local_end_time
+                day_tuple = tuple(tmpl.days_of_week or WEEKDAYS)
+                templates.append((day_tuple, tmpl.session_code, start_t, end_t))
+            out.append({
+                "venue_code": code,
+                "market_family": str(getattr(venue, "market_family", "OTHER")),
+                "timezone_name": getattr(venue, "timezone_name", region.timezone_name),
+                "country_code": getattr(venue, "country_code", None) or None,
+                "base_currency": getattr(venue, "base_currency", region.default_currency),
+                "session_model": str(getattr(venue, "session_model", "continuous")),
+                "display_name": getattr(venue, "display_name", code),
+                "templates": templates,
+            })
+    return out
+
+
 def seed_all() -> dict[str, int]:
     from database.venue_schedule_repo import (
         init_venue_schedule_tables,
@@ -312,7 +357,12 @@ def seed_all() -> dict[str, int]:
     venue_count = 0
     template_count = 0
 
-    for v in VENUE_SEEDS:
+    # Static seeds first (India / Crypto / US/EU/UK reference). Then
+    # region-plugin venues contribute any additional venues not in
+    # the static list. The upsert calls are idempotent.
+    all_seeds = list(VENUE_SEEDS) + _venues_from_region_plugins()
+
+    for v in all_seeds:
         venues_upsert(
             v["venue_code"],
             market_family=v["market_family"],
