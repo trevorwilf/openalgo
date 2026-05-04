@@ -11,6 +11,36 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _broker_is_india_shaped(broker: str) -> bool:
+    """Return True if the broker stores its master contract in the
+    legacy ``symtoken`` table. Non-India brokers (Alpaca, Schwab,
+    Webull, Delta-on-crypto) write to ``instruments_repo`` instead;
+    the legacy SymToken cache is empty for them and triggering the
+    ``BrokerSymbolCache`` load produces a misleading
+    "No symbols found" error.
+
+    Resolution: read the broker's BrokerCapabilities and check
+    whether ``"india"`` is in supported_regions. Falls back to True
+    when capabilities aren't loaded so legacy behavior is
+    preserved for India deployments.
+    """
+    try:
+        from utils.plugin_loader import get_broker_capabilities, load_broker_capabilities
+
+        caps = get_broker_capabilities(broker)
+        if caps is None:
+            load_broker_capabilities()
+            caps = get_broker_capabilities(broker)
+        if caps is None:
+            return True  # Unknown — preserve India default
+        regions = [str(r).strip().lower() for r in (caps.supported_regions or [])]
+        if not regions:
+            return True  # Legacy India shape
+        return "india" in regions
+    except Exception:
+        return True
+
+
 def load_symbols_to_cache(broker: str) -> bool:
     """
     Load all symbols into memory cache after master contract download
@@ -23,6 +53,32 @@ def load_symbols_to_cache(broker: str) -> bool:
         bool: True if cache loaded successfully, False otherwise
     """
     try:
+        # v7 — non-India brokers store their master contract in
+        # ``instruments_repo`` (not the legacy ``symtoken`` table).
+        # Skipping the legacy cache load avoids the spurious
+        # "No symbols found in database for broker" error and the
+        # corresponding ``cache_loaded`` error event the React UI
+        # surfaces as a master-contract failure indicator.
+        if not _broker_is_india_shaped(broker):
+            logger.info(
+                "Skipping legacy SymToken cache load for non-India broker "
+                "%r (data is in instruments_repo). Emitting success.",
+                broker,
+            )
+            socketio.emit(
+                "cache_loaded",
+                {
+                    "status": "success",
+                    "broker": broker,
+                    "total_symbols": 0,
+                    "memory_usage_mb": 0,
+                    "load_time": "0.00",
+                    "skipped": True,
+                    "reason": "non_india_broker_uses_instruments_repo",
+                },
+            )
+            return True
+
         logger.info(f"Starting cache load for broker: {broker}")
         start_time = time.time()
 
