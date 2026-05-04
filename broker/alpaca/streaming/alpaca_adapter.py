@@ -75,6 +75,15 @@ class AlpacaWebSocketAdapter(BaseBrokerWebSocketAdapter):
         # modes keeps the broader of the two so a downgrade
         # (Quote -> LTP) does not silently drop the bid/ask publish.
         self._modes: dict[str, int] = {}
+        # Track the exchange the client subscribed under so the
+        # publish topic uses ``{subscribed_venue}_{symbol}_{mode}``
+        # rather than the tape-derived venue. Alpaca's IEX feed
+        # tags quotes with tape "V" → IEXG, but clients subscribe
+        # under XNAS / XNYS / etc.; the subscription index keys on
+        # (symbol, exchange, mode) so a mismatch silently drops
+        # ticks. Fix: record the subscribed venue and reuse it on
+        # publish.
+        self._subscribed_venue: dict[str, str] = {}
 
     # ---- BaseBrokerWebSocketAdapter abstract methods ---------------------
 
@@ -190,6 +199,8 @@ class AlpacaWebSocketAdapter(BaseBrokerWebSocketAdapter):
         # form so the inbound frame's S field matches.
         prior = self._modes.get(broker_symbol, 0)
         self._modes[broker_symbol] = max(prior, mode)
+        # Remember the subscribed venue for publish-topic routing.
+        self._subscribed_venue[broker_symbol] = exchange
 
         if prior == 0:
             # First subscription for this symbol — open both trade
@@ -199,7 +210,7 @@ class AlpacaWebSocketAdapter(BaseBrokerWebSocketAdapter):
                 trades=[broker_symbol], quotes=[broker_symbol]
             )
         return {
-            "status": "ok",
+            "status": "success",
             "symbol": symbol,
             "broker_symbol": broker_symbol,
             "exchange": exchange,
@@ -282,10 +293,10 @@ class AlpacaWebSocketAdapter(BaseBrokerWebSocketAdapter):
         if self._ws is None:
             return {"status": "error", "code": "not_connected"}
         if symbol not in self._modes:
-            return {"status": "ok", "symbol": symbol, "noop": True}
+            return {"status": "success", "symbol": symbol, "noop": True}
         self._modes.pop(symbol, None)
         self._ws.unsubscribe(trades=[symbol], quotes=[symbol])
-        return {"status": "ok", "symbol": symbol, "exchange": exchange}
+        return {"status": "success", "symbol": symbol, "exchange": exchange}
 
     # ---- frame handlers (called on the WS reader thread) ----------------
 
@@ -297,11 +308,20 @@ class AlpacaWebSocketAdapter(BaseBrokerWebSocketAdapter):
         if not symbol or price is None:
             return
         # Trade frames feed LTP for both LTP-mode and Quote-mode subs.
-        topic = f"{self.broker_name.upper()}:{symbol}:LTP"
+        # Topic format matches the WebSocket proxy server's expected
+        # ``{exchange}_{symbol}_{mode}`` shape (split by ``_``). Use
+        # the SUBSCRIBED venue (XNAS / XNYS / ARCX / BATS) rather
+        # than the tape-derived venue (IEXG / etc.) — the server's
+        # subscription index keys on the subscribed venue, so any
+        # tape-based topic silently misses the lookup.
+        subscribed_venue = self._subscribed_venue.get(symbol) or _venue_for(frame)
+        tape_venue = _venue_for(frame)
+        topic = f"{subscribed_venue}_{symbol}_LTP"
         payload = {
             "broker": self.broker_name,
             "symbol": symbol,
-            "exchange": _venue_for(frame),
+            "exchange": subscribed_venue,
+            "tape_venue": tape_venue,  # metadata: where the print actually happened
             "ltp": price,
             "last_traded_quantity": size,
             "timestamp": ts,
@@ -316,11 +336,14 @@ class AlpacaWebSocketAdapter(BaseBrokerWebSocketAdapter):
         if self._modes.get(symbol, 0) < _QUOTE_MODE:
             # LTP-only subscriber; drop the bid/ask frame.
             return
-        topic = f"{self.broker_name.upper()}:{symbol}:QUOTE"
+        subscribed_venue = self._subscribed_venue.get(symbol) or _venue_for(frame)
+        tape_venue = _venue_for(frame)
+        topic = f"{subscribed_venue}_{symbol}_QUOTE"
         payload = {
             "broker": self.broker_name,
             "symbol": symbol,
-            "exchange": _venue_for(frame),
+            "exchange": subscribed_venue,
+            "tape_venue": tape_venue,
             "bid": frame.get("bp"),
             "bid_size": frame.get("bs"),
             "ask": frame.get("ap"),

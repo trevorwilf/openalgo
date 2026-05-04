@@ -418,10 +418,38 @@ class AlpacaWebSocketClient:
                     logger.exception("alpaca on_status handler raised")
             return
         if kind == "error":
+            code = frame.get("code")
+            msg = frame.get("msg")
+            # Alpaca's IEX / SIP feeds accept auth either via
+            # ``Authorization`` header (set in ``connect``) OR via
+            # in-band ``action: auth`` message. When BOTH are sent,
+            # the server rejects the second auth with
+            # ``code=403 msg='already authenticated'``. The
+            # connection is fine — we're authenticated. Treat this
+            # as a benign success-equivalent so the
+            # ``_authenticated`` event still fires and subscribe
+            # can proceed.
+            if code == 403 and msg == "already authenticated":
+                logger.info(
+                    "Alpaca WS already authenticated via header; "
+                    "treating in-band auth rejection as success"
+                )
+                self._authenticated.set()
+                self._replay_subscriptions()
+                if self._reconnect_attempt > 0 and self._on_status is not None:
+                    try:
+                        self._on_status(
+                            "reconnected",
+                            {"attempt": self._reconnect_attempt},
+                        )
+                    except Exception:  # pragma: no cover
+                        logger.exception("alpaca on_status handler raised")
+                self._reconnect_attempt = 0
+                return
             logger.error(
                 "Alpaca WS error frame: code=%s msg=%r",
-                frame.get("code"),
-                frame.get("msg"),
+                code,
+                msg,
             )
             if self._on_status is not None:
                 try:
