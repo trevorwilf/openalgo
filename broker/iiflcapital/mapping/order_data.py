@@ -306,7 +306,9 @@ def transform_holdings_data(holdings_data):
     for row in rows:
         # Prefer NSE instrument symbol if present
         symbol = row.get("nseTradingSymbol") or row.get("tradingSymbol") or row.get("symbol") or ""
-        exchange = "NSE"
+        # T-19: read default venue from iiflcapital BrokerCapabilities.
+        from utils.plugin_loader import get_default_venue_code
+        exchange = get_default_venue_code("iiflcapital")
 
         quantity = int(_resolve_holding_quantity(row))
         avg_price = _to_float(row.get("averageTradedPrice", row.get("averagePrice", 0)))

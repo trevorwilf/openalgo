@@ -492,6 +492,37 @@ def get_broker_capabilities(broker_name: str) -> BrokerCapabilities | None:
     return _broker_capabilities.get(broker_name)
 
 
+def get_default_venue_code(broker_name: str) -> str:
+    """Return the broker's default venue code (T-19 v7 Phase 3-bis).
+
+    Resolution chain:
+    1. ``BrokerCapabilities.default_venue_code`` (explicit plugin
+       declaration).
+    2. ``BrokerCapabilities.supported_venue_codes[0]`` (first
+       declared venue — typical legacy India default of "NSE").
+    3. ``""`` — caller must guard.
+
+    Replaces the literal ``= "NSE"`` fallback baked into 10+
+    India broker ``mapping/order_data.py`` files. Each plugin now
+    sources its default from its own capability declaration so
+    non-NSE-default brokers get the right value without code
+    edits.
+    """
+    caps = get_broker_capabilities(broker_name)
+    if caps is None:
+        # Cache empty — typical in test contexts where the Flask
+        # app's startup hook hasn't run. Load once and retry.
+        load_broker_capabilities()
+        caps = get_broker_capabilities(broker_name)
+    if caps is None:
+        return ""
+    explicit = getattr(caps, "default_venue_code", None)
+    if explicit:
+        return str(explicit)
+    venues = list(getattr(caps, "supported_venue_codes", []) or [])
+    return str(venues[0]) if venues else ""
+
+
 def load_broker_auth_functions(broker_directory: str = "broker") -> "_LazyBrokerAuthDict":
     """Return a lazy dict that imports broker auth modules on first access.
 

@@ -9,6 +9,7 @@ import pandas as pd
 from broker.dhan.mapping.transform_data import map_exchange
 from database.token_db import get_symbol
 from utils.logging import get_logger
+from utils.plugin_loader import get_default_venue_code as _gdvc
 
 logger = get_logger(__name__)
 
@@ -125,7 +126,7 @@ def map_order_data(order_data):
         mapped_order = {
             "orderid": order.get("groww_order_id", ""),
             "symbol": openalgo_symbol,  # Using the converted OpenAlgo format symbol
-            "exchange": order.get("exchange", "NSE"),
+            "exchange": (order.get("exchange") or _gdvc("groww")),
             "transaction_type": order.get("transaction_type", ""),
             "order_type": order.get("order_type", "MARKET"),
             "status": order.get(
@@ -339,7 +340,7 @@ def transform_order_data(orders):
         broker_symbol = order.get(
             "trading_symbol", order.get("tradingsymbol", order.get("symbol", ""))
         )
-        exchange = order.get("exchange", "NSE")
+        exchange = (order.get("exchange") or _gdvc("groww"))
 
         # Get proper OpenAlgo symbol from database using token lookup
         token = None
@@ -442,7 +443,7 @@ def transform_order_data(orders):
         )
 
         # For NFO instruments, ensure the symbol is in OpenAlgo format (AARTIIND29MAY25630CE)
-        exchange = order.get("exchange", "NSE")
+        exchange = (order.get("exchange") or _gdvc("groww"))
         if exchange == "NFO" and " " in symbol:
             try:
                 # Import the conversion function
@@ -461,7 +462,7 @@ def transform_order_data(orders):
         # Create transformed order in OpenAlgo format
         transformed_order = {
             "symbol": symbol,  # Now guaranteed to be in OpenAlgo format
-            "exchange": order.get("exchange", "NSE"),
+            "exchange": (order.get("exchange") or _gdvc("groww")),
             "action": transaction_type,
             "quantity": quantity,
             "price": price,
@@ -491,7 +492,7 @@ def transform_order_data(orders):
                 try:
                     from database.token_db import get_oa_symbol
 
-                    openalgo_symbol = get_oa_symbol(token, order.get("exchange", "NSE"))
+                    openalgo_symbol = get_oa_symbol(token, (order.get("exchange") or _gdvc("groww")))
                     if openalgo_symbol:
                         order["symbol"] = openalgo_symbol
                         logger.info(f"Final token lookup: {symbol} -> {openalgo_symbol}")
@@ -509,7 +510,7 @@ def transform_order_data(orders):
                         session.query(SymToken)
                         .filter(
                             SymToken.brsymbol == symbol,
-                            SymToken.exchange == order.get("exchange", "NSE"),
+                            SymToken.exchange == (order.get("exchange") or _gdvc("groww")),
                         )
                         .first()
                     )
@@ -581,7 +582,7 @@ def transform_tradebook_data(tradebook_data):
         if segment == "FNO" or any(marker in broker_symbol for marker in ["CE", "PE", "FUT"]):
             exchange = "NFO"
         else:
-            exchange = "NSE"
+            exchange = _gdvc("groww")
 
         # Try to get token from trade data if available
         token = trade.get("token", trade.get("instrument_token", None))
@@ -777,7 +778,7 @@ def transform_positions_data(positions_data):
         ):
             exchange = "NFO"
         else:
-            exchange = "NSE"
+            exchange = _gdvc("groww")
 
         # Try to get token from position data if available
         token = position.get("token", position.get("instrument_token", None))

@@ -116,8 +116,11 @@ def normalize_holding(h):
     bse_symbol = h.get("bseTradingSymbol", "")
     # Use NSE symbol as primary, fallback to BSE
     primary_symbol = nse_symbol or bse_symbol
-    # Determine exchange based on which symbol is available
-    exchange = "NSE" if nse_symbol else ("BSE" if bse_symbol else "NSE")
+    # Determine exchange based on which symbol is available.
+    # T-19: when neither symbol resolves, fall back to aliceblue's
+    # capability-declared default (its plugin.json supported_venue_codes[0]).
+    from utils.plugin_loader import get_default_venue_code as _gdvc
+    exchange = "NSE" if nse_symbol else ("BSE" if bse_symbol else _gdvc("aliceblue"))
 
     return {
         "Nsetsym": nse_symbol,

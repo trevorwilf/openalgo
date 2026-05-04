@@ -401,7 +401,9 @@ def transform_holdings_data(holdings_data):
     for holdings in holdings_list:
         # Get the mapped OpenAlgo symbol and exchange from map_portfolio_data
         symbol = holdings.get("symbol", "")  # Already mapped by map_portfolio_data
-        exchange = holdings.get("exchange", "NSE")  # Already determined by map_portfolio_data
+        # T-19: capability-driven fallback when broker omits exchange.
+        from utils.plugin_loader import get_default_venue_code
+        exchange = holdings.get("exchange") or get_default_venue_code("motilal")
 
         # Get quantity
         dp_qty = int(holdings.get("dpquantity", 0))
@@ -497,7 +499,9 @@ def map_portfolio_data(portfolio_data):
                     f"No valid token found for holding: {holding.get('scripname', 'Unknown')}"
                 )
                 holding["symbol"] = holding.get("scripname", "")  # Keep broker symbol as fallback
-                holding["exchange"] = "NSE"  # Default to NSE
+                # T-19: capability-driven default venue.
+                from utils.plugin_loader import get_default_venue_code
+                holding["exchange"] = get_default_venue_code("motilal")
                 holding["product"] = "CNC"
                 continue
 
