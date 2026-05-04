@@ -91,27 +91,32 @@ INDIA_LITERALS: tuple[str, ...] = (
 # must include a TODO line in this file naming the phase that removes
 # it.
 #
-# TODO(v8 Phase 1-bis — deltaexchange v1-compat cleanup): the
-# entries below are India-shaped literals embedded in deltaexchange's
-# v1-compat layer that survived the T-30 india->crypto migration:
-#   * CE / PE — Delta's actual options instrumenttype values
-#     (Delta uses the same suffix convention for call/put). These
-#     are written into SymToken.instrumenttype during master-contract
-#     ingest and read back when serving the options chain.
-#   * CNC / NRML — used as v1-shape product codes for spot vs.
-#     derivatives. The v1 UI reads these verbatim. Cleanup needs a
-#     coordinated v1 OrderBook + Position table change to introduce
-#     CRYPTO_SPOT / CRYPTO_DERIVATIVE product codes.
-#   * Asia/Kolkata — used for "today" cutoff in order history.
-#     Should switch to UTC (or the venue's timezone via the venue
-#     session service) once the order-book filter is updated.
-#   * NSE — default exchange string for malformed holdings. Should
-#     be CRYPTO.
-#   * INR — appears once in order_api.py:271. Should come from the
-#     venue's currency declaration.
-# The cleanup ships in v8 Phase 1-bis as a coordinated v1-UI +
-# delta-mapping change. Until then these are exempted so the
-# lane-isolation gate runs green.
+# v8 Phase 1-bis — deltaexchange v1-compat cleanup. The remaining
+# entries below are India-shaped literals embedded in
+# deltaexchange's v1-compat layer that survived the T-30
+# india->crypto migration. v8 cycle progress:
+#
+#   ✓ Asia/Kolkata in api/order_api.py — REMOVED (now uses UTC for
+#     "today" cutoff, semantically correct for 24/7 crypto)
+#   ✓ NSE in mapping/order_data.py — REMOVED (now defaults to
+#     CRYPTO for malformed holdings)
+#
+# Still exempted (each requires a coordinated v1-UI change):
+#   * CE / PE — Delta's actual options instrumenttype values.
+#     Delta uses the same suffix convention as Indian exchanges
+#     for call/put. Written into SymToken.instrumenttype during
+#     ingest and read back by the options chain. Replacing them
+#     needs a v1-UI options-chain change to accept new types.
+#   * CNC / NRML — v1-shape product codes for spot vs. derivatives.
+#     The v1 UI's Position/Holdings tables read these verbatim.
+#     Cleanup needs CRYPTO_SPOT / CRYPTO_DERIVATIVE product codes.
+#   * INR — Delta's INR settlement-currency wallet entry filter
+#     (not Indian-market contamination — the literal is reused
+#     because the ticker name happens to be the same).
+#
+# TODO(v8 Phase 1-bis-2 / v9): finish the remaining cleanup items
+# above. Until then these are exempted so the lane-isolation gate
+# runs green.
 _DELTA_V1_COMPAT_FILES: set[str] = {
     "broker/deltaexchange/api/data.py",
     "broker/deltaexchange/api/order_api.py",
@@ -124,9 +129,9 @@ LITERAL_ALLOWLIST: dict[str, set[str]] = {
     "PE": set(_DELTA_V1_COMPAT_FILES),
     "CNC": set(_DELTA_V1_COMPAT_FILES),
     "NRML": set(_DELTA_V1_COMPAT_FILES),
-    "Asia/Kolkata": set(_DELTA_V1_COMPAT_FILES),
-    "NSE": set(_DELTA_V1_COMPAT_FILES),
-    "INR": set(_DELTA_V1_COMPAT_FILES),
+    # Asia/Kolkata — fully removed in v8 cycle (api/order_api.py)
+    # NSE — fully removed in v8 cycle (mapping/order_data.py)
+    "INR": {"broker/deltaexchange/api/order_api.py"},
 }
 
 

@@ -156,12 +156,13 @@ def _get_all_open_orders(auth):
 def get_order_book(auth):
     """Fetch all orders for today (open + history) for UI display."""
     try:
-        from datetime import datetime
-        import pytz
-        
-        # Get today's date in IST
-        ist = pytz.timezone("Asia/Kolkata")
-        today_date = datetime.now(ist).date()
+        from datetime import datetime, timezone
+
+        # Crypto trades 24/7. There's no India trading-day boundary
+        # to align with — use UTC midnight as the "today" cutoff
+        # (matches Delta Exchange's own ``created_at`` ISO-8601
+        # timestamps which arrive in UTC).
+        today_date = datetime.now(timezone.utc).date()
         
         all_orders = []
         
@@ -200,12 +201,11 @@ def get_order_book(auth):
 def get_trade_book(auth):
     """Fetch closed / filled orders (fills) for today only."""
     try:
-        from datetime import datetime
-        import pytz
-        
-        # Get today's date in IST
-        ist = pytz.timezone("Asia/Kolkata")
-        today_date = datetime.now(ist).date()
+        from datetime import datetime, timezone
+
+        # Crypto trades 24/7 — UTC is the natural day boundary for
+        # filtering Delta's UTC-stamped fill records.
+        today_date = datetime.now(timezone.utc).date()
         
         result = get_api_response("/v2/fills", auth, method="GET")
         logger.debug(f"[DeltaExchange] /v2/fills count={len(result.get('result', []))}")
@@ -267,7 +267,13 @@ def get_positions(auth):
                 if not isinstance(asset, dict):
                     continue
                 symbol = asset.get("asset_symbol", "") or asset.get("symbol", "")
-                # Skip INR (settlement currency) and zero-balance assets
+                # Skip INR (Delta's INR settlement-currency wallet
+                # entry — not a tradeable asset) and zero-balance
+                # assets. The "INR" literal here refers to Delta's
+                # settlement-currency ticker, not the India region;
+                # the lane-isolation literal scan allowlists this
+                # path under v8 Phase 1-bis (see
+                # tests/contracts/test_lane_isolation.py).
                 if symbol in ("INR", "USD", "") or not symbol:
                     continue
                 balance = float(asset.get("balance", 0) or 0)
