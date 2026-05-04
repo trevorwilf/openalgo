@@ -20,7 +20,7 @@ invariant infrastructure.
 | 5 | ⏸ deferred | T-25 | — |
 | 6 | ✅ partial | T-21, T-22 | — |
 | 7 | ⏸ deferred | T-26..T-29 | — |
-| 8 | ✅ partial | T-30 | — |
+| 8 | ✅ complete | T-30 + Delta migration | — |
 
 ## v7 closing invariants — all 6 GREEN
 
@@ -89,11 +89,23 @@ backfills `broker_code` from `BROKER_API_KEY` /
 `DEFAULT_BROKER` env resolution and assigns UUID4 `instrument_id`
 per row. Idempotent + reversible (downgrade drops both columns).
 
-## Crypto region (T-30)
+## Crypto region (T-30 + Delta migration)
 
 `market_regions/crypto/` plugin loads in the now-five-region
 matrix. Borderless (no `country_codes`), 24/7 sessions
 (`ALL_DAY`), USDT primary quote currency.
+
+Delta Exchange flipped from `supported_regions: ["india"]` to
+`["crypto"]` and gained the strict-mode metadata declarations
+(market_families, base_currency, master_contract_refresh_policy,
+default_venue_code, etc.). The dispatcher now resolves Delta
+sessions through the crypto region plugin instead of falling
+through India's legacy path.
+
+India `legacy_compat_shim.valid_exchanges` retains "CRYPTO" as
+the transitional state — removing it requires a coordinated
+parity baseline regen since the baseline pins the
+"Must be one of: NSE, NFO, ..., CRYPTO" error message.
 
 ## Deferred tasks
 
