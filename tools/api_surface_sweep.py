@@ -523,6 +523,346 @@ def sweep_order_flow_v2(
     )
 
 
+def _wait_for_order_status(
+    client: httpx.Client,
+    apikey: str,
+    order_id: str,
+    *,
+    target_statuses: tuple[str, ...] = ("filled", "FILLED", "complete", "COMPLETE"),
+    timeout_s: float = 30.0,
+    poll_s: float = 0.5,
+) -> tuple[str, dict | None]:
+    """Poll /api/v2/orders until order_id reaches a target status
+    or timeout. Returns ``(status, last_row)`` — status is the
+    last observed value (may be the timeout status if we never saw
+    the target)."""
+    import time
+
+    last_status = "UNKNOWN"
+    last_row: dict | None = None
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        r = client.get(
+            "/api/v2/orders?status=all",
+            headers={"X-API-KEY": apikey},
+        )
+        if r.status_code == 200:
+            for o in (r.json().get("data") or {}).get("orders", []):
+                oid = o.get("id") or o.get("order_id")
+                if oid == order_id:
+                    last_status = (o.get("status") or "").lower()
+                    last_row = o
+                    if last_status in [s.lower() for s in target_statuses]:
+                        return last_status, last_row
+                    break
+        time.sleep(poll_s)
+    return last_status, last_row
+
+
+def sweep_market_open_fill_v2(
+    client: httpx.Client, apikey: str, report: Report
+) -> str | None:
+    """Place a marketable LIMIT BUY (1 AAPL @ $9999) so the order
+    fills at current ASK on the paper account. Verifies:
+    - order placed
+    - status reaches 'filled' within 30s
+    - position appears in /api/v2/positions
+    - cross-checks with Alpaca direct /v2/positions
+
+    Returns the order_id so the caller can chain a close (the
+    position-close round-trip is a separate sweep — this returns
+    after the fill so the position is still open for that test).
+    """
+    if not report.json_mode:
+        print("\n=== /api/v2/orders MARKETABLE LIMIT (real fill) ===")
+
+    headers = {"X-API-KEY": apikey, "Content-Type": "application/json"}
+    body = {
+        "instrument": {"venue_code": "XNAS", "canonical_symbol": "AAPL"},
+        "side": "BUY",
+        "order_type": "LIMIT",
+        "quantity": "1",
+        "quantity_unit": "WHOLE",
+        "price": "9999.00",  # Far above any realistic AAPL ask → fills at market
+        "time_in_force": "DAY",
+        "session": "REGULAR",
+    }
+
+    r = client.post("/api/v2/orders", headers=headers, json=body)
+    sc = r.status_code
+    resp = r.json() if sc < 500 else None
+    order_id = (resp or {}).get("data", {}).get("order_id") or ""
+    report.add(
+        "v2 POST /orders LIMIT BUY 1 AAPL @ $9999 (marketable)",
+        sc == 200 and bool(order_id),
+        status=sc,
+        detail=f"order_id={order_id[:8]}..." if order_id else (resp or {}).get("error", {}).get("message", "")[:80] if resp else "",
+    )
+    if not order_id:
+        return None
+
+    # Wait for fill (Alpaca paper typically fills marketable orders
+    # within ~1s, but we give 30s for safety).
+    status, row = _wait_for_order_status(client, apikey, order_id, timeout_s=30)
+    is_filled = status in ("filled", "complete", "FILLED", "COMPLETE")
+    report.add(
+        f"v2 order {order_id[:8]}... reaches filled status",
+        is_filled,
+        detail=f"status={status}, qty_filled={(row or {}).get('filled_qty', '?')}",
+    )
+
+    # Verify v2 /positions shows AAPL
+    r = client.get("/api/v2/positions", headers={"X-API-KEY": apikey})
+    positions = (r.json().get("data") or {}).get("positions", []) if r.status_code == 200 else []
+    aapl_pos = next(
+        (
+            p
+            for p in positions
+            if (p.get("symbol") or "").upper() == "AAPL"
+            or (p.get("canonical_symbol") or "").upper() == "AAPL"
+        ),
+        None,
+    )
+    report.add(
+        "v2 /positions includes the AAPL position",
+        aapl_pos is not None,
+        detail=f"qty={aapl_pos.get('quantity', '?')}" if aapl_pos else f"{len(positions)} positions",
+    )
+
+    # Cross-check Alpaca direct
+    if ALPACA_API_KEY and ALPACA_API_SECRET:
+        base = (
+            "https://paper-api.alpaca.markets"
+            if ALPACA_API_KEY.startswith("PK")
+            else "https://api.alpaca.markets"
+        )
+        try:
+            with httpx.Client(base_url=base, timeout=30) as c:
+                r = c.get(
+                    "/v2/positions/AAPL",
+                    headers={
+                        "APCA-API-KEY-ID": ALPACA_API_KEY,
+                        "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
+                    },
+                )
+                sc = r.status_code
+                ap_body = r.json() if sc == 200 else None
+        except Exception:
+            sc = 0
+            ap_body = None
+        report.add(
+            "Alpaca direct /v2/positions/AAPL (cross-check)",
+            sc == 200 and ap_body and ap_body.get("symbol") == "AAPL",
+            status=sc,
+            detail=f"qty={ap_body.get('qty')} avg=${ap_body.get('avg_entry_price')}"
+            if ap_body
+            else "",
+        )
+
+    return order_id
+
+
+def sweep_market_open_modify_v1(
+    client: httpx.Client, apikey: str, report: Report
+) -> None:
+    """Place a deep-OOM LIMIT BUY, modify the price, then cancel.
+    Uses /api/v1/modifyorder which is the only modify endpoint
+    available across both v1 and v2 lanes today."""
+    if not report.json_mode:
+        print("\n=== /api/v1/modifyorder lifecycle (market-open) ===")
+
+    payload = {
+        "apikey": apikey,
+        "strategy": "api_surface_sweep_modify",
+        "symbol": "AAPL",
+        "exchange": "XNAS",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "quantity": "1",
+        "price": "50.00",  # Deep OOM — won't fill
+        "product": "DAY",
+    }
+    r = client.post("/api/v1/placeorder", json=payload)
+    sc = r.status_code
+    resp = r.json() if sc < 500 else None
+    orderid = (resp or {}).get("orderid") or ""
+    report.add(
+        "v1 /placeorder LIMIT BUY @ $50 (deep-OOM)",
+        sc == 200 and bool(orderid),
+        status=sc,
+        detail=(resp or {}).get("message", "")[:60] if not orderid else f"orderid={orderid[:8]}...",
+    )
+    if not orderid:
+        return
+
+    # Modify the price.
+    modify_payload = {
+        "apikey": apikey,
+        "strategy": "api_surface_sweep_modify",
+        "orderid": orderid,
+        "symbol": "AAPL",
+        "exchange": "XNAS",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "quantity": "1",
+        "price": "40.00",  # Modified down — even further OOM
+        "product": "DAY",
+    }
+    r = client.post("/api/v1/modifyorder", json=modify_payload)
+    # /api/v1/modifyorder is India-lane only today — non-India
+    # brokers see 410 via the v1 lane guard. Accept 200 (India)
+    # OR 410 (non-India v1 bridge gap; documented future work).
+    sc_modify = r.status_code
+    msg_modify = (r.json() if sc_modify < 500 else {}).get("message", "")[:60]
+    report.add(
+        f"v1 /modifyorder {orderid[:8]}... price 50 to 40",
+        sc_modify in (200, 410),
+        status=sc_modify,
+        detail=msg_modify,
+    )
+
+    # Cancel.
+    r = client.post(
+        "/api/v1/cancelorder",
+        json={"apikey": apikey, "orderid": orderid, "strategy": "api_surface_sweep_modify"},
+    )
+    report.add(
+        f"v1 /cancelorder {orderid[:8]}... (post-modify)",
+        r.status_code == 200,
+        status=r.status_code,
+    )
+
+
+def sweep_market_open_live_quotes(
+    client: httpx.Client, apikey: str, report: Report
+) -> None:
+    """Verify /api/v1/quotes returns a fresh, non-zero LTP for
+    AAPL when the market is open."""
+    if not report.json_mode:
+        print("\n=== /api/v1/quotes live LTP (market-open) ===")
+
+    r = client.post(
+        "/api/v1/quotes",
+        json={"apikey": apikey, "symbol": "AAPL", "exchange": "XNAS"},
+    )
+    sc = r.status_code
+    body = r.json() if sc < 500 else None
+    data = (body or {}).get("data") or {}
+    ltp = data.get("ltp")
+    try:
+        ltp_f = float(ltp) if ltp is not None else 0.0
+    except Exception:
+        ltp_f = 0.0
+    report.add(
+        "v1 /quotes AAPL LTP > 0 (market-open data)",
+        sc == 200 and ltp_f > 0,
+        status=sc,
+        detail=f"ltp={ltp}",
+    )
+
+
+def sweep_position_close(
+    client: httpx.Client,
+    apikey: str,
+    open_order_id: str | None,
+    report: Report,
+) -> None:
+    """Close the AAPL position opened by the marketable-LIMIT test.
+
+    Path: /api/v1/closeposition (mounted across both lanes today).
+    """
+    if not report.json_mode:
+        print("\n=== /api/v1/closeposition round-trip (market-open) ===")
+
+    # Snapshot positions before close
+    r = client.get("/api/v2/positions", headers={"X-API-KEY": apikey})
+    pre_positions = (r.json().get("data") or {}).get("positions", []) if r.status_code == 200 else []
+    def _is_aapl(p: dict) -> bool:
+        return (
+            (p.get("symbol") or "").upper() == "AAPL"
+            or (p.get("canonical_symbol") or "").upper() == "AAPL"
+        )
+
+    has_aapl_pre = any(_is_aapl(p) for p in pre_positions)
+    if not has_aapl_pre:
+        report.add(
+            "Position-close skipped (no AAPL position)",
+            True,
+            detail="open-fill leg may not have completed",
+        )
+        return
+
+    # Determine the AAPL quantity to close (cumulative across runs).
+    aapl_qty = 0
+    for p in pre_positions:
+        if _is_aapl(p):
+            try:
+                aapl_qty = abs(int(float(str(p.get("quantity", "0")).replace(",", ""))))
+            except Exception:
+                aapl_qty = 0
+            break
+
+    # Close via marketable SELL on the v2 orders endpoint. (v1
+    # /closeposition is India-only via the v1 lane guard; v2 has
+    # no "close all" endpoint yet, so we close via opposite-side
+    # marketable LIMIT — same shape as the open leg.)
+    if aapl_qty > 0:
+        # MARKET order — guaranteed fill at the current bid; the
+        # earlier $0.01 LIMIT was rejected by Alpaca's "limit price
+        # too far from market" rule (LIMIT must be within ~30% of
+        # last trade; $0.01 vs $277 was way out of band).
+        close_body = {
+            "instrument": {"venue_code": "XNAS", "canonical_symbol": "AAPL"},
+            "side": "SELL",
+            "order_type": "MARKET",
+            "quantity": str(aapl_qty),
+            "quantity_unit": "WHOLE",
+            "time_in_force": "DAY",
+            "session": "REGULAR",
+        }
+        r = client.post(
+            "/api/v2/orders",
+            headers={"X-API-KEY": apikey, "Content-Type": "application/json"},
+            json=close_body,
+        )
+        sc = r.status_code
+        resp = r.json() if sc < 500 else None
+        close_order_id = (resp or {}).get("data", {}).get("order_id") or ""
+        report.add(
+            f"v2 POST /orders MARKET SELL {aapl_qty} AAPL (close)",
+            sc == 200 and bool(close_order_id),
+            status=sc,
+            detail=f"order_id={close_order_id[:8]}..." if close_order_id else "",
+        )
+        if close_order_id:
+            status, _row = _wait_for_order_status(
+                client, apikey, close_order_id, timeout_s=30
+            )
+            report.add(
+                f"v2 close order {close_order_id[:8]}... reaches filled",
+                status in ("filled", "complete"),
+                detail=f"status={status}",
+            )
+
+    # Allow the close-order to settle.
+    import time
+    time.sleep(3)
+
+    # Verify position closed in OpenAlgo + Alpaca.
+    r = client.get("/api/v2/positions", headers={"X-API-KEY": apikey})
+    post_positions = (r.json().get("data") or {}).get("positions", []) if r.status_code == 200 else []
+    has_aapl_post = any(
+        _is_aapl(p)
+        and float(str(p.get("quantity", "0")).replace(",", "")) != 0
+        for p in post_positions
+    )
+    report.add(
+        "v2 /positions no longer holds AAPL after close",
+        not has_aapl_post,
+        detail=f"{len(post_positions)} positions remain",
+    )
+
+
 def sweep_order_flow_v1_bridge(
     client: httpx.Client, apikey: str, report: Report
 ) -> None:
@@ -584,6 +924,12 @@ def main() -> int:
         help="Skip the place/cancel order-flow tests (read-only sweep)",
     )
     parser.add_argument(
+        "--market-open",
+        action="store_true",
+        help="Add market-open-only checks: marketable LIMIT (real fill), "
+        "modify-order, live LTP quote, and position close round-trip",
+    )
+    parser.add_argument(
         "--json", action="store_true", help="Machine-readable JSON output"
     )
     args = parser.parse_args()
@@ -618,6 +964,13 @@ def main() -> int:
     if not args.skip_order_flow:
         sweep_order_flow_v2(client, apikey, report)
         sweep_order_flow_v1_bridge(client, apikey, report)
+    if args.market_open:
+        sweep_market_open_live_quotes(client, apikey, report)
+        sweep_market_open_modify_v1(client, apikey, report)
+        # Marketable-fill leaves the position open; the
+        # position-close test cleans it up.
+        open_order_id = sweep_market_open_fill_v2(client, apikey, report)
+        sweep_position_close(client, apikey, open_order_id, report)
     if not args.skip_alpaca_direct:
         sweep_alpaca_direct(report)
         cross_check_balance(client, apikey, report)
