@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **1010**.
+Total classified files: **1011**.
 
 Classification semantics:
 
@@ -142,7 +142,7 @@ Classification semantics:
 - `utils/traffic_logger.py`
 - `utils/version.py`
 
-## LEGACY_INDIA (56 files)
+## LEGACY_INDIA (57 files)
 
 - `app.py`
 - `blueprints/__init__.py`
@@ -191,6 +191,7 @@ Classification semantics:
 - `services/symbol_service.py`
 - `services/v1_compat_bridge.py`
 - `tools/api_surface_sweep.py`
+- `tools/ws_tick_sweep.py`
 - `utils/number_formatter.py`
 - `websocket_proxy/__init__.py`
 - `websocket_proxy/app_integration.py`

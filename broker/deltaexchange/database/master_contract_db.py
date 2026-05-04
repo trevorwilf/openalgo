@@ -553,6 +553,64 @@ def master_contract_download():
         return socketio.emit("master_contract_download", {"status": "error", "message": str(e)})
 
 
+def get_token(symbol: str, exchange: str) -> str | None:
+    """Local symbol->token lookup against this broker's own SymToken
+    table. Replaces the legacy ``database.token_db.get_token`` import
+    so the deltaexchange plugin (now non-India per T-30) doesn't trip
+    the lane-isolation forbidden-import contract.
+    """
+    row = SymToken.query.filter(
+        SymToken.symbol == symbol, SymToken.exchange == exchange
+    ).first()
+    return row.token if row else None
+
+
+def get_br_symbol(symbol: str, exchange: str) -> str | None:
+    """Local OpenAlgo-symbol -> broker-symbol lookup."""
+    row = SymToken.query.filter(
+        SymToken.symbol == symbol, SymToken.exchange == exchange
+    ).first()
+    return row.brsymbol if row else None
+
+
+def get_oa_symbol(brsymbol: str, exchange: str) -> str | None:
+    """Local broker-symbol -> OpenAlgo-symbol lookup."""
+    row = SymToken.query.filter(
+        SymToken.brsymbol == brsymbol, SymToken.exchange == exchange
+    ).first()
+    return row.symbol if row else None
+
+
+def get_symbol(token: str, exchange: str) -> str | None:
+    """Local token -> OpenAlgo-symbol lookup."""
+    row = SymToken.query.filter(
+        SymToken.token == token, SymToken.exchange == exchange
+    ).first()
+    return row.symbol if row else None
+
+
+def get_symbol_info(symbol: str, exchange: str) -> dict | None:
+    """Local symbol/exchange -> v1-shaped info dict."""
+    row = SymToken.query.filter(
+        SymToken.symbol == symbol, SymToken.exchange == exchange
+    ).first()
+    if row is None:
+        return None
+    return {
+        "symbol": row.symbol,
+        "brsymbol": row.brsymbol,
+        "name": row.name,
+        "exchange": row.exchange,
+        "brexchange": row.brexchange,
+        "token": row.token,
+        "expiry": row.expiry,
+        "strike": row.strike,
+        "lotsize": row.lotsize,
+        "instrumenttype": row.instrumenttype,
+        "tick_size": row.tick_size,
+    }
+
+
 def search_symbols(symbol, exchange):
     """
     Search for symbols in the database.

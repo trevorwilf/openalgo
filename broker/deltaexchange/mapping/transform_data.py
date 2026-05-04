@@ -1,7 +1,11 @@
-﻿# Mapping OpenAlgo API Request to Delta Exchange API Parameters
+# Mapping OpenAlgo API Request to Delta Exchange API Parameters
 # Delta Exchange API docs: https://docs.delta.exchange
 
-from database.token_db import get_br_symbol, get_symbol_info, get_token
+from broker.deltaexchange.database.master_contract_db import (
+    get_br_symbol,
+    get_symbol_info,
+    get_token,
+)
 from utils.logging import get_logger
 
 logger = get_logger(__name__)

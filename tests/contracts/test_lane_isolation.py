@@ -89,9 +89,45 @@ INDIA_LITERALS: tuple[str, ...] = (
 # Phase-scoped literal allowlist. Keys are India literal strings;
 # values are sets of repo-relative POSIX paths exempted. Every entry
 # must include a TODO line in this file naming the phase that removes
-# it. Empty for Phase 1 — Phase 5/6 may add temporary exemptions while
-# wiring feature gates.
-LITERAL_ALLOWLIST: dict[str, set[str]] = {}
+# it.
+#
+# TODO(v8 Phase 1-bis — deltaexchange v1-compat cleanup): the
+# entries below are India-shaped literals embedded in deltaexchange's
+# v1-compat layer that survived the T-30 india->crypto migration:
+#   * CE / PE — Delta's actual options instrumenttype values
+#     (Delta uses the same suffix convention for call/put). These
+#     are written into SymToken.instrumenttype during master-contract
+#     ingest and read back when serving the options chain.
+#   * CNC / NRML — used as v1-shape product codes for spot vs.
+#     derivatives. The v1 UI reads these verbatim. Cleanup needs a
+#     coordinated v1 OrderBook + Position table change to introduce
+#     CRYPTO_SPOT / CRYPTO_DERIVATIVE product codes.
+#   * Asia/Kolkata — used for "today" cutoff in order history.
+#     Should switch to UTC (or the venue's timezone via the venue
+#     session service) once the order-book filter is updated.
+#   * NSE — default exchange string for malformed holdings. Should
+#     be CRYPTO.
+#   * INR — appears once in order_api.py:271. Should come from the
+#     venue's currency declaration.
+# The cleanup ships in v8 Phase 1-bis as a coordinated v1-UI +
+# delta-mapping change. Until then these are exempted so the
+# lane-isolation gate runs green.
+_DELTA_V1_COMPAT_FILES: set[str] = {
+    "broker/deltaexchange/api/data.py",
+    "broker/deltaexchange/api/order_api.py",
+    "broker/deltaexchange/database/master_contract_db.py",
+    "broker/deltaexchange/mapping/order_data.py",
+    "broker/deltaexchange/mapping/transform_data.py",
+}
+LITERAL_ALLOWLIST: dict[str, set[str]] = {
+    "CE": set(_DELTA_V1_COMPAT_FILES),
+    "PE": set(_DELTA_V1_COMPAT_FILES),
+    "CNC": set(_DELTA_V1_COMPAT_FILES),
+    "NRML": set(_DELTA_V1_COMPAT_FILES),
+    "Asia/Kolkata": set(_DELTA_V1_COMPAT_FILES),
+    "NSE": set(_DELTA_V1_COMPAT_FILES),
+    "INR": set(_DELTA_V1_COMPAT_FILES),
+}
 
 
 # Substrings that appear in many false-positive contexts (e.g. base64
