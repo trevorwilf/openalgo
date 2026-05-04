@@ -17,7 +17,7 @@
       "ok": true
     },
     {
-      "error": "Invalid exchange 'US_EQUITY'. Must be one of: NSE, NFO, CDS, BSE, BFO, BCD, MCX, NCDEX, NSE_INDEX, BSE_INDEX, CRYPTO",
+      "error": "Invalid exchange 'US_EQUITY'. Must be one of: NSE, NFO, CDS, BSE, BFO, BCD, MCX, NCDEX, NSE_INDEX, BSE_INDEX",
       "input": {
         "exchange": "US_EQUITY",
         "symbol": "INFY"
@@ -33,12 +33,12 @@
       "ok": false
     },
     {
-      "error": null,
+      "error": "Invalid exchange 'CRYPTO'. Must be one of: NSE, NFO, CDS, BSE, BFO, BCD, MCX, NCDEX, NSE_INDEX, BSE_INDEX",
       "input": {
         "exchange": "CRYPTO",
         "symbol": "ETHUSDT"
       },
-      "ok": true
+      "ok": false
     }
   ],
   "harness": "parity_history"

@@ -58,6 +58,13 @@ FNO_EXCHANGES: set[str] = {
     EXCHANGE_NCDEX,
 } | CRYPTO_EXCHANGES
 
+# T-30 (v7 Phase 8): EXCHANGE_CRYPTO removed from India's
+# VALID_EXCHANGES. Crypto is now its own region
+# (``market_regions/crypto/``); Delta Exchange's
+# ``supported_regions`` flipped to ``["crypto"]``. Indian brokers
+# no longer claim crypto venues. Operators with legacy crypto data
+# under India still see EXCHANGE_CRYPTO via CRYPTO_EXCHANGES /
+# FNO_EXCHANGES; only the v1-validation list is trimmed.
 VALID_EXCHANGES = [
     EXCHANGE_NSE,
     EXCHANGE_NFO,
@@ -69,7 +76,6 @@ VALID_EXCHANGES = [
     EXCHANGE_NCDEX,
     EXCHANGE_NSE_INDEX,
     EXCHANGE_BSE_INDEX,
-    EXCHANGE_CRYPTO,
 ]
 
 # Product Types

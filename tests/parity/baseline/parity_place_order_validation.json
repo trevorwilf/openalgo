@@ -13,7 +13,7 @@
       "ok": true
     },
     {
-      "error": "Invalid exchange. Must be one of: NSE, NFO, CDS, BSE, BFO, BCD, MCX, NCDEX, NSE_INDEX, BSE_INDEX, CRYPTO",
+      "error": "Invalid exchange. Must be one of: NSE, NFO, CDS, BSE, BFO, BCD, MCX, NCDEX, NSE_INDEX, BSE_INDEX",
       "has_validated_data": false,
       "label": "invalid_exchange",
       "ok": false
