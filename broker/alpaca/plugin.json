@@ -12,6 +12,8 @@
     "market_families": ["US_STOCK", "CRYPTO"],
     "supported_regions": ["us"],
     "supported_venue_codes": ["XNAS", "XNYS", "ARCX", "BATS", "CRYPTO"],
+    "default_venue_code": "XNAS",
+    "default_product_code": "DAY",
     "supported_asset_classes": ["EQUITY", "ETF", "SPOT"],
     "supported_order_types": [
         "MARKET", "LIMIT", "STOP", "STOP_LIMIT", "TRAILING_STOP",

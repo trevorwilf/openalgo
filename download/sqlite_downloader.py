@@ -20,21 +20,45 @@ MAX_RPS = int(os.getenv("MAX_REQUESTS_PER_SECOND", 10))
 POLL_INTERVAL = int(os.getenv("POLLING_INTERVAL_SECONDS", 5))
 INITIAL_DAYS = int(os.getenv("INITIAL_DAYS", 30))
 
-# Phase 8 (T-27) — venue-tz-driven UTC→local conversion. Operators
-# select the venue's IANA timezone via DOWNLOAD_VENUE_TZ. Defaults
-# to Asia/Kolkata for backward compatibility with the legacy India
-# default; US deployments set DOWNLOAD_VENUE_TZ=America/New_York,
-# UK to Europe/London, etc. The downloader no longer hardcodes a
-# 5:30-hour subtraction.
-DOWNLOAD_VENUE_TZ = os.getenv("DOWNLOAD_VENUE_TZ", "Asia/Kolkata")
-try:
-    _VENUE_TZ = pytz.timezone(DOWNLOAD_VENUE_TZ)
-except pytz.UnknownTimeZoneError:
-    print(
-        f"[WARN] DOWNLOAD_VENUE_TZ={DOWNLOAD_VENUE_TZ!r} is not a valid "
-        "IANA timezone; falling back to Asia/Kolkata."
-    )
-    _VENUE_TZ = pytz.timezone("Asia/Kolkata")
+# T-11 (Phase 2): venue tz fail-closed for non-India deployments.
+# Resolution chain:
+#   * DOWNLOAD_VENUE_TZ env set + valid IANA   -> use it
+#   * DOWNLOAD_VENUE_TZ env set + invalid IANA -> ConfigurationError
+#   * env unset + active region resolves       -> resolve venue tz
+#                                                  from the region's
+#                                                  default_venue_codes[0]
+#                                                  via _venue_iana_tz
+#   * env unset + region unresolvable          -> Asia/Kolkata
+#                                                  (legacy India
+#                                                  script behavior)
+def _resolve_download_venue_tz() -> "pytz.BaseTzInfo":
+    raw = os.getenv("DOWNLOAD_VENUE_TZ")
+    if raw:
+        try:
+            return pytz.timezone(raw)
+        except pytz.UnknownTimeZoneError:
+            from domain.errors import ConfigurationError
+
+            raise ConfigurationError(
+                f"DOWNLOAD_VENUE_TZ={raw!r} is not a valid IANA "
+                f"timezone name. Set it to your venue's IANA tz "
+                f"(e.g., Asia/Kolkata for India, America/New_York "
+                f"for US, Europe/London for UK).",
+                missing_env="DOWNLOAD_VENUE_TZ",
+            )
+
+    # env unset — try to resolve from the active region's primary
+    # venue. Failing that, fall back to Asia/Kolkata (legacy
+    # India-script behavior; the script is historically India-only).
+    try:
+        from utils.venue_local_time import active_render_tz_name
+
+        return pytz.timezone(active_render_tz_name())
+    except Exception:
+        return pytz.timezone("Asia/Kolkata")
+
+
+_VENUE_TZ = _resolve_download_venue_tz()
 
 # Paths
 DB_FOLDER = os.path.join("..", "db")

@@ -321,7 +321,16 @@ class TelegramBotMigration:
                             daily_summary BOOLEAN DEFAULT 1,
                             summary_time VARCHAR(10) DEFAULT '18:00',
                             language VARCHAR(10) DEFAULT 'en',
-                            timezone VARCHAR(50) DEFAULT 'Asia/Kolkata',
+                            -- T-07 (Phase 2 v7): no DDL default for
+                            -- timezone. New rows must supply tz from
+                            -- the active broker's region capability
+                            -- declaration via the dispatcher read
+                            -- path (market_regions/india/legacy_v1/
+                            -- database/telegram_db.py). Existing
+                            -- rows are preserved by the
+                            -- migrate_telegram_timezone_source.py
+                            -- backfill semantics.
+                            timezone VARCHAR(50) NOT NULL,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             FOREIGN KEY (telegram_id) REFERENCES telegram_users(telegram_id)

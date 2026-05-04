@@ -168,6 +168,12 @@ _OPTIONAL_PROMOTED_FIELDS: frozenset[str] = frozenset({
     # documentation surface
     "documentation_url",
     "display",
+    # v7 Phase 2 (T-04) — broker-declared default venue + product
+    # for the v1 compat bridge. Optional; the bridge falls back to
+    # ``supported_venue_codes[0]`` for venue and raises
+    # ``BrokerCapabilityError`` for product.
+    "default_venue_code",
+    "default_product_code",
 })
 
 

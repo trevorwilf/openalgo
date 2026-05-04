@@ -38,6 +38,92 @@ logger = get_logger(__name__)
 BridgeFn = Callable[[], tuple[Any, int]]
 
 
+# ---------------------------------------------------------------------------
+# v7 Phase 2 (T-04) capability resolvers.
+#
+# The bridge previously hard-coded "XNAS" as the venue default and
+# "MIS" as the product default. Both are India-specific literals that
+# don't belong in promoted code. Post-T-04 the bridge reads these
+# from the broker plugin's BrokerCapabilities; brokers without an
+# explicit declaration trigger BrokerCapabilityError so the operator
+# sees a structured 5xx instead of a silently-wrong response shape.
+# ---------------------------------------------------------------------------
+
+
+def _broker_default_venue_code(broker: str) -> str:
+    """Return the active broker's default venue code for v1 UI display.
+
+    Resolution chain:
+    1. ``BrokerCapabilities.default_venue_code`` (explicit declaration)
+    2. ``BrokerCapabilities.supported_venue_codes[0]`` (fallback)
+
+    Raises:
+        BrokerCapabilityError: if neither resolves.
+    """
+    from domain.errors import BrokerCapabilityError
+    from utils.plugin_loader import get_broker_capabilities, load_broker_capabilities
+
+    caps = get_broker_capabilities(broker)
+    if caps is None:
+        # Cache empty — typical in test contexts where the Flask
+        # app's startup hook hasn't run. Load once and retry. In
+        # production the bootstrap path triggers this so the second
+        # call is a no-op for hot paths.
+        load_broker_capabilities()
+        caps = get_broker_capabilities(broker)
+    if caps is None:
+        raise BrokerCapabilityError(
+            broker_code=broker,
+            missing_fields=["plugin"],
+            message=f"broker {broker!r}: capabilities not loaded",
+        )
+    explicit = getattr(caps, "default_venue_code", None)
+    if explicit:
+        return explicit
+    venues = list(getattr(caps, "supported_venue_codes", []) or [])
+    if venues:
+        return venues[0]
+    raise BrokerCapabilityError(
+        broker_code=broker,
+        missing_fields=["default_venue_code", "supported_venue_codes"],
+    )
+
+
+def _broker_default_product_code(broker: str) -> str:
+    """Return the active broker's default product code for v1 UI display.
+
+    Reads ``BrokerCapabilities.default_product_code``. Non-India
+    brokers MUST declare this in plugin.json post-T-04; the previous
+    silent ``"MIS"`` fallback is removed.
+
+    Raises:
+        BrokerCapabilityError: when the field is unset.
+    """
+    from domain.errors import BrokerCapabilityError
+    from utils.plugin_loader import get_broker_capabilities, load_broker_capabilities
+
+    caps = get_broker_capabilities(broker)
+    if caps is None:
+        # Cache empty — typical in test contexts where the Flask
+        # app's startup hook hasn't run. Load once and retry. In
+        # production the bootstrap path triggers this so the second
+        # call is a no-op for hot paths.
+        load_broker_capabilities()
+        caps = get_broker_capabilities(broker)
+    if caps is None:
+        raise BrokerCapabilityError(
+            broker_code=broker,
+            missing_fields=["plugin"],
+            message=f"broker {broker!r}: capabilities not loaded",
+        )
+    explicit = getattr(caps, "default_product_code", None)
+    if explicit:
+        return explicit
+    raise BrokerCapabilityError(
+        broker_code=broker, missing_fields=["default_product_code"]
+    )
+
+
 def _resolve_apikey() -> str | None:
     """v1 endpoints accept apikey in body or X-API-KEY header."""
     body = request.get_json(silent=True) or {}
@@ -193,6 +279,9 @@ def _positionbook() -> tuple[Any, int]:
             logger.exception("v1 bridge positionbook failed: %s", e)
             return jsonify(_v1_error(str(e))), 502
 
+        # T-04: v1 UI expects a product column; read from the broker's
+        # capability declaration instead of hard-coding "MIS".
+        product_code = _broker_default_product_code(broker)
         rows = [
             {
                 "symbol": p.canonical_symbol,
@@ -201,7 +290,7 @@ def _positionbook() -> tuple[Any, int]:
                 "average_price": str(p.average_price) if p.average_price is not None else "0",
                 "ltp": str(p.metadata.get("current_price") or "0"),
                 "pnl": str(p.unrealized_pnl) if p.unrealized_pnl is not None else "0",
-                "product": "MIS",  # v1 UI expects a product code; Alpaca has no equivalent
+                "product": product_code,
             }
             for p in positions
         ]
@@ -349,17 +438,26 @@ def _placeorder() -> tuple[Any, int]:
         from events import OrderPlacedEvent
         from utils.event_bus import bus
 
+        # T-04: defensive — by this point _v1_order_to_normalized
+        # has already rejected missing exchange with HTTP 400. The
+        # capability defaults are still preferred over hard-coded
+        # India literals so the OrderPlacedEvent observability stream
+        # carries the broker's actual default vocabulary.
         bus.publish(
             OrderPlacedEvent(
                 mode="live",
                 api_type="placeorder",
                 strategy=str(body.get("strategy") or "ui"),
                 symbol=str(body.get("symbol") or "").upper(),
-                exchange=str(body.get("exchange") or "XNAS").upper(),
+                exchange=str(
+                    body.get("exchange") or _broker_default_venue_code(broker)
+                ).upper(),
                 action=str(body.get("action") or "").upper(),
                 quantity=int(float(body.get("quantity") or 0)),
                 pricetype=str(body.get("price_type") or body.get("pricetype") or "").upper(),
-                product=str(body.get("product") or "MIS").upper(),
+                product=str(
+                    body.get("product") or _broker_default_product_code(broker)
+                ).upper(),
                 orderid=order_id,
                 request_data=body,
                 response_data={"orderid": order_id},
@@ -685,7 +783,7 @@ def _quotes() -> tuple[Any, int]:
     if not symbol:
         return jsonify(_v1_error("symbol required")), 400
 
-    venue = _alias_venue(exchange) if exchange else "XNAS"
+    venue = _alias_venue(exchange) if exchange else _broker_default_venue_code(broker)
 
     try:
         from broker.alpaca.api.auth_api import auth_handle_from_token
@@ -756,10 +854,15 @@ def _alpaca_order_to_v1(row: dict, *, kind: str = "order") -> dict[str, Any]:
     qty_total = row.get("qty") or "0"
     native_status = row.get("status") or ""
     canonical = AlpacaOrderTranslator.normalize_order_status(native_status)
+    # T-04: read venue + product from the broker's capability
+    # declaration instead of hard-coding India literals. The venue
+    # used to be ``"XNAS"`` in both branches of a degenerate
+    # ``and / or`` expression — a copy-paste artifact this commit
+    # cleans up.
     base = {
         "orderid": row.get("id"),
         "symbol": row.get("symbol"),
-        "exchange": (row.get("asset_class") == "us_equity" and "XNAS") or "XNAS",
+        "exchange": _broker_default_venue_code("alpaca"),
         "action": (row.get("side") or "").upper(),
         "quantity": qty_total,
         "filled_quantity": qty_filled,
@@ -770,7 +873,7 @@ def _alpaca_order_to_v1(row: dict, *, kind: str = "order") -> dict[str, Any]:
         "canonical_status": canonical.value,
         "native_status": native_status,
         "order_type": (row.get("type") or "").upper(),
-        "product": "MIS",
+        "product": _broker_default_product_code("alpaca"),
         "timestamp": row.get("created_at"),
     }
     if kind == "trade":
@@ -820,7 +923,14 @@ def _v1_order_to_normalized(body: dict) -> Any:
     from domain.orders import NormalizedOrderRequest
 
     symbol = (body.get("symbol") or "").upper()
-    exchange = _alias_venue(body.get("exchange") or "XNAS")
+    raw_exchange = body.get("exchange")
+    if not raw_exchange:
+        # T-04: place-order with omitted exchange returns 400 — no
+        # silent route to ``XNAS`` (the prior literal). The caller
+        # (``_placeorder``) catches ValueError and emits a 400
+        # envelope with the documented ``bad_request`` code.
+        raise ValueError("exchange required")
+    exchange = _alias_venue(str(raw_exchange))
     action = (body.get("action") or "BUY").upper()
     pricetype = (body.get("price_type") or body.get("pricetype") or "MARKET").upper()
     quantity = body.get("quantity") or "1"
