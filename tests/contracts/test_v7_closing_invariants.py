@@ -63,6 +63,11 @@ _V7_A_EXPLICIT_ALLOWLIST: frozenset[str] = frozenset({
     # utils/constants.py is THE documented re-export shim — listed
     # explicitly in CLAUDE.md "Promoted lane".
     "utils/constants.py",
+    # T-06 migration script touches India's legacy schema directly
+    # (it's the migration that backfills broker_code on existing
+    # India-only deployments). Migrations are by definition
+    # transitional shims.
+    "upgrade/migrate_symtoken_broker_provenance.py",
 })
 
 
@@ -245,18 +250,25 @@ def test_v7_invariant_v7_e_refresh_policy_mandatory_for_non_legacy():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="T-06 SymToken broker_code redesign deferred to a Phase 4-bis follow-up; the schema change + backfill + v1-lane DB view is too risky for the current cycle and lands in a separate session."
-)
 def test_v7_invariant_v7_f_symtoken_includes_broker_code():
     """v7-F: SymToken's identity tuple includes ``broker_code``.
 
-    Pre-T-06 the unique constraint is ``(symbol, exchange)``; post-
-    T-06 it becomes ``(broker_code, symbol, exchange)``. This
-    invariant fails until T-06 lands; xfailed with a documented
-    deferral reason.
+    T-06 (Phase 4-bis): added ``broker_code`` and ``instrument_id``
+    columns to the SymToken model + an
+    ``(broker_code, symbol, exchange)`` index. Both columns are
+    nullable initially so existing rows survive without migration;
+    the upcoming ``upgrade/migrate_symtoken_broker_provenance.py``
+    backfills ``broker_code`` from operator's BROKER_API_KEY and
+    assigns UUID4 ``instrument_id`` per row.
+
+    The unique constraint ``(broker_code, symbol, exchange)`` and
+    the ``symtoken_v1`` view that hides these columns from the v1
+    lane land in a follow-up commit alongside the migration script
+    — this invariant only asserts the column is present so the
+    framework is ready for the migration.
     """
     from market_regions.india.legacy_v1.database.symbol import SymToken
 
     columns = {col.name for col in SymToken.__table__.columns}
-    assert "broker_code" in columns, "T-06 not yet shipped"
+    assert "broker_code" in columns, "T-06: SymToken.broker_code missing"
+    assert "instrument_id" in columns, "T-06: SymToken.instrument_id missing"

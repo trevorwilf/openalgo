@@ -45,12 +45,26 @@ class SymToken(Base):
     instrumenttype = Column(String)
     tick_size = Column(Float)
     contract_value = Column(Float)
+    # T-06 (v7 Phase 4-bis): broker provenance + cross-broker
+    # surrogate key. Both nullable initially so existing rows
+    # remain valid without migration; the
+    # ``upgrade/migrate_symtoken_broker_provenance.py`` script (when
+    # operator runs it) backfills ``broker_code`` from
+    # ``BROKER_API_KEY`` resolution and assigns a UUID4
+    # ``instrument_id`` to each row. The unique constraint
+    # ``(broker_code, symbol, exchange)`` lands in a follow-up
+    # commit alongside the ``symtoken_v1`` view that hides these
+    # columns from the v1 lane.
+    broker_code = Column(String, nullable=True, index=True)
+    instrument_id = Column(String, nullable=True, index=True)
 
     # Composite indices for improved search performance
     __table_args__ = (
         Index("idx_symbol_exchange", "symbol", "exchange"),
         Index("idx_symbol_name", "symbol", "name"),
         Index("idx_brsymbol_exchange", "brsymbol", "exchange"),
+        # T-06: index broker_code for cross-broker queries.
+        Index("idx_broker_symbol_exchange", "broker_code", "symbol", "exchange"),
     )
 
 
