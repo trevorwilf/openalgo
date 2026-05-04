@@ -151,6 +151,10 @@ _FILE_ALLOWLIST: dict[str, str] = {
     # Action center stamps UTC post T-03; the literal 'IST' appears
     # only in a docstring describing the legacy display string.
     "database/action_center_db.py": "T-03: docstring narrative references historical IST suffix",
+    # T-26 base class declares Asia/Kolkata as the documented
+    # legacy India fallback constant — used only when the region
+    # plugin can't resolve at boot.
+    "services/instrument_sync_adapters/_base.py": "T-26: documented India fallback constant for boot-time resolution",
 }
 
 
