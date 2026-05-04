@@ -174,6 +174,14 @@ _OPTIONAL_PROMOTED_FIELDS: frozenset[str] = frozenset({
     # ``BrokerCapabilityError`` for product.
     "default_venue_code",
     "default_product_code",
+    # v7 Phase 7-bis (T-27) — Alpaca production hardening + future
+    # Schwab/Webull plugin readiness fields. All optional.
+    "streaming_transports",
+    "supports_account_hashes",
+    "supports_subaccounts",
+    "requires_market_price_protection",
+    "requires_slm_to_sl_conversion",
+    "requires_v1_compat",
 })
 
 
