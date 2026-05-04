@@ -156,14 +156,16 @@ def check_order(
     not provided, rule-level ``allows_fractional`` is the authority.
 
     ``account_ctx`` is an optional :class:`domain.account_context.AccountContext`.
-    Phase 8 will use it for entitlement-aware rejects (e.g.
-    "real-time market data not entitled"). Phase 3 accepts it but
-    does not yet read entitlements — the parameter exists so callers
-    can converge on the new signature now.
+    When provided, rules whose
+    ``metadata.required_entitlements`` set is non-empty cause a
+    structured ``entitlement_required`` reject if the account does
+    not carry every listed entitlement. The check is opt-in:
+    rules without ``required_entitlements`` (the default for every
+    legacy rule today) skip the check entirely, so existing
+    deployments see no behavior change.
 
     Raises :class:`OrderRuleViolation` on the first failure.
     """
-    del account_ctx  # reserved for Phase 8 entitlement checks
     if now_tz_aware.tzinfo is None:
         raise ValueError("now_tz_aware must be timezone-aware")
 
@@ -276,6 +278,29 @@ def check_order(
             raise OrderRuleViolation(
                 code="session_closed",
                 message=(reason or "session disabled by broker override"),
+            )
+
+    # Entitlement check. Rules MAY declare
+    # ``metadata.required_entitlements`` (a list of strings — e.g.
+    # ``["us_equity_realtime", "options_l2"]``) that gate access to
+    # the order shape. Operator-level entitlements come from
+    # AccountContext.entitlements. Both sides are opt-in: rules that
+    # don't list any required entitlements skip the check, and
+    # callers that don't pass ``account_ctx`` skip the check too.
+    # That preserves backward compatibility with every existing
+    # caller and rule row in production today.
+    required = list(rule.metadata.get("required_entitlements") or [])
+    if required and account_ctx is not None:
+        granted = set(getattr(account_ctx, "entitlements", []) or [])
+        missing = [e for e in required if e not in granted]
+        if missing:
+            _record_violation(broker_code, "entitlement_required")
+            raise OrderRuleViolation(
+                code="entitlement_required",
+                message=(
+                    f"order requires entitlements not granted on this "
+                    f"account: missing={missing}"
+                ),
             )
 
 
