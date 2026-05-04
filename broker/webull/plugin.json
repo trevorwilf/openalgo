@@ -1,0 +1,48 @@
+{
+  "Plugin Name": "webull",
+  "Plugin URI": "https://openalgo.in",
+  "Description": "Webull plugin — US Cash Equities + Options + Crypto. Framework-readiness scaffold; real Webull API integration deferred to v8 (blocked on official API access).",
+  "Version": "0.1",
+  "Author": "OpenAlgo",
+  "Author URI": "https://openalgo.in",
+  "broker_code": "webull",
+  "broker_type": "US_stock",
+  "broker_display_name": "Webull",
+  "account_context_supports": ["account_id", "entitlements"],
+  "market_families": ["US_STOCK", "CRYPTO"],
+  "supported_regions": ["us"],
+  "supported_venue_codes": ["XNYS", "XNAS", "ARCX", "BATS", "CRYPTO"],
+  "default_venue_code": "XNAS",
+  "default_product_code": "DAY",
+  "supported_asset_classes": ["EQUITY", "ETF", "OPTION", "SPOT"],
+  "supported_order_types": [
+    "MARKET", "LIMIT", "STOP", "STOP_LIMIT", "TRAILING_STOP"
+  ],
+  "supported_time_in_force": ["DAY", "GTC", "IOC", "FOK"],
+  "supported_sessions": ["REGULAR", "PRE_MARKET", "POST_MARKET", "EXTENDED"],
+  "supported_quantity_units": ["WHOLE", "FRACTIONAL", "NOTIONAL"],
+  "trading_currencies": ["USD"],
+  "default_currency": "USD",
+  "base_currency": "USD",
+  "supports_fractional": true,
+  "supports_notional_orders": true,
+  "supports_extended_hours": true,
+  "supports_short_selling": true,
+  "supports_analyzer": false,
+  "supports_combo_types": [
+    "SINGLE", "OCO", "BRACKET", "MULTILEG_OPTIONS"
+  ],
+  "auth_modes": ["OAUTH"],
+  "streaming_transports": ["WEBSOCKET"],
+  "supports_account_hashes": false,
+  "supports_subaccounts": false,
+  "requires_market_price_protection": false,
+  "requires_slm_to_sl_conversion": false,
+  "requires_v1_compat": false,
+  "master_contract_refresh_policy": {
+    "timezone": "America/New_York",
+    "cutoff_local": "07:00",
+    "frequency": "daily",
+    "skip_if_24x7": false
+  }
+}

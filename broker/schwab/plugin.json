@@ -1,0 +1,50 @@
+{
+  "Plugin Name": "schwab",
+  "Plugin URI": "https://openalgo.in",
+  "Description": "Charles Schwab plugin — US Cash Equities + Options. Framework-readiness scaffold; real Schwab API integration deferred to v8 (blocked on official API access).",
+  "Version": "0.1",
+  "Author": "OpenAlgo",
+  "Author URI": "https://openalgo.in",
+  "broker_code": "schwab",
+  "broker_type": "US_stock",
+  "broker_display_name": "Charles Schwab",
+  "account_context_supports": ["account_hash", "entitlements"],
+  "market_families": ["US_STOCK"],
+  "supported_regions": ["us"],
+  "supported_venue_codes": ["XNYS", "XNAS", "ARCX", "BATS", "IEXG"],
+  "default_venue_code": "XNAS",
+  "default_product_code": "DAY",
+  "supported_asset_classes": ["EQUITY", "ETF", "OPTION"],
+  "supported_order_types": [
+    "MARKET", "LIMIT", "STOP", "STOP_LIMIT", "TRAILING_STOP",
+    "MARKET_ON_OPEN", "LIMIT_ON_OPEN",
+    "MARKET_ON_CLOSE", "LIMIT_ON_CLOSE"
+  ],
+  "supported_time_in_force": ["DAY", "GTC", "GTD", "FOK", "IOC"],
+  "supported_sessions": ["REGULAR", "PRE_MARKET", "POST_MARKET", "EXTENDED"],
+  "supported_quantity_units": ["WHOLE", "FRACTIONAL", "NOTIONAL"],
+  "trading_currencies": ["USD"],
+  "default_currency": "USD",
+  "base_currency": "USD",
+  "supports_fractional": true,
+  "supports_notional_orders": true,
+  "supports_extended_hours": true,
+  "supports_short_selling": true,
+  "supports_analyzer": false,
+  "supports_combo_types": [
+    "SINGLE", "OTO", "OCO", "OTOCO", "COMBO", "MULTILEG_OPTIONS"
+  ],
+  "auth_modes": ["OAUTH"],
+  "streaming_transports": ["WEBSOCKET"],
+  "supports_account_hashes": true,
+  "supports_subaccounts": true,
+  "requires_market_price_protection": false,
+  "requires_slm_to_sl_conversion": false,
+  "requires_v1_compat": false,
+  "master_contract_refresh_policy": {
+    "timezone": "America/New_York",
+    "cutoff_local": "08:00",
+    "frequency": "daily",
+    "skip_if_24x7": false
+  }
+}
