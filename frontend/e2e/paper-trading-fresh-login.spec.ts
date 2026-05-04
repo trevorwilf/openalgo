@@ -26,6 +26,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
+import { cancelAllAlpacaOpenOrders } from './alpaca-cleanup'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -63,6 +64,13 @@ const SCREENSHOT_DIR = path.resolve(
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true })
 
 test.setTimeout(120_000)
+
+// Cancel leftover open orders before the place-order leg so that
+// MARKET/STOP orders parked across previous specs don't trip
+// Alpaca's wash-trade prevention on this BUY @ $50 LIMIT.
+test.beforeEach(async () => {
+  await cancelAllAlpacaOpenOrders()
+})
 
 test('fresh login → broker connect → dashboard → place order → cancel', async ({
   browser,

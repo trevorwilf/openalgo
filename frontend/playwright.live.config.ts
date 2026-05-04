@@ -19,6 +19,10 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5000'
 
 export default defineConfig({
   testDir: './e2e',
+  // Cancel any leftover open orders on the Alpaca paper account
+  // before any test runs. Otherwise wash-trade prevention rejects
+  // the first deep-OOM LIMIT order with 403 / code=40310000.
+  globalSetup: './e2e/global-setup.ts',
   testMatch: /(live-instance|auth-instance|paper-trading|paper-trading-actions|paper-trading-ui-click|paper-trading-positions|paper-trading-alpaca-parity|paper-trading-india-gating|paper-trading-mode-pill|paper-trading-fresh-login|paper-trading-ws-ticks)\.spec\.ts/,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

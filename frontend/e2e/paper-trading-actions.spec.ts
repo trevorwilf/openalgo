@@ -17,6 +17,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
+import { cancelAllAlpacaOpenOrders } from './alpaca-cleanup'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -97,6 +98,13 @@ test.beforeAll(async ({ browser }) => {
   storageStateFile = path.join(SCREENSHOT_DIR, 'auth-state.json')
   await ctx.storageState({ path: storageStateFile })
   await ctx.close()
+})
+
+// Cancel any leftover open orders before every order-placing test.
+// MARKET/STOP orders parked across previous tests trip Alpaca's
+// wash-trade prevention on the next opposite-side LIMIT.
+test.beforeEach(async () => {
+  await cancelAllAlpacaOpenOrders()
 })
 
 async function getApiKey(ctx: import('@playwright/test').BrowserContext): Promise<string> {
