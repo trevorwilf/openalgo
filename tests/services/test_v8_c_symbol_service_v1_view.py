@@ -106,3 +106,61 @@ def test_env_var_disables_view():
         from services import symbol_service as ss
 
         importlib.reload(ss)
+
+
+def test_instruments_service_uses_view_when_available():
+    """``services.instruments_service.get_instruments`` queries
+    SymTokenV1Read through the same probe."""
+    from services import instruments_service
+
+    # Patch the bound reference inside instruments_service —
+    # ``from services.symbol_service import _v1_view_is_available``
+    # captures the reference at module load, so patching
+    # ``symbol_service._v1_view_is_available`` is too late.
+    with patch.object(instruments_service, "_v1_view_is_available", return_value=True):
+        seen = []
+        original_query = instruments_service.db_session.query
+
+        def capture(*args, **kwargs):
+            if args:
+                seen.append(args[0].__name__ if hasattr(args[0], "__name__") else str(args[0]))
+            return original_query(*args, **kwargs)
+
+        with patch.object(instruments_service.db_session, "query", side_effect=capture):
+            with patch.object(
+                instruments_service, "verify_api_key", return_value="user-1"
+            ):
+                instruments_service.get_instruments(
+                    exchange="XNAS", api_key="dummy", format="json"
+                )
+        assert "SymTokenV1Read" in seen, (
+            f"expected SymTokenV1Read query, got {seen}"
+        )
+
+
+def test_instruments_service_falls_back_when_view_missing():
+    """Pre-migration: get_instruments hits SymToken, not the view."""
+    from services import instruments_service
+
+    with patch.object(instruments_service, "_v1_view_is_available", return_value=False):
+        seen = []
+        original_query = instruments_service.db_session.query
+
+        def capture(*args, **kwargs):
+            if args:
+                seen.append(args[0].__name__ if hasattr(args[0], "__name__") else str(args[0]))
+            return original_query(*args, **kwargs)
+
+        with patch.object(instruments_service.db_session, "query", side_effect=capture):
+            with patch.object(
+                instruments_service, "verify_api_key", return_value="user-1"
+            ):
+                instruments_service.get_instruments(
+                    exchange="XNAS", api_key="dummy", format="json"
+                )
+        # Should NOT see SymTokenV1Read; the fallback path uses
+        # ``SymToken.query`` which doesn't go through
+        # ``db_session.query(SymTokenV1Read)``.
+        assert "SymTokenV1Read" not in seen, (
+            f"expected fallback, but SymTokenV1Read appeared: {seen}"
+        )
