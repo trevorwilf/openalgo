@@ -27,11 +27,17 @@ def test_symtoken_has_instrument_id_column():
     assert "instrument_id" in columns
 
 
-def test_symtoken_has_cross_broker_index():
+def test_symtoken_has_cross_broker_unique_constraint():
+    """Phase 4-bis-2: the cross-broker identity tuple
+    ``(broker_code, symbol, exchange)`` is now UNIQUE. SQLite +
+    Postgres treat NULL as distinct so pre-backfill rows don't
+    collide; after backfill the constraint disambiguates two
+    brokers registering the same canonical symbol."""
     from market_regions.india.legacy_v1.database.symbol import SymToken
 
-    indexes = {idx.name for idx in SymToken.__table__.indexes}
-    assert "idx_broker_symbol_exchange" in indexes
+    indexes = {idx.name: idx for idx in SymToken.__table__.indexes}
+    assert "uq_broker_symbol_exchange" in indexes
+    assert indexes["uq_broker_symbol_exchange"].unique is True
 
 
 def test_legacy_indices_preserved():
