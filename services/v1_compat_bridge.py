@@ -946,6 +946,19 @@ def _v1_order_to_normalized(body: dict) -> Any:
     }
     order_type = pricetype_map.get(pricetype, pricetype)
 
+    # ---- trigger_price (required for STOP / STOP_LIMIT) -----------
+    # Without this, NormalizedOrderRequest's cross-field validator
+    # raises ``order_type=STOP requires trigger_price`` and the
+    # bridge surfaces it as 502 broker_error to the caller. v1
+    # callers send the field as ``trigger_price`` (canonical),
+    # ``trigger_price`` (already), or via ``triggerprice``
+    # (legacy India shape — kept for backward compat).
+    trigger_raw = (
+        body.get("trigger_price")
+        or body.get("triggerprice")
+        or body.get("trigger")
+    )
+
     # ---- quantity_unit selection ----------------------------------
     notional_flag = body.get("notional")
     is_notional = (
@@ -970,6 +983,22 @@ def _v1_order_to_normalized(body: dict) -> Any:
         "0", "false", "",
     )
 
+    # ---- time_in_force ---------------------------------------------
+    # The legacy v1 contract had no explicit TIF field; India
+    # brokers default to DAY. Promoted brokers (Alpaca, IBKR, …)
+    # support GTC/IOC/FOK/OPG/ATC. Honor ``time_in_force`` /
+    # ``validity`` / ``tif`` from the body (case-insensitive),
+    # default DAY when absent. Unknown values fall through to
+    # NormalizedOrderRequest's enum coercion which raises a
+    # structured 422 the bridge maps to v1's error envelope.
+    tif_raw = (
+        body.get("time_in_force")
+        or body.get("tif")
+        or body.get("validity")
+        or "DAY"
+    )
+    tif = str(tif_raw).strip().upper() or "DAY"
+
     return NormalizedOrderRequest(
         instrument=InstrumentRef(venue_code=exchange, canonical_symbol=symbol),
         side=action,
@@ -977,7 +1006,12 @@ def _v1_order_to_normalized(body: dict) -> Any:
         quantity=Decimal(str(quantity)),
         quantity_unit=quantity_unit,
         price=(Decimal(str(price)) if price not in (None, "", "0") and order_type != "MARKET" else None),
-        time_in_force="DAY",
+        trigger_price=(
+            Decimal(str(trigger_raw))
+            if trigger_raw not in (None, "", "0", "0.0")
+            else None
+        ),
+        time_in_force=tif,
         extended_hours=extended_hours,
     )
 
