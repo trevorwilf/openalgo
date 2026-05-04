@@ -446,6 +446,129 @@ def cross_check_balance(
     )
 
 
+def sweep_order_flow_v2(
+    client: httpx.Client, apikey: str, report: Report
+) -> None:
+    """Place + cancel a deep-out-of-money LIMIT order via /api/v2/orders.
+
+    Uses LIMIT $1.00 BUY on AAPL XNAS — guaranteed to never fill
+    on a paper account, so we can cleanly observe placed-then-
+    cancelled lifecycle without affecting the operator's portfolio.
+    """
+    if not report.json_mode:
+        print("\n=== /api/v2/orders order-flow ===")
+
+    headers = {"X-API-KEY": apikey, "Content-Type": "application/json"}
+    body = {
+        "instrument": {"venue_code": "XNAS", "canonical_symbol": "AAPL"},
+        "side": "BUY",
+        "order_type": "LIMIT",
+        "quantity": "1",
+        "quantity_unit": "WHOLE",
+        "price": "1.00",
+        "time_in_force": "DAY",
+        "session": "REGULAR",
+    }
+
+    # Place
+    r = client.post("/api/v2/orders", headers=headers, json=body)
+    sc = r.status_code
+    resp = r.json() if r.headers.get("content-type", "").startswith("application/json") else None
+    order_id = (resp or {}).get("data", {}).get("order_id") or ""
+    report.add(
+        "v2 POST /orders LIMIT BUY 1 AAPL @ $1.00",
+        sc == 200 and bool(order_id),
+        status=sc,
+        detail=f"order_id={order_id[:8]}..." if order_id else (
+            (resp or {}).get("error", {}).get("message", "")[:60] if resp else ""
+        ),
+    )
+    if not order_id:
+        return
+
+    # Verify in v2 list
+    r = client.get("/api/v2/orders?status=open", headers={"X-API-KEY": apikey})
+    sc = r.status_code
+    open_orders = (r.json().get("data") or {}).get("orders", []) if sc == 200 else []
+    found = any(o.get("id") == order_id or o.get("order_id") == order_id for o in open_orders)
+    report.add(
+        "v2 GET /orders shows the placed order",
+        found,
+        detail=f"{len(open_orders)} open orders",
+    )
+
+    # Verify in v1 orderbook
+    r = client.post("/api/v1/orderbook", json={"apikey": apikey})
+    if r.status_code == 200:
+        body_v1 = r.json()
+        v1_orders = (body_v1.get("data") or {}).get("orders") or body_v1.get("data") or []
+        v1_found = any(
+            (o.get("orderid") == order_id or o.get("order_id") == order_id)
+            for o in (v1_orders if isinstance(v1_orders, list) else [])
+        )
+        report.add(
+            "v1 /orderbook shows the placed order",
+            v1_found,
+            detail=f"{len(v1_orders) if isinstance(v1_orders, list) else 0} orders",
+        )
+
+    # Cancel via v2
+    r = client.delete(
+        f"/api/v2/orders/{order_id}", headers={"X-API-KEY": apikey}
+    )
+    report.add(
+        f"v2 DELETE /orders/{order_id[:8]}...",
+        r.status_code == 200,
+        status=r.status_code,
+    )
+
+
+def sweep_order_flow_v1_bridge(
+    client: httpx.Client, apikey: str, report: Report
+) -> None:
+    """Place + cancel via legacy /api/v1/placeorder, which routes
+    through services.v1_compat_bridge for non-India brokers."""
+    if not report.json_mode:
+        print("\n=== /api/v1/placeorder bridge order-flow ===")
+
+    payload = {
+        "apikey": apikey,
+        "strategy": "api_surface_sweep",
+        "symbol": "AAPL",
+        "exchange": "XNAS",
+        "action": "BUY",
+        "pricetype": "LIMIT",
+        "quantity": "1",
+        "price": "1.00",
+        "product": "DAY",
+    }
+    r = client.post("/api/v1/placeorder", json=payload)
+    sc = r.status_code
+    resp = r.json() if r.headers.get("content-type", "").startswith("application/json") else None
+    orderid = (resp or {}).get("orderid") or ""
+    report.add(
+        "v1 /placeorder LIMIT BUY 1 AAPL @ $1.00",
+        sc == 200 and bool(orderid),
+        status=sc,
+        detail=f"orderid={orderid[:8]}..."
+        if orderid
+        else (resp or {}).get("message", "")[:60] if resp else "",
+    )
+    if not orderid:
+        return
+
+    # Cancel via v1
+    r = client.post(
+        "/api/v1/cancelorder",
+        json={"apikey": apikey, "orderid": orderid, "strategy": "api_surface_sweep"},
+    )
+    report.add(
+        f"v1 /cancelorder {orderid[:8]}...",
+        r.status_code == 200,
+        status=r.status_code,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="OpenAlgo v7 API surface sweep + Alpaca cross-check"
@@ -454,6 +577,11 @@ def main() -> int:
         "--skip-alpaca-direct",
         action="store_true",
         help="Skip the direct Alpaca API calls (useful when offline)",
+    )
+    parser.add_argument(
+        "--skip-order-flow",
+        action="store_true",
+        help="Skip the place/cancel order-flow tests (read-only sweep)",
     )
     parser.add_argument(
         "--json", action="store_true", help="Machine-readable JSON output"
@@ -487,6 +615,9 @@ def main() -> int:
     sweep_v1(client, apikey, report)
     sweep_v2(client, apikey, report)
     sweep_auth(client, report)
+    if not args.skip_order_flow:
+        sweep_order_flow_v2(client, apikey, report)
+        sweep_order_flow_v1_bridge(client, apikey, report)
     if not args.skip_alpaca_direct:
         sweep_alpaca_direct(report)
         cross_check_balance(client, apikey, report)
