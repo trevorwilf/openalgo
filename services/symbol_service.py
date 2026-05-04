@@ -3,11 +3,44 @@ from typing import Any, Dict, Optional, Tuple
 from sqlalchemy.orm.exc import NoResultFound
 
 from database.auth_db import get_auth_token_broker
-from database.symbol import SymToken, db_session
+from database.symbol import SymToken, SymTokenV1Read, db_session
 from utils.logging import get_logger
 
 # Initialize logger
 logger = get_logger(__name__)
+
+# v8-C — query the symtoken_v1 view first when the operator has run
+# the broker-provenance migration. The view hides T-06 columns
+# (broker_code / instrument_id) so v1 callers can't accidentally
+# leak them. Set OPENALGO_SYMTOKEN_V1_VIEW=0 to disable view-first
+# behavior (rollback escape hatch). When the view doesn't exist
+# (operator hasn't migrated), the helper falls back to SymToken.
+import os as _os
+_USE_V1_VIEW = _os.environ.get("OPENALGO_SYMTOKEN_V1_VIEW", "1") != "0"
+_V1_VIEW_AVAILABLE: bool | None = None  # tri-state probe cache
+
+
+def _v1_view_is_available() -> bool:
+    """Cached probe — does the symtoken_v1 view exist?
+
+    Probes once per process. The migration that creates the view is
+    run by the operator out-of-band; until then, the v1-lane lookup
+    falls back to the SymToken table (same v1-shaped result).
+    """
+    global _V1_VIEW_AVAILABLE
+    if _V1_VIEW_AVAILABLE is not None:
+        return _V1_VIEW_AVAILABLE
+    if not _USE_V1_VIEW:
+        _V1_VIEW_AVAILABLE = False
+        return False
+    try:
+        db_session.query(SymTokenV1Read).limit(1).all()
+        _V1_VIEW_AVAILABLE = True
+    except Exception:
+        # OperationalError "no such table: symtoken_v1" is the
+        # expected pre-migration outcome — fall back silently.
+        _V1_VIEW_AVAILABLE = False
+    return _V1_VIEW_AVAILABLE
 
 
 def get_symbol_info_for_broker(
@@ -55,12 +88,25 @@ def get_symbol_info_with_auth(
         - HTTP status code (int)
     """
     try:
-        # Query the database for the symbol
-        result = (
-            db_session.query(SymToken)
-            .filter(SymToken.symbol == symbol, SymToken.exchange == exchange)
-            .first()
-        )
+        # v8-C — v1 lookup goes through symtoken_v1 view when
+        # available (hides T-06 broker_code / instrument_id from
+        # v1 responses). Falls back to SymToken when the view
+        # doesn't exist (pre-migration operator).
+        if _v1_view_is_available():
+            result = (
+                db_session.query(SymTokenV1Read)
+                .filter(
+                    SymTokenV1Read.symbol == symbol,
+                    SymTokenV1Read.exchange == exchange,
+                )
+                .first()
+            )
+        else:
+            result = (
+                db_session.query(SymToken)
+                .filter(SymToken.symbol == symbol, SymToken.exchange == exchange)
+                .first()
+            )
 
         if result is None:
             error_response = {

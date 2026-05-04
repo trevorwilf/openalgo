@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Tuple
 
 from database.auth_db import verify_api_key
 from database.symbol import SymToken, db_session
+from services.symbol_service import _v1_view_is_available
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -34,12 +35,21 @@ def get_instruments(
             logger.warning("No API key provided for instruments download")
             return False, {"status": "error", "message": "API key is required"}, 401, {}
 
-        # Build query
-        query = SymToken.query
+        # v8-C — query symtoken_v1 view when available (hides T-06
+        # columns from v1 responses); fall back to SymToken when the
+        # operator hasn't run the broker-provenance migration.
+        if _v1_view_is_available():
+            from database.symbol import SymTokenV1Read
 
-        # Apply exchange filter if provided
+            query = db_session.query(SymTokenV1Read)
+            if exchange:
+                query = query.filter(SymTokenV1Read.exchange == exchange)
+        else:
+            query = SymToken.query
+            if exchange:
+                query = query.filter(SymToken.exchange == exchange)
+
         if exchange:
-            query = query.filter(SymToken.exchange == exchange)
             logger.info(f"Filtering instruments by exchange: {exchange}")
         else:
             logger.info("Fetching all instruments from all exchanges")
