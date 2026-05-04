@@ -242,7 +242,7 @@ def test_subscribe_to_equity_on_crypto_feed_returns_feed_mismatch(monkeypatch):
 def test_subscribe_crypto_translates_dash_to_slash(monkeypatch):
     adapter = _make_adapter(monkeypatch, feed="crypto")
     resp = adapter.subscribe("BTC-USD", "CRYPTO", mode=2)
-    assert resp["status"] == "ok"
+    assert resp["status"] == "success"
     assert resp["broker_symbol"] == "BTC/USD"
     # WS got the slash-form symbol on the wire.
     adapter._ws.subscribe.assert_called_once_with(
@@ -253,7 +253,7 @@ def test_subscribe_crypto_translates_dash_to_slash(monkeypatch):
 def test_subscribe_equity_does_not_translate_symbol(monkeypatch):
     adapter = _make_adapter(monkeypatch)  # iex
     resp = adapter.subscribe("AAPL", "XNAS", mode=2)
-    assert resp["status"] == "ok"
+    assert resp["status"] == "success"
     assert resp["broker_symbol"] == "AAPL"
     adapter._ws.subscribe.assert_called_once_with(
         trades=["AAPL"], quotes=["AAPL"]
