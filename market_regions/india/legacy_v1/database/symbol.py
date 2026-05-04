@@ -117,7 +117,11 @@ class SymTokenV1Read(Base):
     contract_value = Column(Float)
 
 
-def enhanced_search_symbols(query: str, exchange: str = None) -> list[SymToken]:
+def enhanced_search_symbols(
+    query: str,
+    exchange: str = None,
+    model_cls=None,
+):
     """
     Enhanced search function that searches across multiple fields
     and supports partial matching with multiple terms
@@ -125,20 +129,30 @@ def enhanced_search_symbols(query: str, exchange: str = None) -> list[SymToken]:
     Args:
         query (str): Search query string
         exchange (str, optional): Exchange to filter by
+        model_cls (type, optional): SQLAlchemy ORM class to query.
+            Defaults to ``SymToken`` when not provided. v8-C callers
+            pass ``SymTokenV1Read`` here when the symtoken_v1 view
+            is available, so v1 search responses don't surface T-06
+            broker_code / instrument_id columns.
 
     Returns:
-        List[SymToken]: List of matching SymToken objects
+        List of matching ORM objects (``SymToken`` by default,
+        ``SymTokenV1Read`` when the v1 view is selected).
     """
+    if model_cls is None:
+        model_cls = SymToken
+
     try:
         # Split the query into terms and clean them
         terms = [term.strip().upper() for term in query.split() if term.strip()]
 
-        # Base query
-        base_query = SymToken.query
+        # Base query — the view doesn't expose Base.query the same
+        # way SymToken does, so go through db_session uniformly.
+        base_query = db_session.query(model_cls)
 
         # If exchange is specified, filter by it
         if exchange:
-            base_query = base_query.filter(SymToken.exchange == exchange)
+            base_query = base_query.filter(model_cls.exchange == exchange)
 
         # Create conditions for each term
         all_conditions = []
@@ -148,18 +162,18 @@ def enhanced_search_symbols(query: str, exchange: str = None) -> list[SymToken]:
             try:
                 num_term = float(term)
                 term_conditions = or_(
-                    SymToken.symbol.ilike(f"%{safe_term}%", escape="\\"),
-                    SymToken.brsymbol.ilike(f"%{safe_term}%", escape="\\"),
-                    SymToken.name.ilike(f"%{safe_term}%", escape="\\"),
-                    SymToken.token.ilike(f"%{safe_term}%", escape="\\"),
-                    SymToken.strike == num_term,
+                    model_cls.symbol.ilike(f"%{safe_term}%", escape="\\"),
+                    model_cls.brsymbol.ilike(f"%{safe_term}%", escape="\\"),
+                    model_cls.name.ilike(f"%{safe_term}%", escape="\\"),
+                    model_cls.token.ilike(f"%{safe_term}%", escape="\\"),
+                    model_cls.strike == num_term,
                 )
             except ValueError:
                 term_conditions = or_(
-                    SymToken.symbol.ilike(f"%{safe_term}%", escape="\\"),
-                    SymToken.brsymbol.ilike(f"%{safe_term}%", escape="\\"),
-                    SymToken.name.ilike(f"%{safe_term}%", escape="\\"),
-                    SymToken.token.ilike(f"%{safe_term}%", escape="\\"),
+                    model_cls.symbol.ilike(f"%{safe_term}%", escape="\\"),
+                    model_cls.brsymbol.ilike(f"%{safe_term}%", escape="\\"),
+                    model_cls.name.ilike(f"%{safe_term}%", escape="\\"),
+                    model_cls.token.ilike(f"%{safe_term}%", escape="\\"),
                 )
             all_conditions.append(term_conditions)
 

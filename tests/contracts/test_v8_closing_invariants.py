@@ -76,6 +76,22 @@ def test_v8_invariant_v8_c_instruments_service_uses_v1_view():
     )
 
 
+def test_v8_invariant_v8_c_search_service_uses_v1_view():
+    """``services.search_service`` falls back to the v1 view when
+    the cache misses, completing the v1-lane symbol-lookup
+    surface (symbol_service, instruments_service, search_service).
+    """
+    src = (_REPO_ROOT / "services" / "search_service.py").read_text(
+        encoding="utf-8"
+    )
+    assert "SymTokenV1Read" in src, (
+        "search_service must reference SymTokenV1Read for v8-C"
+    )
+    assert "_v1_view_is_available" in src, (
+        "search_service must call the v8-C probe in the fallback branch"
+    )
+
+
 # ---------------------------------------------------------------------------
 # v8-E — at least one production page uses RegionContent
 # ---------------------------------------------------------------------------
