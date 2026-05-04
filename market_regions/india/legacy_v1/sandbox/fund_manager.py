@@ -40,14 +40,6 @@ from utils.symbol_utils import is_future, is_option
 logger = get_logger(__name__)
 
 
-class FundManager:
-    """Manages virtual funds for sandbox mode"""
-
-    # Class-level lock for thread safety across all fund operations
-    # This prevents race conditions when multiple threads modify funds simultaneously
-    _lock = threading.Lock()
-
-
 def _resolve_starting_capital_default() -> str:
     """T-16 (v7 Phase 4-bis-3): legacy fund_manager starting capital
     default.
@@ -83,6 +75,14 @@ def _resolve_starting_capital_default() -> str:
     except Exception:
         pass
     return "10000000.00"
+
+
+class FundManager:
+    """Manages virtual funds for sandbox mode"""
+
+    # Class-level lock for thread safety across all fund operations
+    # This prevents race conditions when multiple threads modify funds simultaneously
+    _lock = threading.Lock()
 
     def __init__(self, user_id):
         self.user_id = user_id
