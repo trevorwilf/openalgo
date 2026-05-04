@@ -81,6 +81,42 @@ class SymToken(Base):
     )
 
 
+class SymTokenV1Read(Base):
+    """v7 Phase 4-bis-6 — read-only ORM mapping over the
+    ``symtoken_v1`` view.
+
+    The view (created by
+    ``upgrade/migrate_symtoken_broker_provenance.py``) exposes
+    only the pre-T-06 column set. v1-lane code that wants to opt
+    out of the broker_code / instrument_id columns can query
+    through this class instead of the ``SymToken`` model.
+
+    This is read-only by convention — writes go to the underlying
+    ``symtoken`` table via the SymToken model. The
+    ``__table_args__`` declares the entity as a view via
+    ``info={"is_view": True}`` so SQLAlchemy doesn't try to
+    create/drop it during ``create_all()``.
+    """
+
+    __tablename__ = "symtoken_v1"
+    __table_args__ = {"info": {"is_view": True}}
+
+    # Same column set as SymToken minus broker_code / instrument_id.
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String)
+    brsymbol = Column(String)
+    name = Column(String)
+    exchange = Column(String)
+    brexchange = Column(String)
+    token = Column(String)
+    expiry = Column(String)
+    strike = Column(Float)
+    lotsize = Column(Integer)
+    instrumenttype = Column(String)
+    tick_size = Column(Float)
+    contract_value = Column(Float)
+
+
 def enhanced_search_symbols(query: str, exchange: str = None) -> list[SymToken]:
     """
     Enhanced search function that searches across multiple fields
