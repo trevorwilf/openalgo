@@ -52,9 +52,11 @@ def _resolve_starting_capital_default() -> str:
     """T-16 (v7 Phase 4-bis-3): legacy fund_manager starting capital
     default.
 
-    The legacy ``₹1 Crore`` (``"10000000.00"``) value historically
-    differed from the v2 IndiaSandboxProvider's ``₹10L``
-    (``"1000000.00"``). The reconciliation:
+    The legacy ``₹1 Crore`` (``"10000000.00"``) value differs from
+    the v2 IndiaSandboxProvider's ``₹10L`` (``"1000000.00"``) by
+    10×. T-16 moved both to the region plugin metadata; the
+    numeric values themselves stay distinct for backward compat.
+    Resolution:
 
     1. Read from ``market_regions/india/plugin.json``
        ``metadata.sandbox_starting_capital_default`` if declared
