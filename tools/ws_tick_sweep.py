@@ -54,75 +54,81 @@ def fetch_apikey() -> str:
     return body.get("api_key") or body.get("apikey") or ""
 
 
-async def run_sweep(symbol: str, exchange: str, mode: str, timeout: float) -> int:
+async def run_sweep(symbols: list[dict], mode: str, timeout: float) -> int:
+    """Connect, authenticate, subscribe to all ``symbols``, wait
+    for at least one tick per symbol within ``timeout`` seconds.
+    Single-symbol caller passes a 1-element list."""
     apikey = fetch_apikey()
     print(f"apikey: {apikey[:8]}...")
-
-    print(f"connecting to {WS_URL} ...")
+    sym_keys = {(s["symbol"], s["exchange"]) for s in symbols}
+    print(f"connecting to {WS_URL} (subscribing to {len(symbols)}) ...")
     try:
         async with websockets.connect(WS_URL) as ws:
-            # Authenticate.
             await ws.send(json.dumps({"action": "authenticate", "api_key": apikey}))
-            auth_resp_raw = await asyncio.wait_for(ws.recv(), timeout=10)
-            auth_resp = json.loads(auth_resp_raw)
+            auth_resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
             print(f"auth response: {auth_resp.get('status')} / {auth_resp.get('message', '')}")
             if auth_resp.get("status") not in ("success", "ok", "authenticated"):
-                print(f"  full body: {auth_resp_raw[:200]}")
                 return 1
 
-            # Subscribe.
-            await ws.send(
-                json.dumps(
-                    {
-                        "action": "subscribe",
-                        "symbol": symbol,
-                        "exchange": exchange,
-                        "mode": mode,
-                    }
+            for s in symbols:
+                await ws.send(
+                    json.dumps(
+                        {
+                            "action": "subscribe",
+                            "symbol": s["symbol"],
+                            "exchange": s["exchange"],
+                            "mode": mode,
+                        }
+                    )
                 )
-            )
-            sub_resp_raw = await asyncio.wait_for(ws.recv(), timeout=10)
-            print(f"subscribe response: {sub_resp_raw[:200]}")
+                sub_resp = await asyncio.wait_for(ws.recv(), timeout=10)
+                body = json.loads(sub_resp)
+                statuses = (body.get("subscriptions") or [{}])[0].get("status", "?")
+                print(f"  subscribe {s['symbol']}@{s['exchange']}: {statuses}")
 
-            # Wait for at least one tick.
-            tick_count = 0
+            seen: dict[tuple[str, str], int] = {}
+            tick_total = 0
             try:
                 async with asyncio.timeout(timeout):
                     while True:
                         msg = await ws.recv()
                         body = json.loads(msg)
-                        # Ticks come as ``{"data": {...}, "type": "live", ...}``
-                        # or similar — anything that's not just a status
-                        # response counts.
-                        is_tick = (
-                            body.get("type") in ("live", "market_data", "ltp", "quote", "depth")
-                            or "data" in body
-                            and not body.get("status")
-                        )
-                        if is_tick:
-                            tick_count += 1
-                            print(f"  tick #{tick_count}: {str(body)[:120]}...")
-                            if tick_count >= 3:
+                        if body.get("type") in (
+                            "live", "market_data", "ltp", "quote", "depth"
+                        ) or ("data" in body and not body.get("status")):
+                            tick_total += 1
+                            sym = body.get("symbol") or (body.get("data") or {}).get("symbol")
+                            exc = body.get("exchange") or (body.get("data") or {}).get("exchange")
+                            key = (sym, exc)
+                            seen[key] = seen.get(key, 0) + 1
+                            if all(k in seen for k in sym_keys):
                                 break
             except (asyncio.TimeoutError, TimeoutError):
                 pass
 
-            await ws.send(
-                json.dumps(
-                    {
-                        "action": "unsubscribe",
-                        "symbol": symbol,
-                        "exchange": exchange,
-                        "mode": mode,
-                    }
+            for s in symbols:
+                await ws.send(
+                    json.dumps(
+                        {
+                            "action": "unsubscribe",
+                            "symbol": s["symbol"],
+                            "exchange": s["exchange"],
+                            "mode": mode,
+                        }
+                    )
                 )
-            )
+
             print(f"\n=== Result ===")
-            print(f"ticks received: {tick_count}")
-            if tick_count > 0:
+            print(f"total ticks: {tick_total}")
+            for s in symbols:
+                k = (s["symbol"], s["exchange"])
+                count = seen.get(k, 0)
+                mark = "OK  " if count > 0 else "FAIL"
+                print(f"  [{mark}] {s['symbol']}@{s['exchange']}: {count} ticks")
+            if all(seen.get((s["symbol"], s["exchange"]), 0) > 0 for s in symbols):
                 print("PASS")
                 return 0
-            print("FAIL: no ticks received within window")
+            print("FAIL: at least one symbol got no ticks")
             return 1
 
     except Exception as e:
@@ -134,7 +140,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="OpenAlgo WebSocket tick verification"
     )
-    parser.add_argument("--symbol", default="AAPL")
+    parser.add_argument(
+        "--symbols",
+        default="AAPL@XNAS",
+        help="Comma-separated SYMBOL@EXCHANGE pairs, e.g. "
+        "'AAPL@XNAS,MSFT@XNAS,SPY@ARCX'",
+    )
+    parser.add_argument(
+        "--symbol",
+        help="(legacy) single-symbol form, paired with --exchange",
+    )
     parser.add_argument("--exchange", default="XNAS")
     parser.add_argument("--mode", default="LTP", choices=["LTP", "Quote", "Depth"])
     parser.add_argument("--timeout", type=float, default=20.0)
@@ -144,7 +159,17 @@ def main() -> int:
         print("set web_login_username + web_login_password in .env")
         return 2
 
-    return asyncio.run(run_sweep(args.symbol, args.exchange, args.mode, args.timeout))
+    if args.symbol:
+        syms = [{"symbol": args.symbol, "exchange": args.exchange}]
+    else:
+        syms = []
+        for pair in args.symbols.split(","):
+            if "@" not in pair:
+                continue
+            symbol, exchange = pair.strip().split("@", 1)
+            syms.append({"symbol": symbol.strip(), "exchange": exchange.strip()})
+
+    return asyncio.run(run_sweep(syms, args.mode, args.timeout))
 
 
 if __name__ == "__main__":
