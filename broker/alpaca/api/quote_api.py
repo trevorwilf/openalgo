@@ -63,24 +63,58 @@ class AlpacaQuoteAdapter:
                 details=f"Alpaca does not trade venue {instrument.venue_code!r}",
             )
         symbol = instrument.broker_native_symbol or instrument.canonical_symbol
-        data = self._get(f"/v2/stocks/{symbol}/quotes/latest")
-        quote = data.get("quote", {})
-        ts_raw = quote.get("t")
-        ts = None
-        if ts_raw:
-            ts = _parse_ts(ts_raw)
+        # Use the snapshot endpoint — one call returns latestTrade
+        # (real last-trade price), latestQuote (NBBO bid/ask),
+        # dailyBar (intraday OHLCV), and prevDailyBar (prev close).
+        # The previous /quotes/latest endpoint omitted last-trade so
+        # ``last`` had to fall back to the ask price, which the v1
+        # bridge then propagated as ltp/high/low/open/prev_close.
+        data = self._get(f"/v2/stocks/{symbol}/snapshot")
+        latest_quote = data.get("latestQuote") or {}
+        latest_trade = data.get("latestTrade") or {}
+        daily_bar = data.get("dailyBar") or {}
+        prev_daily_bar = data.get("prevDailyBar") or {}
+        # Prefer the trade timestamp; fall back to quote timestamp.
+        ts_raw = latest_trade.get("t") or latest_quote.get("t")
+        ts = _parse_ts(ts_raw) if ts_raw else None
+
+        # Prefer the actual last-trade price; if the snapshot has no
+        # trade today (rare on a heavily-traded symbol but possible
+        # for thinly-traded ones outside RTH), fall back to the
+        # bid+ask midpoint, which is a more honest "last" than
+        # picking either side.
+        last = _opt_decimal(latest_trade.get("p"))
+        if last is None:
+            bid_d = _opt_decimal(latest_quote.get("bp"))
+            ask_d = _opt_decimal(latest_quote.get("ap"))
+            if bid_d is not None and ask_d is not None and bid_d > 0 and ask_d > 0:
+                last = (bid_d + ask_d) / 2
+
         return NormalizedQuote(
             instrument_id=instrument.instrument_id,
             venue_code=instrument.venue_code,
             canonical_symbol=instrument.canonical_symbol,
-            bid=_opt_decimal(quote.get("bp")),
-            ask=_opt_decimal(quote.get("ap")),
-            last=_opt_decimal(quote.get("ap") or quote.get("bp")),
-            bid_size=_opt_decimal(quote.get("bs")),
-            ask_size=_opt_decimal(quote.get("as")),
+            bid=_opt_decimal(latest_quote.get("bp")),
+            ask=_opt_decimal(latest_quote.get("ap")),
+            last=last,
+            bid_size=_opt_decimal(latest_quote.get("bs")),
+            ask_size=_opt_decimal(latest_quote.get("as")),
             timestamp=ts,
             currency=Currency.USD,
-            metadata={"raw_exchange": quote.get("x")},
+            metadata={
+                "raw_exchange": latest_quote.get("x"),
+                # OHLCV — populated for the v1 bridge so /quotes,
+                # /multiquotes, /depth render correct daily bars
+                # instead of stamping the same `last` value into
+                # high/low/open/prev_close.
+                "open": _opt_decimal(daily_bar.get("o")),
+                "high": _opt_decimal(daily_bar.get("h")),
+                "low": _opt_decimal(daily_bar.get("l")),
+                "close": _opt_decimal(daily_bar.get("c")),
+                "volume": _opt_decimal(daily_bar.get("v")),
+                "prev_close": _opt_decimal(prev_daily_bar.get("c")),
+                "trade_size": _opt_decimal(latest_trade.get("s")),
+            },
         )
 
 
