@@ -10,6 +10,32 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def get_symbol_info_for_broker(
+    symbol: str, exchange: str, broker_code: str,
+) -> Optional["SymToken"]:
+    """v7 Phase 4-bis-5 — broker-aware symbol lookup.
+
+    Filters by ``broker_code`` so two brokers that both register
+    the same canonical ``(symbol, exchange)`` pair (post-T-06
+    cross-broker scenario) return their respective rows. Returns
+    ``None`` when no row matches.
+
+    Backward-compatible behavior: if ``broker_code`` is empty the
+    function falls back to ``(symbol, exchange)`` matching only —
+    matches the legacy ``get_symbol_info_with_auth`` lookup.
+    """
+    query = db_session.query(SymToken).filter(
+        SymToken.symbol == symbol, SymToken.exchange == exchange
+    )
+    if broker_code:
+        # Match the operator's broker explicitly. Pre-backfill
+        # rows have broker_code=NULL so they're filtered out —
+        # once the operator runs migrate_symtoken_broker_provenance.py
+        # the rows pick up broker_code and become matchable.
+        query = query.filter(SymToken.broker_code == broker_code)
+    return query.first()
+
+
 def get_symbol_info_with_auth(
     symbol: str, exchange: str, auth_token: str, broker: str
 ) -> tuple[bool, dict[str, Any], int]:
