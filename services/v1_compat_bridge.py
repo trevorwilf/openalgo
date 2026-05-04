@@ -572,6 +572,7 @@ def _multiquotes() -> tuple[Any, int]:
             logger.warning("multiquotes %s@%s failed: %s", sym, ex, e)
             continue
         last = float(quote.last) if quote.last is not None else 0.0
+        meta = quote.metadata or {}
         results.append(
             {
                 "symbol": sym,
@@ -579,13 +580,13 @@ def _multiquotes() -> tuple[Any, int]:
                 "data": {
                     "ask": float(quote.ask) if quote.ask is not None else 0.0,
                     "bid": float(quote.bid) if quote.bid is not None else 0.0,
-                    "high": last,
-                    "low": last,
+                    "high": _meta_float(meta, "high", last),
+                    "low": _meta_float(meta, "low", last),
                     "ltp": last,
                     "oi": 0,
-                    "open": last,
-                    "prev_close": last,
-                    "volume": 0,
+                    "open": _meta_float(meta, "open", last),
+                    "prev_close": _meta_float(meta, "prev_close", last),
+                    "volume": _meta_float(meta, "volume", 0),
                 },
             }
         )
@@ -745,6 +746,7 @@ def _depth() -> tuple[Any, int]:
     ask = float(quote.ask) if quote.ask is not None else 0.0
     bid_size = float(quote.bid_size) if quote.bid_size is not None else 0.0
     ask_size = float(quote.ask_size) if quote.ask_size is not None else 0.0
+    meta = quote.metadata or {}
 
     return (
         jsonify(
@@ -752,16 +754,16 @@ def _depth() -> tuple[Any, int]:
                 data={
                     "asks": [{"price": ask, "quantity": int(ask_size)}],
                     "bids": [{"price": bid, "quantity": int(bid_size)}],
-                    "high": last,
-                    "low": last,
+                    "high": _meta_float(meta, "high", last),
+                    "low": _meta_float(meta, "low", last),
                     "ltp": last,
-                    "ltq": 0,
+                    "ltq": int(_meta_float(meta, "trade_size", 0)),
                     "oi": 0,
-                    "open": last,
-                    "prev_close": last,
+                    "open": _meta_float(meta, "open", last),
+                    "prev_close": _meta_float(meta, "prev_close", last),
                     "totalbuyqty": int(bid_size),
                     "totalsellqty": int(ask_size),
-                    "volume": 0,
+                    "volume": _meta_float(meta, "volume", 0),
                 }
             )
         ),
@@ -811,19 +813,20 @@ def _quotes() -> tuple[Any, int]:
         return jsonify(_v1_error(f"quote unavailable for {symbol}")), 404
 
     last = float(quote.last) if quote.last is not None else 0.0
+    meta = quote.metadata or {}
     return (
         jsonify(
             _v1_envelope(
                 data={
                     "ask": float(quote.ask) if quote.ask is not None else 0.0,
                     "bid": float(quote.bid) if quote.bid is not None else 0.0,
-                    "high": last,
-                    "low": last,
+                    "high": _meta_float(meta, "high", last),
+                    "low": _meta_float(meta, "low", last),
                     "ltp": last,
                     "oi": 0,
-                    "open": last,
-                    "prev_close": last,
-                    "volume": 0,
+                    "open": _meta_float(meta, "open", last),
+                    "prev_close": _meta_float(meta, "prev_close", last),
+                    "volume": _meta_float(meta, "volume", 0),
                 }
             )
         ),
@@ -834,6 +837,26 @@ def _quotes() -> tuple[Any, int]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _meta_float(meta: dict, key: str, default: float) -> float:
+    """Read an OHLC field from ``NormalizedQuote.metadata`` as a
+    float. Returns ``default`` when the key is missing or the value
+    is None — preserves the legacy "stamp last into every OHLC field"
+    behavior for adapters that don't populate the metadata.
+
+    The Alpaca quote adapter (post-snapshot-endpoint switch) exposes
+    ``open / high / low / close / prev_close / volume`` in the
+    metadata dict. Other adapters that only fill ``last`` keep the
+    fallback path.
+    """
+    raw = meta.get(key)
+    if raw is None:
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def _alpaca_order_to_v1(row: dict, *, kind: str = "order") -> dict[str, Any]:
