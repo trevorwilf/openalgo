@@ -14,7 +14,8 @@
       "products": ["MIS", "CNC", "NRML"]
     },
     "sandbox_initial_funds": "1000000.00",
-    "sandbox_initial_funds_currency": "INR"
+    "sandbox_initial_funds_currency": "INR",
+    "sandbox_starting_capital_default": "10000000.00"
   },
   "venues": [
     {
