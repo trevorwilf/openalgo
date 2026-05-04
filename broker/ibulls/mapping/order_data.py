@@ -396,7 +396,9 @@ def map_portfolio_data(portfolio_data):
     for isin, holding in holdings_data.items():
         # Extract NSE instrument ID for symbol lookup
         nse_instrument_id = holding.get("ExchangeNSEInstrumentId")
-        exchange = "NSE"  # Default to NSE for equity holdings
+        # T-19: read default venue from ibulls BrokerCapabilities.
+        from utils.plugin_loader import get_default_venue_code
+        exchange = get_default_venue_code("ibulls")
 
         # Get trading symbol from database using instrument ID and exchange
         trading_symbol = get_symbol(nse_instrument_id, exchange) or isin

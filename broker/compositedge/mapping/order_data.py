@@ -396,7 +396,11 @@ def map_portfolio_data(portfolio_data):
     for isin, holding in holdings_data.items():
         # Extract NSE instrument ID for symbol lookup
         nse_instrument_id = holding.get("ExchangeNSEInstrumentId")
-        exchange = "NSE"  # Default to NSE for equity holdings
+        # T-19: read default venue from compositedge's
+        # BrokerCapabilities.default_venue_code (or
+        # supported_venue_codes[0]) instead of hard-coding "NSE".
+        from utils.plugin_loader import get_default_venue_code
+        exchange = get_default_venue_code("compositedge")
 
         # Get trading symbol from database using instrument ID and exchange
         trading_symbol = get_symbol(nse_instrument_id, exchange) or isin

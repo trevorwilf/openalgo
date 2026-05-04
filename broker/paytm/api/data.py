@@ -65,17 +65,53 @@ class BrokerData:
         # Empty timeframe map since historical data is not supported
         self.timeframe_map = {}
 
-        # Market timing configuration for different exchanges
-        self.market_timings = {
-            "NSE": {"start": "09:15:00", "end": "15:30:00"},
-            "BSE": {"start": "09:15:00", "end": "15:30:00"},
-            "NFO": {"start": "09:15:00", "end": "15:30:00"},
-            "CDS": {"start": "09:00:00", "end": "17:00:00"},
-            "BCD": {"start": "09:00:00", "end": "17:00:00"},
-        }
+        # T-20 (v7 Phase 3-bis): market timing configuration sourced
+        # from the India region plugin's session_templates instead of
+        # hard-coded literals. ``_load_session_windows`` resolves
+        # NSE/BSE/NFO + CDS/BCD windows from
+        # ``market_regions/india/plugin.json`` so any tweak to the
+        # exchange windows lives in ONE place. India operators see
+        # the same wall-clock values (09:15-15:30 for cash, etc.) —
+        # the literals just no longer live in broker source.
+        self.market_timings = self._load_session_windows()
+        self.default_market_timings = self.market_timings.get(
+            "NSE", {"start": "09:15:00", "end": "15:29:59"}
+        )
 
-        # Default market timings if exchange not found
-        self.default_market_timings = {"start": "09:15:00", "end": "15:29:59"}
+    @staticmethod
+    def _load_session_windows() -> dict:
+        """Load India venue session windows from the region plugin.
+
+        Falls back to the historical Paytm hard-coded values if the
+        region plugin is unavailable so the broker keeps working
+        even before app startup has run the region loader.
+        """
+        from utils.region_loader import get_market_region
+
+        india = get_market_region("india")
+        if india is None:
+            return {
+                "NSE": {"start": "09:15:00", "end": "15:30:00"},
+                "BSE": {"start": "09:15:00", "end": "15:30:00"},
+                "NFO": {"start": "09:15:00", "end": "15:30:00"},
+                "CDS": {"start": "09:00:00", "end": "17:00:00"},
+                "BCD": {"start": "09:00:00", "end": "17:00:00"},
+            }
+
+        out: dict = {}
+        for tmpl in india.session_templates:
+            # Region plugin stores datetime.time objects; Paytm's
+            # API expects HH:MM:SS strings.
+            start = tmpl.local_start_time.strftime("%H:%M:%S")
+            end = tmpl.local_end_time.strftime("%H:%M:%S")
+            window = {"start": start, "end": end}
+            for venue in tmpl.venue_codes:
+                # First template per venue wins.
+                out.setdefault(venue, window)
+        # Paytm advertises BCD same as CDS — alias for backward compat.
+        if "BCD" not in out and "CDS" in out:
+            out["BCD"] = out["CDS"]
+        return out
 
     def get_market_timings(self, exchange: str) -> dict:
         """Get market start and end times for given exchange"""
