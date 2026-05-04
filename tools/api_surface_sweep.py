@@ -108,6 +108,47 @@ def login_and_get_apikey() -> tuple[httpx.Client, str]:
     return client, apikey
 
 
+def cleanup_alpaca_open_orders() -> int:
+    """Cancel any open orders on the Alpaca paper account before
+    starting the sweep.
+
+    Without this, leftover state from a prior ``--market-open`` run
+    (e.g. a MARKET SELL queued while the market is closed) blocks
+    later runs via Alpaca's wash-trade prevention: a ``LIMIT BUY @
+    $1`` on AAPL gets rejected with ``code=40310000 / 403`` when an
+    opposite-side order exists.
+
+    Returns the number of orders cancelled (0 on no-op, -1 on
+    transport error). Idempotent — safe to call before every run.
+    """
+    if not (ALPACA_API_KEY and ALPACA_API_SECRET):
+        return 0
+    base = (
+        "https://paper-api.alpaca.markets"
+        if ALPACA_API_KEY.startswith("PK")
+        else "https://api.alpaca.markets"
+    )
+    headers = {
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
+    }
+    try:
+        with httpx.Client(base_url=base, timeout=30) as c:
+            r = c.get("/v2/orders?status=open&limit=500", headers=headers)
+            if r.status_code != 200:
+                return -1
+            orders = r.json() if isinstance(r.json(), list) else []
+            if not orders:
+                return 0
+            r = c.delete("/v2/orders", headers=headers)
+            # 207 Multi-Status when there are orders to cancel; 200/204 on no-op.
+            if r.status_code in (200, 204, 207):
+                return len(orders)
+            return -1
+    except Exception:
+        return -1
+
+
 class Report:
     """Collect pass/fail rows for the final summary."""
 
@@ -951,6 +992,15 @@ def main() -> int:
         "modify-order, live LTP quote, and position close round-trip",
     )
     parser.add_argument(
+        "--no-pre-cleanup",
+        action="store_true",
+        help="Skip the pre-flight Alpaca open-order cancellation. By "
+        "default the sweep cancels any leftover open orders so that "
+        "wash-trade prevention does not reject the deep-OOM LIMIT "
+        "BUY against an opposite-side parked order from a prior "
+        "--market-open run.",
+    )
+    parser.add_argument(
         "--json", action="store_true", help="Machine-readable JSON output"
     )
     args = parser.parse_args()
@@ -976,6 +1026,14 @@ def main() -> int:
 
     if not args.json:
         print(f"API key: {apikey[:8]}...")
+
+    # Pre-flight: clean up any open orders left by a prior run. Alpaca's
+    # wash-trade prevention rejects a deep-OOM LIMIT BUY when an opposite-
+    # side order is parked, which surfaces as a 403/502 via the v1 bridge.
+    if not args.no_pre_cleanup and not args.skip_order_flow:
+        cancelled = cleanup_alpaca_open_orders()
+        if not args.json and cancelled > 0:
+            print(f"Pre-flight: cancelled {cancelled} leftover open order(s)")
 
     report = Report(json_mode=args.json)
 
