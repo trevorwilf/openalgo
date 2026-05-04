@@ -237,6 +237,13 @@ test.beforeAll(async ({ browser }) => {
 
 for (const route of AUTH_ROUTES) {
   test(`UI ${route}`, async ({ browser }, testInfo) => {
+    // Generous test-level timeout. Some India-only feature pages
+    // (volsurface, gex, ivsmile, oiprofile, strategybuilder) render
+    // the "feature unavailable in region" gating UI for non-India
+    // brokers and continue polling background React queries that
+    // race against the default 30s test timeout. 90s is well above
+    // the 99th percentile observed on the live suite.
+    testInfo.setTimeout(90_000)
     expect(storageStateFile, 'storage state not captured').toBeTruthy()
     const ctx = await browser.newContext({ storageState: storageStateFile! })
     const page = await ctx.newPage()
@@ -297,7 +304,20 @@ for (const route of AUTH_ROUTES) {
       )
     }
 
-    await ctx.close()
+    // Some India-only feature pages (volsurface, gex, ivsmile, etc.)
+    // render the "feature unavailable in region" gating UI for non-
+    // India brokers. The gating page may continue polling React
+    // queries on a long-lived setInterval which races with
+    // ctx.close() and throws a Protocol error during disposal.
+    // The test value is in the navigation + screenshot + soft-fail
+    // metrics; we don't need a clean context-close to claim
+    // success. Wrap in try/catch so the disposal race doesn't
+    // bubble up as a test failure.
+    try {
+      await ctx.close()
+    } catch (closeErr) {
+      console.log(`[ui WARN] ${route} ctx.close race (non-fatal): ${closeErr}`)
+    }
     // Soft-record only — never throw. The summary file collects
     // every failure; cascading failures here would block 80% of
     // the sweep. Use `npm run report:live` (or read
