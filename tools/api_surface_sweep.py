@@ -792,15 +792,32 @@ def sweep_position_close(
         )
         return
 
-    # Determine the AAPL quantity to close (cumulative across runs).
-    aapl_qty = 0
+    # Determine the AAPL quantity to close (cumulative across runs;
+    # Alpaca paper allows fractional positions so this may not be
+    # an integer — float-cast preserves fractional shares).
+    aapl_qty_float = 0.0
     for p in pre_positions:
         if _is_aapl(p):
             try:
-                aapl_qty = abs(int(float(str(p.get("quantity", "0")).replace(",", ""))))
+                aapl_qty_float = abs(float(str(p.get("quantity", "0")).replace(",", "")))
             except Exception:
-                aapl_qty = 0
+                aapl_qty_float = 0.0
             break
+    # Format the quantity for the order body. Whole shares stay
+    # whole; fractional residue gets sent as a decimal — Alpaca's
+    # close-position semantics accept fractional sells of any
+    # outstanding fractional position.
+    if aapl_qty_float > 0:
+        if aapl_qty_float == int(aapl_qty_float):
+            aapl_qty_str = str(int(aapl_qty_float))
+            qty_unit = "WHOLE"
+        else:
+            aapl_qty_str = f"{aapl_qty_float:.8f}".rstrip("0").rstrip(".")
+            qty_unit = "FRACTIONAL"
+    else:
+        aapl_qty_str = "0"
+        qty_unit = "WHOLE"
+    aapl_qty = aapl_qty_float  # back-compat var name for downstream messages
 
     # Close via marketable SELL on the v2 orders endpoint. (v1
     # /closeposition is India-only via the v1 lane guard; v2 has
@@ -815,8 +832,8 @@ def sweep_position_close(
             "instrument": {"venue_code": "XNAS", "canonical_symbol": "AAPL"},
             "side": "SELL",
             "order_type": "MARKET",
-            "quantity": str(aapl_qty),
-            "quantity_unit": "WHOLE",
+            "quantity": aapl_qty_str,
+            "quantity_unit": qty_unit,
             "time_in_force": "DAY",
             "session": "REGULAR",
         }
@@ -829,7 +846,7 @@ def sweep_position_close(
         resp = r.json() if sc < 500 else None
         close_order_id = (resp or {}).get("data", {}).get("order_id") or ""
         report.add(
-            f"v2 POST /orders MARKET SELL {aapl_qty} AAPL (close)",
+            f"v2 POST /orders MARKET SELL {aapl_qty_str} AAPL (close)",
             sc == 200 and bool(close_order_id),
             status=sc,
             detail=f"order_id={close_order_id[:8]}..." if close_order_id else "",
