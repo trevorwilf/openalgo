@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **998**.
+Total classified files: **1010**.
 
 Classification semantics:
 
@@ -142,7 +142,7 @@ Classification semantics:
 - `utils/traffic_logger.py`
 - `utils/version.py`
 
-## LEGACY_INDIA (50 files)
+## LEGACY_INDIA (56 files)
 
 - `app.py`
 - `blueprints/__init__.py`
@@ -179,12 +179,18 @@ Classification semantics:
 - `database/cache_restoration.py`
 - `mcp/mcpserver.py`
 - `restx_api/__init__.py`
+- `services/broker_mode_resolver.py`
+- `services/instrument_sync_adapters/_base.py`
 - `services/instrument_sync_adapters/alpaca_adapter.py`
 - `services/instrument_sync_adapters/delta_adapter.py`
 - `services/instrument_sync_adapters/zerodha_adapter.py`
 - `services/instruments_service.py`
+- `services/master_contract_scheduler.py`
+- `services/order_status_display.py`
 - `services/search_service.py`
 - `services/symbol_service.py`
+- `services/v1_compat_bridge.py`
+- `tools/api_surface_sweep.py`
 - `utils/number_formatter.py`
 - `websocket_proxy/__init__.py`
 - `websocket_proxy/app_integration.py`
@@ -195,7 +201,7 @@ Classification semantics:
 - `websocket_proxy/port_check.py`
 - `websocket_proxy/server.py`
 
-## REGION_PLUGIN (164 files)
+## REGION_PLUGIN (165 files)
 
 - `market_regions/india/__init__.py`
 - `market_regions/india/holidays.py`
@@ -334,6 +340,7 @@ Classification semantics:
 - `market_regions/india/legacy_v1/utils/symbol_utils.py`
 - `market_regions/india/legacy_v1/utils_legacy.py`
 - `market_regions/india/locale.py`
+- `market_regions/india/mpp.py`
 - `market_regions/india/options_grammar.py`
 - `market_regions/india/plugin.py`
 - `market_regions/india/qty_freeze.py`
@@ -362,7 +369,7 @@ Classification semantics:
 - `services/screeners/providers/uk/__init__.py`
 - `services/screeners/providers/us/__init__.py`
 
-## BROKER_PLUGIN (572 files)
+## BROKER_PLUGIN (577 files)
 
 - `broker/__init__.py`
 - `broker/_mock_schwab_like/__init__.py`
@@ -410,7 +417,9 @@ Classification semantics:
 - `broker/alpaca/api/auth_api.py`
 - `broker/alpaca/api/bar_api.py`
 - `broker/alpaca/api/funds.py`
+- `broker/alpaca/api/install.py`
 - `broker/alpaca/api/order_api.py`
+- `broker/alpaca/api/position_balance_adapters.py`
 - `broker/alpaca/api/quote_api.py`
 - `broker/alpaca/database/__init__.py`
 - `broker/alpaca/database/master_contract_db.py`
@@ -418,6 +427,7 @@ Classification semantics:
 - `broker/alpaca/mapping/transform_data.py`
 - `broker/alpaca/streaming/__init__.py`
 - `broker/alpaca/streaming/alpaca_adapter.py`
+- `broker/alpaca/streaming/alpaca_trade_updates.py`
 - `broker/alpaca/streaming/alpaca_websocket.py`
 - `broker/alpaca/sync/__init__.py`
 - `broker/alpaca/sync/instrument_sync.py`
@@ -840,6 +850,7 @@ Classification semantics:
 - `broker/samco/streaming/samco_adapter.py`
 - `broker/samco/streaming/samco_mapping.py`
 - `broker/samco/translator.py`
+- `broker/schwab/__init__.py`
 - `broker/shoonya/__init__.py`
 - `broker/shoonya/api/__init__.py`
 - `broker/shoonya/api/auth_api.py`
@@ -889,6 +900,7 @@ Classification semantics:
 - `broker/upstox/streaming/upstox_client.py`
 - `broker/upstox/streaming/upstox_mapping.py`
 - `broker/upstox/translator.py`
+- `broker/webull/__init__.py`
 - `broker/wisdom/api/__init__.py`
 - `broker/wisdom/api/auth_api.py`
 - `broker/wisdom/api/data.py`
