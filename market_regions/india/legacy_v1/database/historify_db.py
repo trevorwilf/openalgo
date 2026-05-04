@@ -102,6 +102,13 @@ def init_database():
         # Main OHLCV data table - unified table approach.
         # instrument_id is nullable — populated by HISTORIFY_INSTRUMENT_ID_V2
         # writers and by the Phase 3b backfill script. Never part of the PK.
+        # T-15 (v7 Phase 4-bis): broker_code is nullable too. Existing
+        # rows survive without backfill; new writes can populate it
+        # so two brokers can store distinct OHLC for the same
+        # (symbol, exchange, interval, timestamp) tuple. The composite
+        # unique constraint ``(broker_code, symbol, exchange, interval,
+        # timestamp)`` lands in a follow-up commit alongside
+        # ``upgrade/migrate_historify_broker_provenance.py``.
         conn.execute("""
             CREATE TABLE IF NOT EXISTS market_data (
                 symbol VARCHAR NOT NULL,
@@ -115,10 +122,18 @@ def init_database():
                 volume BIGINT NOT NULL,
                 oi BIGINT DEFAULT 0,
                 instrument_id VARCHAR,
+                broker_code VARCHAR,
                 created_at TIMESTAMP DEFAULT current_timestamp,
                 PRIMARY KEY (symbol, exchange, interval, timestamp)
             )
         """)
+        # T-15: ensure broker_code column exists on pre-Phase-4-bis
+        # databases (DuckDB ALTER TABLE ADD COLUMN is idempotent
+        # via IF NOT EXISTS pattern below).
+        try:
+            conn.execute("ALTER TABLE market_data ADD COLUMN IF NOT EXISTS broker_code VARCHAR")
+        except Exception:
+            pass
 
         # Watchlist table
         conn.execute("""
