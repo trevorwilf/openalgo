@@ -243,7 +243,12 @@ class BrokerSymbolCache:
             self.cache_loaded = True
             self.stats.total_symbols = len(symbols)
             self.stats.cache_loads += 1
-            self.stats.last_loaded = datetime.now(pytz.timezone("Asia/Kolkata"))
+            # T-17 (v7 Phase 4): stamp UTC at write; render layer
+            # applies the operator's region tz at read time. Mixed-tz
+            # comparisons remain correct because both legacy IST-aware
+            # and new UTC-aware datetimes share the same instant.
+            from datetime import timezone as _tz
+            self.stats.last_loaded = datetime.now(_tz.utc)
 
             # Calculate memory usage (rough estimate)
             self.stats.memory_usage_mb = (
