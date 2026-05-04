@@ -164,6 +164,11 @@ class AlpacaBalanceAdapter:
                 "transfers_blocked": data.get("transfers_blocked"),
                 "long_market_value": data.get("long_market_value"),
                 "short_market_value": data.get("short_market_value"),
+                # last_equity = the account's equity at the previous
+                # close. v1_compat_bridge subtracts it from current
+                # equity for intraday unrealized P&L on the funds
+                # widget. Without it, m2munrealized always shows 0.00.
+                "last_equity": data.get("last_equity"),
             },
         )
 
