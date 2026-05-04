@@ -63,8 +63,21 @@ class SymToken(Base):
         Index("idx_symbol_exchange", "symbol", "exchange"),
         Index("idx_symbol_name", "symbol", "name"),
         Index("idx_brsymbol_exchange", "brsymbol", "exchange"),
-        # T-06: index broker_code for cross-broker queries.
-        Index("idx_broker_symbol_exchange", "broker_code", "symbol", "exchange"),
+        # T-06 / Phase 4-bis-2: cross-broker uniqueness. Two brokers
+        # that both register the same (symbol, exchange) pair are
+        # disambiguated by ``broker_code``. SQLite (and Postgres)
+        # treat NULL as distinct in UNIQUE constraints, so existing
+        # pre-backfill rows where broker_code is NULL don't collide.
+        # Operators run ``upgrade/migrate_symtoken_broker_provenance.py``
+        # to backfill broker_code; after backfill, this UNIQUE
+        # constraint enforces the per-broker identity tuple.
+        Index(
+            "uq_broker_symbol_exchange",
+            "broker_code",
+            "symbol",
+            "exchange",
+            unique=True,
+        ),
     )
 
 
