@@ -529,7 +529,7 @@ def _wait_for_order_status(
     order_id: str,
     *,
     target_statuses: tuple[str, ...] = ("filled", "FILLED", "complete", "COMPLETE"),
-    timeout_s: float = 30.0,
+    timeout_s: float = 90.0,
     poll_s: float = 0.5,
 ) -> tuple[str, dict | None]:
     """Poll /api/v2/orders until order_id reaches a target status
@@ -603,7 +603,7 @@ def sweep_market_open_fill_v2(
 
     # Wait for fill (Alpaca paper typically fills marketable orders
     # within ~1s, but we give 30s for safety).
-    status, row = _wait_for_order_status(client, apikey, order_id, timeout_s=30)
+    status, row = _wait_for_order_status(client, apikey, order_id, timeout_s=90)
     is_filled = status in ("filled", "complete", "FILLED", "COMPLETE")
     report.add(
         f"v2 order {order_id[:8]}... reaches filled status",
@@ -857,7 +857,7 @@ def sweep_position_close(
         )
         if close_order_id:
             status, _row = _wait_for_order_status(
-                client, apikey, close_order_id, timeout_s=30
+                client, apikey, close_order_id, timeout_s=90
             )
             report.add(
                 f"v2 close order {close_order_id[:8]}... reaches filled",
