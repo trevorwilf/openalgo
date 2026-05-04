@@ -24,6 +24,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
+import { cancelAllAlpacaOpenOrders } from './alpaca-cleanup.ts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -92,6 +93,13 @@ test.beforeAll(async ({ browser }) => {
   storageStateFile = path.join(SCREENSHOT_DIR, 'auth-state.json')
   await ctx.storageState({ path: storageStateFile })
   await ctx.close()
+})
+
+// Cancel any leftover open orders before each order-placing test so
+// MARKET/STOP orders parked across previous specs don't trip
+// Alpaca's wash-trade prevention.
+test.beforeEach(async () => {
+  await cancelAllAlpacaOpenOrders()
 })
 
 async function attachObservers(page: import('@playwright/test').Page) {

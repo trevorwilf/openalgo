@@ -23,6 +23,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
+import { cancelAllAlpacaOpenOrders } from './alpaca-cleanup.ts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -81,6 +82,14 @@ test.beforeAll(async ({ browser }) => {
   fs.mkdirSync(path.dirname(storageStateFile), { recursive: true })
   await ctx.storageState({ path: storageStateFile })
   await ctx.close()
+})
+
+// Cancel any leftover open orders on the paper account before every
+// test. When the market is closed, MARKET/STOP orders parked by
+// previous tests trip Alpaca's wash-trade prevention on the next BUY,
+// surfacing as 403 ``code=40310000`` from the v1/v2 place endpoints.
+test.beforeEach(async () => {
+  await cancelAllAlpacaOpenOrders()
 })
 
 const ALPACA_HEADERS = {
