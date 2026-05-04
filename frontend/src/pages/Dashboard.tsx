@@ -4,6 +4,9 @@ import { Link } from 'react-router-dom'
 import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { useBrokerRegion } from '@/hooks/useBrokerRegion'
+import { useBrokerStore } from '@/stores/brokerStore'
+import { formatCurrencyAmount } from '@/lib/format/currency'
 import { cn } from '@/lib/utils'
 import { onModeChange } from '@/stores/themeStore'
 
@@ -21,7 +24,8 @@ interface MasterContractStatus {
   total_symbols?: number
 }
 
-// Format number in Indian format with Cr/L suffixes
+// Format number in Indian format with Cr/L suffixes (legacy India
+// dashboard convention).
 function formatIndianNumber(value: string | number): string {
   const num = typeof value === 'string' ? parseFloat(value) : value
   if (Number.isNaN(num)) return '0.00'
@@ -42,6 +46,30 @@ function formatIndianNumber(value: string | number): string {
   }
 
   return isNegative ? `-${formatted}` : formatted
+}
+
+// v7 Phase 5 — region-aware currency formatter hook. India keeps
+// the legacy Cr/L convention (parity-preserved); non-India brokers
+// render in their broker's base_currency via the canonical
+// formatCurrencyAmount helper. Uses RegionContent's helper hook
+// pattern: derives the region once + picks the right formatter.
+function useDashboardAmountFormatter(): (v: string | number) => string {
+  const region = useBrokerRegion()
+  const baseCurrency = useBrokerStore(
+    (s) => s.capabilities?.base_currency || '',
+  )
+  return (value: string | number): string => {
+    const num = typeof value === 'string' ? parseFloat(value) : value
+    if (Number.isNaN(num)) return '0.00'
+    if (region === 'india' || !baseCurrency) {
+      return formatIndianNumber(value)
+    }
+    try {
+      return formatCurrencyAmount(num, baseCurrency)
+    } catch {
+      return formatIndianNumber(value)
+    }
+  }
 }
 
 // Get color class based on P&L value
@@ -67,6 +95,11 @@ export default function Dashboard() {
     status: 'pending',
   })
   const [isAuthenticated, setIsAuthenticated] = useState(true) // Assume authenticated initially
+
+  // v7 Phase 5 — pick the region-correct formatter once at the
+  // top of the component. India operators see Cr/L; US/EU/UK
+  // operators see USD/EUR/GBP via formatCurrencyAmount.
+  const formatAmount = useDashboardAmountFormatter()
 
   // Fetch dashboard funds data
   const fetchFundsData = useCallback(async () => {
@@ -310,7 +343,7 @@ export default function Dashboard() {
                 {isLoading
                   ? '...'
                   : marginData
-                    ? formatIndianNumber(marginData.availablecash)
+                    ? formatAmount(marginData.availablecash)
                     : '0.00'}
               </p>
               <Badge variant="secondary" className="mt-2">
@@ -329,7 +362,7 @@ export default function Dashboard() {
                 {isLoading
                   ? '...'
                   : marginData
-                    ? formatIndianNumber(marginData.collateral)
+                    ? formatAmount(marginData.collateral)
                     : '0.00'}
               </p>
               <Badge variant="secondary" className="mt-2">
@@ -353,7 +386,7 @@ export default function Dashboard() {
                 {isLoading
                   ? '...'
                   : marginData
-                    ? formatIndianNumber(marginData.m2munrealized)
+                    ? formatAmount(marginData.m2munrealized)
                     : '0.00'}
               </p>
               <Badge
@@ -380,7 +413,7 @@ export default function Dashboard() {
                 {isLoading
                   ? '...'
                   : marginData
-                    ? formatIndianNumber(marginData.m2mrealized)
+                    ? formatAmount(marginData.m2mrealized)
                     : '0.00'}
               </p>
               <Badge
@@ -402,7 +435,7 @@ export default function Dashboard() {
                 {isLoading
                   ? '...'
                   : marginData
-                    ? formatIndianNumber(marginData.utiliseddebits)
+                    ? formatAmount(marginData.utiliseddebits)
                     : '0.00'}
               </p>
               <Badge
