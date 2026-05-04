@@ -608,7 +608,7 @@ class AlpacaOrderTranslator:
         else:
             with httpx.Client(**self._client_kwargs(auth)) as c:
                 r = c.post(path, json=body)
-        r.raise_for_status()
+        _raise_with_alpaca_message(r)
         return r.json()
 
     def _get(self, path: str) -> dict:
@@ -618,7 +618,7 @@ class AlpacaOrderTranslator:
         else:
             with httpx.Client(**self._client_kwargs(auth)) as c:
                 r = c.get(path)
-        r.raise_for_status()
+        _raise_with_alpaca_message(r)
         return r.json()
 
     def _delete(self, path: str) -> None:
@@ -639,6 +639,51 @@ def _opt_decimal(raw: Any) -> str | None:
         return str(Decimal(str(raw)))
     except (ArithmeticError, ValueError):
         return None
+
+
+def _raise_with_alpaca_message(response: httpx.Response) -> None:
+    """Surface Alpaca's JSON error body in the raised exception.
+
+    ``httpx.Response.raise_for_status()`` produces a generic
+    ``Client error '422 Unprocessable Entity'`` message, dropping
+    Alpaca's actual diagnostic (e.g. ``"stop price must be greater
+    than current price"`` or ``"insufficient buying power"``).
+    Operators see the generic message via the v1 bridge's
+    502 ``broker_error`` envelope and have no way to know what
+    actually went wrong.
+
+    Parse the response body when possible and append Alpaca's
+    ``message`` to the raised exception.
+    """
+    if 200 <= response.status_code < 400:
+        return
+
+    detail = ""
+    try:
+        body = response.json()
+    except (ValueError, TypeError):
+        body = None
+    if isinstance(body, dict):
+        msg = body.get("message")
+        code = body.get("code")
+        if msg:
+            detail = f": {msg}"
+            if code:
+                detail = f" (code {code}){detail}"
+
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        # Re-raise with the broker's diagnostic appended. Preserve
+        # the original exception type so callers' except clauses
+        # still match.
+        if detail:
+            raise httpx.HTTPStatusError(
+                f"{e}{detail}",
+                request=e.request,
+                response=e.response,
+            ) from e
+        raise
 
 
 # ---- Branch L — bracket / OCO / OTO leg builders ---------------------
