@@ -1,0 +1,68 @@
+{
+  "region_code": "crypto",
+  "display_name": "Crypto",
+  "description": "Region plugin for crypto-derivatives venues (no country, 24/7 sessions, USDT/USDC quote currencies). T-30 v7 Phase 8.",
+  "timezone_name": "UTC",
+  "market_families": ["CRYPTO"],
+  "default_currency": "USDT",
+  "default_venue_codes": ["CRYPTO"],
+  "default_sessions": ["ALL_DAY"],
+  "country_codes": [],
+  "metadata": {
+    "notes": "Crypto region: no country mapping, 24/7 sessions, USDT primary quote with USDC alias.",
+    "quote_currency_aliases": ["USDT", "USDC", "BUSD", "DAI"],
+    "flow_defaults": {
+      "products": ["NRML"]
+    }
+  },
+  "venues": [
+    {
+      "venue_code": "CRYPTO",
+      "display_name": "Crypto Derivatives",
+      "mic_code": "XCRYPTO",
+      "country_code": "",
+      "timezone_name": "UTC",
+      "base_currency": "USDT",
+      "market_family": "CRYPTO",
+      "settlement_template": "T+0",
+      "session_model": "ALL_DAY"
+    }
+  ],
+  "session_templates": [
+    {
+      "session_code": "ALL_DAY",
+      "venue_codes": ["CRYPTO"],
+      "local_start_time": "00:00",
+      "local_end_time": "23:59",
+      "days_of_week": [0, 1, 2, 3, 4, 5, 6],
+      "label": "24/7 continuous trading"
+    }
+  ],
+  "calendar_exceptions": [],
+  "symbol_display": {
+    "date_format": "DDMMMYY",
+    "option_right_codes": ["C", "P"],
+    "futures_grammar": "PERPFUT",
+    "example_underlyings": ["BTC", "ETH", "SOL", "BNB", "XRP"]
+  },
+  "feature_flags": {
+    "option_chain_enabled": true,
+    "iv_chart_enabled": false,
+    "muhurat_session_supported": false,
+    "india_legacy_compatibility": false,
+    "sandbox_enabled": false,
+    "analyzer_enabled": false,
+    "flow_templates_enabled": true
+  },
+  "product_vocabulary": {
+    "ALL": ["NRML"]
+  },
+  "price_type_vocabulary": {
+    "ALL": ["MARKET", "LIMIT", "SL", "SL-M"]
+  },
+  "legacy_compat_shim": {
+    "valid_exchanges": ["CRYPTO"],
+    "valid_actions": ["BUY", "SELL"],
+    "valid_time_in_force": ["DAY", "IOC", "GTC"]
+  }
+}
