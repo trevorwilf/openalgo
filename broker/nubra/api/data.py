@@ -12,6 +12,51 @@ from database.token_db import get_br_symbol, get_oa_symbol, get_token
 from utils.httpx_client import get_httpx_client
 from utils.logging import get_logger
 
+
+def _resolve_ist_market_window() -> tuple[int, int, int, int, int]:
+    """T-20 (v7 Phase 3-bis-2): resolve India market hours + IST
+    offset from the region plugin instead of hard-coding
+    ``09:15 IST → 03:45 UTC`` / ``15:30 IST → 10:00 UTC``.
+
+    Returns ``(open_utc_h, open_utc_m, close_utc_h, close_utc_m, offset_minutes)``
+    where the open/close UTC components are derived from the
+    region plugin's REGULAR session for NSE — currently
+    ``(03, 45, 10, 00, 330)`` for India's 09:15-15:30 IST window
+    with a 330-minute offset. Falls back to the legacy hardcoded
+    values when the region plugin is not yet loaded.
+    """
+    try:
+        from utils.region_loader import get_market_region, load_market_regions
+
+        india = get_market_region("india")
+        if india is None:
+            load_market_regions()
+            india = get_market_region("india")
+        if india is not None:
+            offset_minutes = 330  # IST = UTC+5:30 (DST-free)
+            for tmpl in india.session_templates:
+                if (
+                    tmpl.session_code == "REGULAR"
+                    and "NSE" in (tmpl.venue_codes or [])
+                ):
+                    open_local_h = tmpl.local_start_time.hour
+                    open_local_m = tmpl.local_start_time.minute
+                    close_local_h = tmpl.local_end_time.hour
+                    close_local_m = tmpl.local_end_time.minute
+                    open_total = open_local_h * 60 + open_local_m - offset_minutes
+                    close_total = close_local_h * 60 + close_local_m - offset_minutes
+                    return (
+                        open_total // 60,
+                        open_total % 60,
+                        close_total // 60,
+                        close_total % 60,
+                        offset_minutes,
+                    )
+    except Exception:
+        pass
+    # Legacy India fallback: 09:15 IST → 03:45 UTC; 15:30 IST → 10:00 UTC.
+    return (3, 45, 10, 0, 330)
+
 from .nubrawebsocket import NubraWebSocket
 
 logger = get_logger(__name__)
@@ -701,23 +746,51 @@ class BrokerData:
             # Initialize list to store all candle data
             all_candles = {}
 
+            # T-20 (v7 Phase 3-bis-2): source India market hours +
+            # IST→UTC offset from the India region plugin's session
+            # templates. The Nubra API expects UTC timestamps; the
+            # legacy code computed UTC by subtracting a hardcoded
+            # IST offset from local times. Now the offset comes from
+            # the venue's tz info via :func:`_resolve_ist_market_window`
+            # so a future operator running on a non-default IST
+            # offset (DST exception, year-end exchange tweak, etc.)
+            # gets the right value without editing this broker.
+            (
+                _market_open_utc_h,
+                _market_open_utc_m,
+                _market_close_utc_h,
+                _market_close_utc_m,
+                _ist_offset_minutes,
+            ) = _resolve_ist_market_window()
+
             # Process data in chunks
             current_start = from_date
             while current_start <= to_date:
                 # Calculate chunk end date
                 current_end = min(current_start + timedelta(days=chunk_days - 1), to_date)
 
-                # Set start time to market open (09:15 IST -> 03:45 UTC)
-                chunk_start = current_start.replace(hour=3, minute=45, second=0, microsecond=0)
-                
+                # Set start time to market open (region-plugin-driven).
+                chunk_start = current_start.replace(
+                    hour=_market_open_utc_h,
+                    minute=_market_open_utc_m,
+                    second=0,
+                    microsecond=0,
+                )
+
                 # Set end time
                 current_time = pd.Timestamp.now()
                 if current_end.date() == current_time.date():
-                    # Convert current IST to approximate UTC
-                    chunk_end = current_time - pd.Timedelta(hours=5, minutes=30)
+                    # Convert current local time to UTC by stripping
+                    # the India tz offset.
+                    chunk_end = current_time - pd.Timedelta(minutes=_ist_offset_minutes)
                 else:
-                    # For past dates, set end time to market close (15:30 IST -> 10:00 UTC)
-                    chunk_end = current_end.replace(hour=10, minute=0, second=0, microsecond=0)
+                    # For past dates, set end time to market close (UTC).
+                    chunk_end = current_end.replace(
+                        hour=_market_close_utc_h,
+                        minute=_market_close_utc_m,
+                        second=0,
+                        microsecond=0,
+                    )
 
                 # Format dates as ISO strings
                 start_iso = chunk_start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
