@@ -41,7 +41,10 @@ def _groww_ist_tz() -> "pytz.BaseTzInfo":
                 return pytz.timezone(str(tz_name))
     except Exception:
         pass
-    return _groww_ist_tz()
+    # Fallback when region plugin can't be resolved (boot-time /
+    # test contexts). India broker; ``broker/groww/`` is allow-
+    # listed in scripts/audit/india_literal_scan_backend.py.
+    return pytz.timezone("Asia/Kolkata")
 
 
 def _groww_market_window() -> tuple[str, str]:
