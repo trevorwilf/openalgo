@@ -44,7 +44,7 @@
   "feature_flags": {
     "option_chain_enabled": false,
     "iv_chart_enabled": false,
-    "sandbox_enabled": false,
+    "sandbox_enabled": true,
     "analyzer_enabled": false,
     "flow_templates_enabled": false
   },
