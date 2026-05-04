@@ -40,15 +40,32 @@ def test_india_plugin_declares_sandbox_initial_funds():
     assert metadata.get("sandbox_initial_funds_currency") == "INR"
 
 
+def test_india_plugin_declares_legacy_starting_capital_default():
+    """v8 reconciliation — the legacy fund_manager's ₹1Cr default
+    is now declared explicitly in plugin.json so both lanes read
+    from the same source of truth (no silent Python-level
+    hard-coded fallback in normal operation)."""
+    from utils.region_loader import load_market_regions, get_market_region
+
+    load_market_regions()
+    india = get_market_region("india")
+    assert india is not None
+    metadata = getattr(india, "metadata", None) or {}
+    assert metadata.get("sandbox_starting_capital_default") == "10000000.00"
+
+
 def test_legacy_fund_manager_default_reconciled():
     """The legacy fund_manager.py default reads from the plugin
-    metadata fallback. Default value is the legacy ₹1Cr for
-    parity-preserved existing installs."""
+    metadata. Post-v8 reconciliation, the value is declared
+    explicitly in plugin.json (no silent Python fallback unless
+    the region plugin can't be loaded)."""
     from market_regions.india.legacy_v1.sandbox.fund_manager import (
         _resolve_starting_capital_default,
     )
 
     default = _resolve_starting_capital_default()
-    # Either the metadata-declared value (if operator overrides)
-    # or the legacy ₹1Cr fallback.
-    assert default in ("10000000.00", "1000000.00") or default.replace(".", "").isdigit()
+    # Post-v8 — the value must come from plugin.json (₹1Cr).
+    assert default == "10000000.00", (
+        f"expected fund_manager default to read ₹1Cr from plugin "
+        f"metadata; got {default!r}"
+    )

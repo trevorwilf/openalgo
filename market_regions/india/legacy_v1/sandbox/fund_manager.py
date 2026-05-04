@@ -41,24 +41,31 @@ logger = get_logger(__name__)
 
 
 def _resolve_starting_capital_default() -> str:
-    """T-16 (v7 Phase 4-bis-3): legacy fund_manager starting capital
-    default.
+    """T-16 (v7 Phase 4-bis-3) + v8 reconciliation: legacy
+    fund_manager starting capital default.
 
     The legacy ``₹1 Crore`` (``"10000000.00"``) value differs from
-    the v2 IndiaSandboxProvider's ``₹10L`` (``"1000000.00"``) by
-    10×. T-16 moved both to the region plugin metadata; the
-    numeric values themselves stay distinct for backward compat.
-    Resolution:
+    the v2 ``IndiaSandboxProvider``'s ``₹10L`` (``"1000000.00"``)
+    by 10×. v7 T-16 moved both to the region plugin metadata; v8
+    completes the reconciliation by declaring BOTH keys in
+    ``market_regions/india/plugin.json`` so each lane reads its
+    own value from a single source of truth:
 
-    1. Read from ``market_regions/india/plugin.json``
-       ``metadata.sandbox_starting_capital_default`` if declared
-       (operator-overridable per the prompt's stakeholder note).
-    2. Fall back to the legacy ``"10000000.00"`` (₹1Cr) so existing
-       India deployments without explicit configuration see no
-       behavior change.
+      * ``metadata.sandbox_initial_funds`` -> v2 IndiaSandboxProvider
+        (₹10L)
+      * ``metadata.sandbox_starting_capital_default`` -> legacy
+        fund_manager (₹1Cr — preserves bit-identical India parity)
 
-    This indirection lets a future operator set the default in ONE
-    place (the region plugin's metadata) instead of editing Python.
+    Resolution order:
+
+    1. Read ``metadata.sandbox_starting_capital_default`` from the
+       region plugin (now declared explicitly post-v8). Operator
+       can override by editing the JSON.
+    2. Fall back to the hard-coded ``"10000000.00"`` (₹1Cr) only
+       if the region plugin can't be loaded for some reason —
+       this defensive fallback keeps the function infallible at
+       boot time. With the v8 plugin.json declaration, the
+       fallback should never fire in production.
     """
     try:
         from utils.region_loader import get_market_region, load_market_regions
