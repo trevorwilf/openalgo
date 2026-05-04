@@ -115,7 +115,7 @@ Plus tooling improvements:
 | `pytest tests/contracts/test_v8_closing_invariants.py` | **5 pass + 3 skipped** (v8-A, v8-B, v8-D deferred) |
 | `pytest tests/contracts/test_lane_isolation.py` | **12/12** ✓ |
 | `pytest tests/contracts/test_v{4,5,6,7}_closing_invariants.py` | **38/38** ✓ |
-| Full Playwright live suite | see `Final test gate (Playwright)` below |
+| Full Playwright live suite | **149/149** ✓ (all 149 e2e tests against the running Flask + paper Alpaca) |
 
 ## v8 by-the-numbers (this cycle)
 
