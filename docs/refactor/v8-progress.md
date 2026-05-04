@@ -168,6 +168,54 @@ Plus tooling improvements:
   test failure where residual 1.000000004 AAPL got truncated
   to 1, leaving sub-cent residue.
 
+## v8-bis-2 cycle — test-infrastructure + production hardening (2026-05-04)
+
+A second v8-cycle pass surfaced three Alpaca-related issues during
+a comprehensive surface sweep + Playwright re-run, all of which
+ship as separate branches:
+
+* **`chore/sweep-pre-flight-cleanup`** —
+  `tools/api_surface_sweep.py` adds a pre-flight pass that cancels
+  any open orders on the Alpaca paper account before the sweep
+  starts. Without it, leftover state from a prior `--market-open`
+  run (a parked SELL MARKET from the close-position leg) trips
+  Alpaca's wash-trade prevention on the deep-OOM LIMIT BUY:
+
+      code=40310000  HTTP 403
+      "potential wash trade detected. use complex orders"
+      reject_reason: "opposite side market/stop order exists"
+
+  Idempotent. New `--no-pre-cleanup` flag for operators on real
+  accounts who park orders intentionally.
+
+* **`fix/health-blueprint-tz-import`** —
+  `blueprints/health.py:38` called `pytz.timezone(active_render_tz_name())`
+  but never imported the helper, so every request to
+  `/health/api/current` and `/health/api/history` returned HTTP
+  500 with `NameError: name 'active_render_tz_name' is not defined`.
+  This was a v7-B miss (analyzer/latency/log/pnltracker all
+  imported it correctly; health.py was skipped). Surfaced by the
+  Playwright `auth-instance.spec.ts` `UI /health` route soft-fail
+  log.
+
+* **`chore/e2e-pre-cleanup-alpaca`** —
+  Adds `frontend/e2e/alpaca-cleanup.ts` (cancel-all helper) +
+  `frontend/e2e/global-setup.ts` (suite-level cancel) + per-spec
+  `test.beforeEach` hooks in the 5 order-placing specs (parity,
+  actions, fresh-login, ui-click, paper-trading). Without this,
+  intra-suite state leaks across tests: each test that places a
+  MARKET/STOP order parks it in Alpaca's queue (market closed →
+  orders sit in `accepted` until next open), and the next test
+  that places an opposing LIMIT hits wash-trade prevention.
+  Concretely the parity spec's "simple LIMIT order — bridge ≡
+  direct" + the fresh-login spec's place-order leg both broke
+  after `paper-trading-actions:/close_position` queued a SELL
+  MARKET that wash-trade-blocked subsequent BUYs.
+
+  Also fixes the ESM module-resolution issue with the helper
+  imports + globalSetup path (both required explicit `.ts`
+  extension / absolute path under `"type": "module"`).
+
 ## Final test gate counts
 
 | Step | Result |
@@ -178,6 +226,18 @@ Plus tooling improvements:
 | `pytest tests/contracts/test_lane_isolation.py` | **12/12** ✓ |
 | `pytest tests/contracts/test_v{4,5,6,7}_closing_invariants.py` | **38/38** ✓ |
 | Full Playwright live suite | **149/149** ✓ (all 149 e2e tests against the running Flask + paper Alpaca) |
+
+### v8-bis-2 final gate (market closed, 2026-05-04 evening)
+
+| Step | Result |
+|---|---|
+| `tools/api_surface_sweep.py` (no `--market-open`) | **35/35** ✓ |
+| Full Playwright live suite | **148 passed, 1 skipped, 0 failed** ✓ (one market-open-only test skips) |
+| `pytest tests/parity/run_parity.py` | **41/41** ✓ |
+| `pytest tests/contracts/test_v8_closing_invariants.py` | **5 pass + 3 skipped** ✓ |
+| `pytest tests/contracts/test_lane_isolation.py` | **12/12** ✓ |
+| `scripts/audit/classify_files.py --check` | clean (1011 files, no drift) |
+| `node frontend/scripts/literal_scan.mjs` | clean (133 files, 0 violations) |
 
 ## v8 by-the-numbers (this cycle)
 
