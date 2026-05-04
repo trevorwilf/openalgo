@@ -812,7 +812,11 @@ def sweep_position_close(
             aapl_qty_str = str(int(aapl_qty_float))
             qty_unit = "WHOLE"
         else:
-            aapl_qty_str = f"{aapl_qty_float:.8f}".rstrip("0").rstrip(".")
+            # Alpaca supports up to 9 decimal places for fractional
+            # quantities. Use 9 here so positions like 1.000000004
+            # (residue from prior runs) get fully closed instead of
+            # truncated to 1, which leaves a sub-cent residual.
+            aapl_qty_str = f"{aapl_qty_float:.9f}".rstrip("0").rstrip(".")
             qty_unit = "FRACTIONAL"
     else:
         aapl_qty_str = "0"
