@@ -68,25 +68,42 @@ def test_limit_type_requires_price(ot: OrderType) -> None:
         NormalizedOrderRequest(**kwargs)
 
 
-@pytest.mark.parametrize("ot", [OrderType.STOP, OrderType.STOP_LIMIT, OrderType.TRAILING_STOP])
+@pytest.mark.parametrize("ot", [OrderType.STOP, OrderType.STOP_LIMIT])
 def test_stop_type_requires_trigger_price(ot: OrderType) -> None:
     kwargs = _base_kwargs(order_type=ot)
     if ot == OrderType.STOP_LIMIT:
         kwargs["price"] = Decimal("100")
-    if ot == OrderType.TRAILING_STOP:
-        kwargs["trailing_offset"] = Decimal("1")
     with pytest.raises(ValidationError, match="requires trigger_price"):
         NormalizedOrderRequest(**kwargs)
 
 
 def test_trailing_stop_requires_offset() -> None:
+    """TRAILING_STOP requires only ``trailing_offset`` (no trigger_price);
+    omitting the offset must fail with the offset-specific error.
+    """
     with pytest.raises(ValidationError, match="trailing_offset"):
         NormalizedOrderRequest(
-            **_base_kwargs(
-                order_type=OrderType.TRAILING_STOP,
-                trigger_price=Decimal("95"),
-            )
+            **_base_kwargs(order_type=OrderType.TRAILING_STOP)
         )
+
+
+def test_trailing_stop_constructs_without_trigger_price() -> None:
+    """Regression: TRAILING_STOP used to be in ``_STOP_TYPES``, which
+    forced the validator to require ``trigger_price``. But every
+    supported broker (Alpaca, Schwab, Webull, IBKR, Zerodha) computes
+    a trailing stop's trigger dynamically from ``trailing_offset``,
+    not from a fixed price. Construction with only ``trailing_offset``
+    must succeed.
+    """
+    o = NormalizedOrderRequest(
+        **_base_kwargs(
+            order_type=OrderType.TRAILING_STOP,
+            trailing_offset=Decimal("5"),
+        )
+    )
+    assert o.order_type == OrderType.TRAILING_STOP
+    assert o.trailing_offset == Decimal("5")
+    assert o.trigger_price is None
 
 
 def test_gtd_requires_good_till() -> None:
