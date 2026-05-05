@@ -37,12 +37,30 @@ operator-readable; tools can key on the ``state`` enum.
 
 from __future__ import annotations
 
+from flask import redirect
 from flask_restx import Namespace, Resource
 
 from restx_api.v2._auth import ok
 from utils.plugin_loader import get_plugin_diagnostics
 
 api = Namespace("plugins", description="Promoted plugin diagnostics")
+
+
+@api.route("")
+@api.route("/")
+class PluginsRoot(Resource):
+    """Bare ``/api/v2/plugins`` redirects to the diagnostics endpoint.
+
+    Without this stub, a ``GET /api/v2/plugins`` request fell through to
+    the React SPA's catch-all and returned ``index.html`` with HTTP 200.
+    Operators (and external tools) inspecting the surface saw a
+    successful HTML response and assumed the endpoint existed but was
+    misbehaving. The 302 here points unambiguously at the real
+    diagnostics URL.
+    """
+
+    def get(self):
+        return redirect("/api/v2/plugins/diagnostics", code=302)
 
 
 @api.route("/diagnostics")

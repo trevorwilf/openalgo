@@ -72,6 +72,28 @@ def test_diagnostics_endpoint_returns_summary(flask_app, monkeypatch):
     ]
 
 
+def test_bare_plugins_path_redirects_to_diagnostics(flask_app):
+    """Regression: ``GET /api/v2/plugins`` (no sub-path) used to fall
+    through to the React SPA catch-all and return ``index.html`` with
+    HTTP 200, masquerading as a successful API response. Now it
+    redirects (302) to the real diagnostics URL so an operator
+    inspecting the surface gets an unambiguous answer.
+    """
+    client = flask_app.test_client()
+    resp = client.get("/api/v2/plugins", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/api/v2/plugins/diagnostics")
+
+
+def test_bare_plugins_path_with_trailing_slash_redirects(flask_app):
+    """The trailing-slash variant must redirect too — flask-restx
+    registers both paths for namespaces, so both must agree."""
+    client = flask_app.test_client()
+    resp = client.get("/api/v2/plugins/", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/api/v2/plugins/diagnostics")
+
+
 def test_diagnostics_endpoint_works_with_empty_state(flask_app, monkeypatch):
     monkeypatch.setattr(
         "restx_api.v2.plugins.get_plugin_diagnostics", lambda: {}
