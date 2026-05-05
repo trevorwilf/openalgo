@@ -177,6 +177,13 @@ broker_cache = TTLCache(maxsize=1024, ttl=3000)
 verified_api_key_cache = TTLCache(maxsize=1024, ttl=36000)  # 10 hours
 # Define a cache for invalid API keys with shorter 5-minute TTL (prevent cache poisoning)
 invalid_api_key_cache = TTLCache(maxsize=512, ttl=300)  # 5 minutes
+# Negative-result cache for ``get_auth_token_broker``. Kept separate
+# from ``auth_cache`` (which has a 24h-or-session TTL) so that a token
+# revoke followed by a recovery is bounded to a 5-minute blackout
+# instead of the full session window. Without this split, a recovery
+# is silently blocked for up to 24 hours by a poisoned (None, None)
+# entry in auth_cache.
+revoked_auth_cache = TTLCache(maxsize=1024, ttl=300)  # 5 minutes
 
 # Conditionally create engine based on DB type
 if DATABASE_URL and "sqlite" in DATABASE_URL:
@@ -917,6 +924,13 @@ def get_auth_token_broker(provided_api_key, include_feed_token=False):
     # Generate cache key
     cache_key = f"{hashlib.sha256(provided_api_key.encode()).hexdigest()}_{include_feed_token}"
 
+    # Negative-result cache: short-TTL so a revoked → restored token
+    # recovers within ~5 minutes instead of waiting for the full
+    # session-expiry window. Hit short-circuits to "no auth" without
+    # spamming the DB.
+    if cache_key in revoked_auth_cache:
+        return (None, None, None) if include_feed_token else (None, None)
+
     # Check cache first (but still verify revocation status)
     if cache_key in auth_cache:
         cached_result = auth_cache[cache_key]
@@ -959,10 +973,13 @@ def get_auth_token_broker(provided_api_key, include_feed_token=False):
                 logger.debug(f"Auth token cached for user_id: {user_id}")
                 return result
             else:
-                # Cache the negative result to prevent repeated DB queries and log spam
-                # (e.g., orphaned users with revoked sessions polled by background services)
+                # Negative-result cache short-TTL to dampen DB load
+                # from background services polling orphaned / revoked
+                # users, while still letting a credential restore
+                # recover within ~5 minutes (was: cached in auth_cache
+                # for up to 24h, which silently blocked recovery).
                 negative_result = (None, None, None) if include_feed_token else (None, None)
-                auth_cache[cache_key] = negative_result
+                revoked_auth_cache[cache_key] = True
                 logger.warning(f"No valid auth token or broker found for user_id '{user_id}'. Cached negative result.")
                 return negative_result
         except Exception as e:
