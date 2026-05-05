@@ -886,10 +886,41 @@ def get_username_by_apikey(provided_api_key):
 
 
 def get_broker_name(provided_api_key):
-    """Get only the broker name for a valid API key with caching"""
-    # Check if broker name is in cache
-    if provided_api_key in broker_cache:
-        return broker_cache[provided_api_key]
+    """Get only the broker name for a valid API key with caching.
+
+    Mirrors the revocation-aware pattern from ``get_auth_token_broker``:
+    cache by ``sha256(api_key)`` (never the plaintext key), and re-check
+    ``is_revoked`` on every cache hit so a revoked credential cannot
+    keep returning a broker name from cache for the rest of the
+    50-minute TTL.
+    """
+    import hashlib
+
+    cache_key = hashlib.sha256(provided_api_key.encode()).hexdigest()
+
+    if cache_key in broker_cache:
+        cached_broker = broker_cache[cache_key]
+        # Defense-in-depth: verify the credential is still valid before
+        # returning the cached broker name. Pre-fix, a revoked key kept
+        # leaking the broker name for up to 50 minutes.
+        user_id = verify_api_key(provided_api_key)
+        if user_id:
+            try:
+                auth_obj = Auth.query.filter_by(name=user_id).first()
+                if auth_obj and auth_obj.is_revoked:
+                    del broker_cache[cache_key]
+                    logger.warning(
+                        f"Cached broker name was revoked for user_id '{user_id}'."
+                    )
+                    return None
+                return cached_broker
+            except Exception as e:
+                logger.exception(f"Error checking revocation status: {e}")
+                del broker_cache[cache_key]
+        else:
+            # API key no longer verifies — drop the stale cache entry.
+            del broker_cache[cache_key]
+            return None
 
     # Not in cache, need to look it up
     user_id = verify_api_key(provided_api_key)
@@ -898,8 +929,7 @@ def get_broker_name(provided_api_key):
         try:
             auth_obj = Auth.query.filter_by(name=user_id).first()
             if auth_obj and not auth_obj.is_revoked:
-                # Cache the broker name
-                broker_cache[provided_api_key] = auth_obj.broker
+                broker_cache[cache_key] = auth_obj.broker
                 return auth_obj.broker
             else:
                 logger.warning(f"No valid broker found for user_id '{user_id}'.")
