@@ -101,6 +101,12 @@ PHASE_ALLOWED: set[Path] = {
     # Phase 6 v3 (ADR 0022) — /api/v2/orders/combo dispatcher resolves
     # each leg's instrument ref via the canonical resolver.
     REPO_ROOT / "restx_api" / "v2" / "orders_combo.py",
+    # feat(alpaca): symbol search + friendly venue aliases (b58e79aa).
+    # blueprints/search.py legitimately needs ``instruments_search``
+    # to support non-India brokers — Alpaca / Schwab / Webull symbols
+    # don't live in the legacy SymToken table that the prior search
+    # path queried. Allowed.
+    REPO_ROOT / "blueprints" / "search.py",
 }
 
 
