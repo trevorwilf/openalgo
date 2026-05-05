@@ -10,7 +10,7 @@
 // kicks in once they've signed in via /apikey.
 
 import { useEffect, useRef } from 'react'
-import { selectActiveTab, type TabState, useWorkspaceStore } from '../state/workspaceStore'
+import { type TabState, useWorkspaceStore } from '../state/workspaceStore'
 
 const DEBOUNCE_MS = 500
 

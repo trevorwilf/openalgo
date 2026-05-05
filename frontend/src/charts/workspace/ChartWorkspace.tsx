@@ -21,12 +21,12 @@ export function ChartWorkspace({ liveModeEnabled }: ChartWorkspaceProps = {}) {
       className="flex h-full w-full flex-col overflow-hidden bg-background"
     >
       <WorkspaceTopBar liveModeEnabled={liveModeEnabled} />
-      <ResizablePanelGroup direction="horizontal" className="flex-1">
-        <ResizablePanel id="sidebar" order={0} defaultSize={20} minSize={12}>
+      <ResizablePanelGroup orientation="horizontal" className="flex-1">
+        <ResizablePanel id="sidebar" defaultSize={20} minSize={12}>
           <WorkspaceSidebar />
         </ResizablePanel>
         <ResizableHandle withHandle />
-        <ResizablePanel id="grid" order={1} defaultSize={80}>
+        <ResizablePanel id="grid" defaultSize={80}>
           <ChartLayoutGrid />
         </ResizablePanel>
       </ResizablePanelGroup>

@@ -201,7 +201,7 @@ export class KLineChartProAdapter implements ChartEngineAdapter {
   getPriceCoordinate(price: number): number | null {
     if (!this.chart) return null
     const point = this.chart.convertToPixel({ value: price }, { paneId: 'candle_pane' })
-    return point && typeof point === 'object' && 'y' in point ? point.y : null
+    return point && typeof point === 'object' && 'y' in point ? (point.y ?? null) : null
   }
 
   getTimeCoordinate(tsSeconds: number): number | null {
@@ -210,7 +210,7 @@ export class KLineChartProAdapter implements ChartEngineAdapter {
       { timestamp: tsSeconds * 1000 },
       { paneId: 'candle_pane' }
     )
-    return point && typeof point === 'object' && 'x' in point ? point.x : null
+    return point && typeof point === 'object' && 'x' in point ? (point.x ?? null) : null
   }
 
   // ------------------------------------------------------------------

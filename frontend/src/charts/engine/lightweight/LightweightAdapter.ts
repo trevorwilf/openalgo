@@ -58,24 +58,27 @@ export class LightweightAdapter implements ChartEngineAdapter {
   private drawings = new Map<string, DrawingSpec>()
   private bars: NormalizedBar[] = []
   private theme: Theme = 'dark'
-  private container: HTMLElement | null = null
   private events = makeEventEmitter()
   private mounted = false
 
   async mount(args: MountArgs): Promise<void> {
     if (this.mounted) return
-    this.container = args.container
     this.theme = args.theme
 
     this.chart = createChart(args.container, {
       width: args.width,
       height: args.height,
       ...this.themeOptions(args.theme),
-      // Lightweight Charts v5 attribution requirement (P-12).
-      // Renders a small "TradingView" link in the corner that the user
-      // can click through to tradingview.com — the license obligation
-      // for Apache-2.0 use of the library.
-      attributionLogo: true,
+      layout: {
+        ...(this.themeOptions(args.theme).layout ?? {}),
+        // Lightweight Charts v5 attribution requirement (P-12).
+        // Renders a small "TradingView" link in the corner that the
+        // user can click through to tradingview.com — the license
+        // obligation for Apache-2.0 use of the library. In v5 this
+        // field lives on ``LayoutOptions``, not the top-level
+        // ChartOptions.
+        attributionLogo: true,
+      },
       timeScale: {
         timeVisible: true,
         secondsVisible: true,
