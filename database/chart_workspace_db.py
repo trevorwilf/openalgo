@@ -247,7 +247,13 @@ def _make_engine(url: str) -> Engine:
 def get_engine() -> Engine:
     global _engine, _Session
     if _engine is None:
-        _engine = _make_engine(DATABASE_URL)
+        # Re-read DATABASE_URL on each lazy-init so unit tests that
+        # set the env var via ``monkeypatch.setenv`` AFTER the module
+        # is imported get a fresh per-test SQLite. The module-level
+        # ``DATABASE_URL`` is the production default; when an env var
+        # is present at engine-build time, it wins.
+        url = os.getenv("DATABASE_URL", DATABASE_URL)
+        _engine = _make_engine(url)
         _Session = scoped_session(
             sessionmaker(autocommit=False, autoflush=False, bind=_engine)
         )
@@ -257,6 +263,27 @@ def get_engine() -> Engine:
 def get_session():
     get_engine()
     return _Session()
+
+
+def _reset_engine_for_tests() -> None:
+    """Force the next call to :func:`get_engine` to rebuild from the
+    current ``DATABASE_URL`` environment variable. Used by per-test
+    fixtures so chart-workspace state does not leak across tests via
+    a shared SQLite file.
+    """
+    global _engine, _Session
+    if _Session is not None:
+        try:
+            _Session.remove()
+        except Exception:  # noqa: BLE001 — best-effort cleanup
+            pass
+    if _engine is not None:
+        try:
+            _engine.dispose()
+        except Exception:  # noqa: BLE001
+            pass
+    _engine = None
+    _Session = None
 
 
 def _install_audit_delete_block(engine: Engine) -> None:
