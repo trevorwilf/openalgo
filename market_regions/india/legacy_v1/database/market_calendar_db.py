@@ -33,6 +33,12 @@ logger = get_logger(__name__)
 
 # Cache for market timings - 1 hour TTL
 _timings_cache = TTLCache(maxsize=500, ttl=3600)
+# Negative-result cache for the "no special session" / "no holiday
+# row" branches. Kept separate from ``_timings_cache`` and at a much
+# shorter TTL so an operator who adds an emergency session row
+# mid-trading-day does not get blocked from visibility for the full
+# hour. 300 s mirrors the auth-token negative cache.
+_timings_negative_cache = TTLCache(maxsize=500, ttl=300)
 _holidays_cache = TTLCache(maxsize=50, ttl=3600)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -573,8 +579,9 @@ def get_special_session(query_date: date, exchange: str) -> Optional[Dict[str, A
 
     cache_key = f"special_{query_date.isoformat()}_{exch}"
     if cache_key in _timings_cache:
-        cached = _timings_cache[cache_key]
-        return cached if cached else None
+        return _timings_cache[cache_key]
+    if cache_key in _timings_negative_cache:
+        return None
 
     try:
         holiday = (
@@ -583,7 +590,7 @@ def get_special_session(query_date: date, exchange: str) -> Optional[Dict[str, A
             .first()
         )
         if not holiday:
-            _timings_cache[cache_key] = None
+            _timings_negative_cache[cache_key] = True
             return None
 
         ex_row = HolidayExchange.query.filter(
@@ -593,7 +600,7 @@ def get_special_session(query_date: date, exchange: str) -> Optional[Dict[str, A
         ).first()
 
         if not ex_row or ex_row.start_time is None or ex_row.end_time is None:
-            _timings_cache[cache_key] = None
+            _timings_negative_cache[cache_key] = True
             return None
 
         result = {
@@ -632,8 +639,9 @@ def get_holiday_exchange_window(
 
     cache_key = f"holopen_{query_date.isoformat()}_{exch}"
     if cache_key in _timings_cache:
-        cached = _timings_cache[cache_key]
-        return cached if cached else None
+        return _timings_cache[cache_key]
+    if cache_key in _timings_negative_cache:
+        return None
 
     try:
         holiday = (
@@ -642,7 +650,7 @@ def get_holiday_exchange_window(
             .first()
         )
         if not holiday:
-            _timings_cache[cache_key] = None
+            _timings_negative_cache[cache_key] = True
             return None
 
         ex_row = HolidayExchange.query.filter(
@@ -652,7 +660,7 @@ def get_holiday_exchange_window(
         ).first()
 
         if not ex_row or ex_row.start_time is None or ex_row.end_time is None:
-            _timings_cache[cache_key] = None
+            _timings_negative_cache[cache_key] = True
             return None
 
         result = {"start_ms": int(ex_row.start_time), "end_ms": int(ex_row.end_time)}
