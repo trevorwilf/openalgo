@@ -140,6 +140,49 @@ def _ensure_promoted(broker: str | None):
 @api.route("")
 @api.route("/")
 class Orders(Resource):
+    def delete(self):
+        """Cancel every open order for the authenticated broker session.
+
+        Mirrors Alpaca's ``DELETE /v2/orders`` semantics: a single
+        round-trip that returns a ``(canceled, failed)`` summary so
+        operators can flatten an entire book without N per-id deletes.
+
+        Translators that don't implement
+        ``cancel_all_orders_via_token`` return 501 with
+        ``unimplemented`` so the v2 surface is honest about the
+        capability boundary.
+        """
+        auth_token, broker, auth_err = resolve_auth()
+        if auth_err is not None:
+            return error("unauthorized", auth_err), 401
+
+        promoted, err_payload, err_status = _ensure_promoted(broker)
+        if promoted is None:
+            return err_payload, err_status
+
+        fn = getattr(promoted, "cancel_all_orders_via_token", None)
+        if not callable(fn):
+            return error(
+                "unimplemented",
+                f"broker {broker!r} translator does not implement "
+                "cancel_all_orders_via_token",
+                details={"broker_code": broker},
+            ), 501
+        try:
+            canceled, failed = fn(auth_token)
+        except Exception as e:  # noqa: BLE001 — broker-side last-resort
+            logger.exception("cancel_all_orders failed for %s: %s", broker, e)
+            return error("broker_error", str(e)), 502
+
+        return ok({
+            "canceled": canceled,
+            "failed": failed,
+            "summary": {
+                "canceled_count": len(canceled),
+                "failed_count": len(failed),
+            },
+        }), 200
+
     def get(self):
         """List orders for the authenticated broker session.
 

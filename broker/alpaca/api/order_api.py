@@ -630,6 +630,53 @@ class AlpacaOrderTranslator:
         if r.status_code not in (200, 204):
             r.raise_for_status()
 
+    def cancel_all_orders_via_token(
+        self,
+        auth_token: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """DELETE /v2/orders — Alpaca's atomic cancel-every-open-order
+        endpoint. Returns ``(canceled, failed)`` lists. Each canceled
+        entry is ``{"order_id": ...}``; each failed entry is
+        ``{"order_id": ..., "reason": ...}``.
+
+        Alpaca returns 207 Multi-Status with a per-order body; 204 No
+        Content when there are no open orders. Both shapes collapse to
+        the canonical ``(canceled, failed)`` tuple this method emits.
+
+        When the translator was constructed with ``client=`` (tests
+        with ``httpx.MockTransport``), use that client directly so the
+        mock transport intercepts the request. Otherwise rebuild the
+        HTTP client from the session ``auth_token`` so paper-vs-live
+        mode is honored independently of ambient env state.
+        """
+        canceled: list[dict[str, Any]] = []
+        failed: list[dict[str, Any]] = []
+
+        if self._client is not None:
+            r = self._client.delete("/v2/orders")
+        else:
+            from broker.alpaca.api.auth_api import auth_handle_from_token
+
+            auth = auth_handle_from_token(auth_token)
+            with httpx.Client(**self._client_kwargs(auth)) as c:
+                r = c.delete("/v2/orders")
+
+        if r.status_code == 204:
+            return canceled, failed
+        if r.status_code in (200, 207):
+            for entry in r.json() or []:
+                oid = entry.get("id")
+                http_code = entry.get("status")
+                if isinstance(http_code, int) and http_code < 300:
+                    canceled.append({"order_id": oid})
+                else:
+                    failed.append({"order_id": oid, "reason": entry.get("body")})
+            return canceled, failed
+        r.raise_for_status()
+        # raise_for_status returns None on 2xx but we've already
+        # handled those; this line is unreachable.
+        return canceled, failed  # pragma: no cover
+
     # ---- HTTP plumbing -------------------------------------------------
 
     def _resolve_auth(self) -> AlpacaAuth:
