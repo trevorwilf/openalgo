@@ -94,8 +94,13 @@ def test_place_order_india_rejects_xnys(force_india):
     assert ok is False
     assert "Invalid exchange" in msg
     # Error message lists India's vocabulary in legacy order.
+    # T-30 (v7 Phase 8 final) — India relinquished CRYPTO; the venue
+    # now lives in market_regions/crypto/plugin.json. India's enum
+    # is the 10-exchange legacy list (NSE / NFO / CDS / BSE / BFO /
+    # BCD / MCX / NCDEX / NSE_INDEX / BSE_INDEX).
     assert "NSE" in msg
-    assert "CRYPTO" in msg
+    assert "MCX" in msg
+    assert "CRYPTO" not in msg
 
 
 def test_place_order_no_region_returns_missing_context_message(force_no_region):

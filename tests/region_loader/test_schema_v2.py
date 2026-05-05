@@ -167,7 +167,13 @@ def test_shipped_india_plugin_validates_v2(chdir) -> None:
     # service helpers can consume them.
     assert region.product_vocabulary.get("ALL") == ["CNC", "NRML", "MIS"]
     assert region.price_type_vocabulary.get("ALL") == ["MARKET", "LIMIT", "SL", "SL-M"]
-    assert "CRYPTO" in (region.legacy_compat_shim or {}).get("valid_exchanges", [])
+    # T-30 (v7 Phase 8 final) — India relinquished the CRYPTO venue
+    # to the dedicated ``market_regions/crypto/plugin.json``. The
+    # India ``legacy_compat_shim.valid_exchanges`` list no longer
+    # carries CRYPTO; it stays an India-only enum.
+    assert "CRYPTO" not in (
+        region.legacy_compat_shim or {}
+    ).get("valid_exchanges", [])
 
 
 def test_shipped_us_plugin_validates_v2() -> None:
