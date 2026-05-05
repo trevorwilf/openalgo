@@ -109,3 +109,4 @@ frontend/private/**
 !frontend/private/
 !frontend/private/tradingview/
 !frontend/private/tradingview/README.md
+reports/*
