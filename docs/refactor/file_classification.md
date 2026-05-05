@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **1011**.
+Total classified files: **1026**.
 
 Classification semantics:
 
@@ -18,7 +18,7 @@ Classification semantics:
 | `BROKER_PLUGIN` | Under `broker/*` — broker facts only. |
 | `COMPATIBILITY_SHIM` | Explicit bridge between lanes (e.g. `domain/translators.py`). |
 
-## PROMOTED_CORE (121 files)
+## PROMOTED_CORE (136 files)
 
 - `__init__.py`
 - `conftest.py`
@@ -27,6 +27,7 @@ Classification semantics:
 - `database/__init__.py`
 - `database/broker_rules_repo.py`
 - `database/cache_invalidation.py`
+- `database/chart_workspace_db.py`
 - `database/db_init_helper.py`
 - `database/health_db.py`
 - `database/instruments_repo.py`
@@ -61,6 +62,14 @@ Classification semantics:
 - `restx_api/v2/bars.py`
 - `restx_api/v2/broker_compliance.py`
 - `restx_api/v2/capabilities.py`
+- `restx_api/v2/chart/__init__.py`
+- `restx_api/v2/chart/_common.py`
+- `restx_api/v2/chart/active_layout.py`
+- `restx_api/v2/chart/drawings.py`
+- `restx_api/v2/chart/indicators.py`
+- `restx_api/v2/chart/layouts.py`
+- `restx_api/v2/chart/templates.py`
+- `restx_api/v2/chart/watchlists.py`
 - `restx_api/v2/instruments.py`
 - `restx_api/v2/orders.py`
 - `restx_api/v2/orders_combo.py`
@@ -76,6 +85,12 @@ Classification semantics:
 - `services/broker_translator_registry.py`
 - `services/cancel_all_order_service.py`
 - `services/cancel_order_service.py`
+- `services/charts/__init__.py`
+- `services/charts/bar_resampler.py`
+- `services/charts/intervals_service.py`
+- `services/charts/normalized_bar.py`
+- `services/charts/valkey_client.py`
+- `services/charts/ws_envelope.py`
 - `services/close_position_service.py`
 - `services/depth_service.py`
 - `services/feature_gate_service.py`

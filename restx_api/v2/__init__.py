@@ -61,6 +61,14 @@ def _build() -> tuple[Blueprint, Api]:
     from restx_api.v2.bars import api as bars_ns
     from restx_api.v2.broker_compliance import api as broker_compliance_ns
     from restx_api.v2.capabilities import api as capabilities_ns
+    from restx_api.v2.chart import (
+        active_layout_ns,
+        drawings_ns,
+        indicators_ns,
+        layouts_ns,
+        templates_ns,
+        watchlists_ns,
+    )
     from restx_api.v2.instruments import api as instruments_ns
     from restx_api.v2.orders import api as orders_ns
     from restx_api.v2.orders_combo import api as orders_combo_ns
@@ -80,6 +88,13 @@ def _build() -> tuple[Blueprint, Api]:
     api.add_namespace(venues_ns, path="/venues")
     api.add_namespace(regions_ns, path="/regions")
     api.add_namespace(plugins_ns, path="/plugins")
+    # /api/v2/chart/* sub-namespaces (Phase 1 skeleton; Phase 5 wires CRUD).
+    api.add_namespace(layouts_ns, path="/chart/layouts")
+    api.add_namespace(drawings_ns, path="/chart/drawings")
+    api.add_namespace(indicators_ns, path="/chart/indicators")
+    api.add_namespace(watchlists_ns, path="/chart/watchlists")
+    api.add_namespace(templates_ns, path="/chart/templates")
+    api.add_namespace(active_layout_ns, path="/chart/active-layout")
     api.add_namespace(broker_compliance_ns, path="/admin/broker_compliance")
 
     return bp, api
