@@ -155,6 +155,13 @@ _FILE_ALLOWLIST: dict[str, str] = {
     # legacy India fallback constant — used only when the region
     # plugin can't resolve at boot.
     "services/instrument_sync_adapters/_base.py": "T-26: documented India fallback constant for boot-time resolution",
+    # D-05 documents per-currency safety defaults including the
+    # India INR cap. The ₹ literal lives in the docstring describing
+    # ``max_notional_inr``; the runtime path uses Currency enum
+    # comparison (USD / INR), not the symbol. Domain-justified —
+    # see also tests/contracts/test_lane_isolation.py allowlist for
+    # the same file's INR currency-code literal.
+    "services/charts/safety_defaults.py": "D-05: per-currency notional caps; ₹ in docstring, runtime uses currency enum",
 }
 
 
