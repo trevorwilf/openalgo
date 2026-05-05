@@ -2,6 +2,7 @@ import {
   BarChart3,
   Bell,
   BookOpen,
+  CandlestickChart,
   ClipboardList,
   Code2,
   Database,
@@ -78,6 +79,11 @@ export const profileMenuItems: NavItem[] = [
   { href: '/python', label: 'Python Strategies', icon: Code2 },
   { href: '/pnl-tracker', label: 'PnL Tracker', icon: BarChart3 },
   { href: '/historify', label: 'Historify', icon: Database },
+  // Phase 7 (Premier Charting System) — region-agnostic /charts
+  // workspace; placed adjacent to Historify in the profile menu so
+  // operators with the legacy India-only deployment continue to see
+  // both surfaces. Visible to ALL authenticated brokers.
+  { href: '/charts', label: 'Charts', icon: CandlestickChart },
   { href: '/search/token', label: 'Search', icon: Search },
   {
     href: '/sandbox',
