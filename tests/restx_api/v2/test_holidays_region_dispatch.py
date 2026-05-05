@@ -8,23 +8,53 @@ Asserts:
 * US region returns its own (currently empty) calendar; the legacy
   India v1 ``/market/holidays`` endpoint is NOT routed for non-
   India brokers.
+
+Test isolation: an earlier-running test in the suite may
+``from app import app`` before ``API_V2=1`` is in the environment,
+caching the global app without the v2 blueprint. Build a minimal
+Flask app and register v2 explicitly so this file's tests are
+hermetic regardless of suite order.
 """
 
 from __future__ import annotations
 
-import os
+from pathlib import Path
 
 import pytest
 
-# Force API_V2 on at module load so the regions namespace mounts.
-os.environ.setdefault("API_V2", "1")
-
-from app import app  # noqa: E402
-
 
 @pytest.fixture
-def client():
-    return app.test_client()
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("API_V2", "1")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'phase6.db'}")
+    from flask import Flask
+
+    from database import broker_rules_repo, instruments_repo, venue_schedule_repo
+
+    instruments_repo._reset_engine_for_tests()
+    instruments_repo.init_instrument_tables()
+    broker_rules_repo._reset_engine_for_tests()
+    broker_rules_repo.init_broker_rules_tables()
+    venue_schedule_repo.init_venue_schedule_tables()
+
+    # Region plugins are normally loaded once at app.py boot. The
+    # holidays endpoint reads them via ``get_market_region``; without
+    # this explicit load the cache is empty and india/us 404 with
+    # ``region_not_found``.
+    from utils.region_loader import load_market_regions
+
+    load_market_regions()
+
+    app = Flask(__name__)
+    app.secret_key = "holidays-test"
+
+    from restx_api.v2 import register_api_v2
+
+    registered = register_api_v2(app)
+    assert registered is True
+    yield app.test_client()
+    instruments_repo._reset_engine_for_tests()
+    broker_rules_repo._reset_engine_for_tests()
 
 
 def test_india_2026_holidays_returned(client):
