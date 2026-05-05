@@ -85,8 +85,8 @@ class AlpacaPositionAdapter:
         rows = resp.json() or []
         out: list[NormalizedPosition] = []
         for row in rows:
-            symbol = row.get("symbol")
-            if not symbol:
+            broker_symbol = row.get("symbol")
+            if not broker_symbol:
                 continue
             qty = _to_decimal(row.get("qty")) or Decimal("0")
             # Alpaca returns positive qty for both long and short; the
@@ -94,13 +94,28 @@ class AlpacaPositionAdapter:
             side = (row.get("side") or "long").lower()
             if side == "short":
                 qty = -qty
+            venue_code = _venue_from_alpaca(
+                row.get("exchange"), row.get("asset_class")
+            )
+            # Match the instrument_sync convention: crypto canonical
+            # form uses the OpenAlgo dash separator (BTC-USD), Alpaca
+            # wire form uses slash (BTC/USD). Without this conversion
+            # the v2 /positions response exposes ``canonical_symbol=
+            # "BTC/USD"`` while the instrument universe stores
+            # ``"BTC-USD"`` — a v2 caller looking up the position's
+            # ``canonical_symbol`` against /api/v2/instruments/search
+            # gets a 404.
+            canonical_symbol = (
+                broker_symbol.replace("/", "-")
+                if (row.get("asset_class") or "").lower() == "crypto"
+                and "/" in broker_symbol
+                else broker_symbol
+            )
             out.append(
                 NormalizedPosition(
-                    instrument_id=row.get("asset_id") or symbol,
-                    venue_code=_venue_from_alpaca(
-                        row.get("exchange"), row.get("asset_class")
-                    ),
-                    canonical_symbol=symbol,
+                    instrument_id=row.get("asset_id") or broker_symbol,
+                    venue_code=venue_code,
+                    canonical_symbol=canonical_symbol,
                     quantity=qty,
                     average_price=_to_decimal(row.get("avg_entry_price")),
                     market_value=_to_decimal(row.get("market_value")),
@@ -112,6 +127,10 @@ class AlpacaPositionAdapter:
                         "asset_class": row.get("asset_class"),
                         "current_price": row.get("current_price"),
                         "lastday_price": row.get("lastday_price"),
+                        # Keep the raw Alpaca symbol so callers that
+                        # need to round-trip back to /v2/orders /
+                        # /v2/positions/<symbol> can reconstruct it.
+                        "broker_symbol": broker_symbol,
                     },
                 )
             )
