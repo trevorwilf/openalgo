@@ -54,6 +54,39 @@ def test_capabilities_returns_400_without_broker_session(client) -> None:
     assert body["error"]["code"] == "no_broker"
 
 
+def test_capabilities_resolves_broker_via_apikey_when_no_session(client) -> None:
+    """Regression: external clients (TradingView, Excel, MCP, ops scripts)
+    use API-key auth — they cannot establish a Flask session. Pre-fix,
+    /api/v2/capabilities only honored ``session["broker"]`` and 400'd
+    every API-key call. Now it resolves via the standard v2 auth helper
+    and falls back to session for browser-side React fetches.
+    """
+    from domain.capabilities import BrokerCapabilities, infer_capabilities_from_legacy
+
+    fake = BrokerCapabilities(
+        **infer_capabilities_from_legacy(
+            {
+                "broker_type": "IN_stock",
+                "supported_exchanges": ["NSE", "BSE"],
+                "supported_regions": ["india"],
+                "leverage_config": False,
+            },
+            broker_code="zerodha",
+        )
+    )
+    with mock.patch(
+        "restx_api.v2.capabilities.resolve_auth",
+        return_value=("tok", "zerodha", None),
+    ), mock.patch(
+        "utils.plugin_loader.get_broker_capabilities", return_value=fake
+    ):
+        # Note: query-string apikey is enough for resolve_auth to fire.
+        resp = client.get("/api/v2/capabilities?apikey=test-key-123")
+    assert resp.status_code == 200
+    data = resp.get_json()["data"]
+    assert data["broker_code"] == "zerodha"
+
+
 def test_capabilities_404_for_unknown_broker(client, flask_app) -> None:
     with flask_app.test_client() as c:
         with c.session_transaction() as s:
