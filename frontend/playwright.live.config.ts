@@ -31,7 +31,7 @@ export default defineConfig({
   // config from various cwds) sometimes fail to resolve a
   // ``./e2e/...`` relative path under ``"type": "module"``.
   globalSetup: path.resolve(__dirname, 'e2e', 'global-setup.ts'),
-  testMatch: /(live-instance|auth-instance|paper-trading|paper-trading-actions|paper-trading-ui-click|paper-trading-positions|paper-trading-alpaca-parity|paper-trading-india-gating|paper-trading-mode-pill|paper-trading-fresh-login|paper-trading-ws-ticks)\.spec\.ts/,
+  testMatch: /(live-instance|auth-instance|paper-trading|paper-trading-actions|paper-trading-ui-click|paper-trading-positions|paper-trading-alpaca-parity|paper-trading-india-gating|paper-trading-mode-pill|paper-trading-fresh-login|paper-trading-ws-ticks|focused-page-sweep)\.spec\.ts/,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,
