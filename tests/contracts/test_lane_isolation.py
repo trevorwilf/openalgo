@@ -124,14 +124,31 @@ _DELTA_V1_COMPAT_FILES: set[str] = {
     "broker/deltaexchange/mapping/order_data.py",
     "broker/deltaexchange/mapping/transform_data.py",
 }
+# Alpaca's legacy v1 compatibility shims — broker/alpaca/mapping/
+# order_data.py translates Alpaca → India-shaped legacy v1 schema
+# (orderbook / positionbook / holdings / tradebook). The "CNC"
+# literal is part of the OUTPUT schema, not the Alpaca side; the
+# India-shaped v1 surface has no neutral product code so we surface
+# "CNC" for downstream parity. Same justification as the
+# DeltaExchange compat files above.
+_ALPACA_V1_COMPAT_FILES: set[str] = {
+    "broker/alpaca/mapping/order_data.py",
+}
 LITERAL_ALLOWLIST: dict[str, set[str]] = {
     "CE": set(_DELTA_V1_COMPAT_FILES),
     "PE": set(_DELTA_V1_COMPAT_FILES),
-    "CNC": set(_DELTA_V1_COMPAT_FILES),
+    "CNC": set(_DELTA_V1_COMPAT_FILES) | set(_ALPACA_V1_COMPAT_FILES),
     "NRML": set(_DELTA_V1_COMPAT_FILES),
     # Asia/Kolkata — fully removed in v8 cycle (api/order_api.py)
     # NSE — fully removed in v8 cycle (mapping/order_data.py)
-    "INR": {"broker/deltaexchange/api/order_api.py"},
+    # services/charts/safety_defaults.py uses "INR" as a currency-code
+    # comparison (D-05 per-currency notional caps), not as an
+    # India-scale literal — the function's contract is to map ISO
+    # currency codes onto USD-equivalent caps. Domain-justified.
+    "INR": {
+        "broker/deltaexchange/api/order_api.py",
+        "services/charts/safety_defaults.py",
+    },
 }
 
 
