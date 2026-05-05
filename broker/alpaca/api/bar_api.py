@@ -27,6 +27,12 @@ _TIMEFRAME_MAP = {
     "1d": "1Day",
 }
 
+# Hard ceiling on next_page_token follows. Alpaca's max limit per page
+# is 10000; even at 1m bars that covers ~16 trading days. 200 pages is
+# well past any reasonable historical request and short-circuits a
+# server-side loop bug.
+_MAX_PAGES = 200
+
 
 class AlpacaBarAdapter:
     broker_code = "alpaca"
@@ -79,16 +85,31 @@ class AlpacaBarAdapter:
                 ),
             )
         symbol = instrument.broker_native_symbol or instrument.canonical_symbol
-        params = {
+        params: dict[str, Any] = {
             "symbols": symbol,
             "timeframe": tf,
             "start": _iso(request.start),
             "end": _iso(request.end),
             "limit": 10000,
         }
-        data = self._get("/v2/stocks/bars", params=params)
-        bars_block = data.get("bars", {})
-        rows = bars_block.get(symbol, []) if isinstance(bars_block, dict) else []
+        # Alpaca paginates beyond ``limit`` via ``next_page_token``. A
+        # historical-bar consumer asking for more rows than fit in a
+        # single page (e.g. 1m bars over a multi-week window) would
+        # otherwise see silently truncated data. Walk every page,
+        # capping the loop at a generous ceiling so a misbehaving
+        # token loop cannot run forever.
+        rows: list[dict] = []
+        for _ in range(_MAX_PAGES):
+            data = self._get("/v2/stocks/bars", params=params)
+            bars_block = data.get("bars", {})
+            page = (
+                bars_block.get(symbol, []) if isinstance(bars_block, dict) else []
+            )
+            rows.extend(page)
+            token = data.get("next_page_token")
+            if not token:
+                break
+            params["page_token"] = token
         return [_row_to_bar(r) for r in rows]
 
 
