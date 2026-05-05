@@ -216,7 +216,16 @@ packages = []
 testpaths = ["test", "tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-addopts = "-v --timeout=60"
+# ``-m 'not perf'`` excludes timing-sensitive perf tests from the
+# default suite — they trip thresholds when running concurrently
+# with the broader test suite (system load shifts numbers above
+# the assertion bound). Run them explicitly with
+# ``pytest -m perf`` (which overrides this filter on the command
+# line). Perf tests are tagged via ``pytestmark = pytest.mark.perf``.
+addopts = "-v --timeout=60 -m 'not perf'"
+markers = [
+    "perf: timing-sensitive performance benchmark; excluded from the default suite. Run with `pytest -m perf` for perf-only runs.",
+]
 asyncio_mode = "auto"
 filterwarnings = [
     "ignore::DeprecationWarning",
