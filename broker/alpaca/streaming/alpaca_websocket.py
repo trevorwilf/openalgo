@@ -115,6 +115,10 @@ class AlpacaWebSocketClient:
         # Track reconnect attempts so on_status observers can see
         # ``RECONNECTING`` events with the attempt count.
         self._reconnect_attempt = 0
+        # Current backoff delay. Lives on the instance (not a local
+        # in ``_reader_loop``) so ``_on_message`` can reset it back
+        # to the initial value on auth success.
+        self._reconnect_delay = reconnect_initial_delay
 
         # Active subscription sets — replayed to the broker after each
         # reconnect.
@@ -199,7 +203,15 @@ class AlpacaWebSocketClient:
         the active subscription sets are never cleared so a clean
         reconnect resumes the prior topic state automatically.
         """
-        delay = self._reconnect_initial_delay
+        # Backoff state lives on the instance so ``_on_message`` can
+        # reset it on auth success — otherwise after several
+        # disconnects ``delay`` keeps growing, caps at
+        # ``_reconnect_max_delay``, and stays there forever even
+        # when subsequent connections are stable for hours. Auth-
+        # success is the canonical "we're back online" signal; that
+        # handler (lines further down) clears both the attempt
+        # counter and the delay.
+        self._reconnect_delay = self._reconnect_initial_delay
         first = True
 
         while not self._stop_requested.is_set():
@@ -222,7 +234,7 @@ class AlpacaWebSocketClient:
                             "reconnecting",
                             {
                                 "attempt": self._reconnect_attempt,
-                                "delay_seconds": delay,
+                                "delay_seconds": self._reconnect_delay,
                             },
                         )
                     except Exception:  # pragma: no cover
@@ -230,18 +242,18 @@ class AlpacaWebSocketClient:
                 logger.info(
                     "Alpaca WS reconnect attempt %d in %.1fs",
                     self._reconnect_attempt,
-                    delay,
+                    self._reconnect_delay,
                 )
                 # Sleep in short slices so stop() can interrupt
                 # promptly without waiting out the full backoff.
                 slept = 0.0
-                while slept < delay and not self._stop_requested.is_set():
-                    time.sleep(min(0.25, delay - slept))
+                while slept < self._reconnect_delay and not self._stop_requested.is_set():
+                    time.sleep(min(0.25, self._reconnect_delay - slept))
                     slept += 0.25
                 if self._stop_requested.is_set():
                     break
-                delay = min(
-                    delay * self._reconnect_backoff_factor,
+                self._reconnect_delay = min(
+                    self._reconnect_delay * self._reconnect_backoff_factor,
                     self._reconnect_max_delay,
                 )
 
@@ -409,8 +421,13 @@ class AlpacaWebSocketClient:
                         )
                     except Exception:  # pragma: no cover
                         logger.exception("alpaca on_status handler raised")
-                # Reset for the next disconnect cycle.
+                # Reset for the next disconnect cycle. Both the
+                # attempt counter and the backoff delay reset — without
+                # the delay reset, a stable session followed by a
+                # disconnect would still sleep at the previously-grown
+                # cap (typically 30s) before reconnecting.
                 self._reconnect_attempt = 0
+                self._reconnect_delay = self._reconnect_initial_delay
             if self._on_status is not None:
                 try:
                     self._on_status("success", frame)
@@ -445,6 +462,7 @@ class AlpacaWebSocketClient:
                     except Exception:  # pragma: no cover
                         logger.exception("alpaca on_status handler raised")
                 self._reconnect_attempt = 0
+                self._reconnect_delay = self._reconnect_initial_delay
                 return
             logger.error(
                 "Alpaca WS error frame: code=%s msg=%r",
