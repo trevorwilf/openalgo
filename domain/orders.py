@@ -3,7 +3,9 @@
 Cross-field validators enforce the meaningful combinations:
 
 - price required for limit-type orders (LIMIT, STOP_LIMIT, LOO, LOC)
-- trigger_price required for stop-type orders (STOP, STOP_LIMIT, TRAILING_STOP)
+- trigger_price required for stop-type orders (STOP, STOP_LIMIT)
+  TRAILING_STOP is NOT in this set — its trigger is computed
+  dynamically by the broker from ``trailing_offset``.
 - trailing_offset required for TRAILING_STOP
 - good_till required for GTD; forbidden for non-GTD TIFs
 - OPG/ATC TIFs require MOO/MOC order types respectively
@@ -37,8 +39,17 @@ _LIMIT_TYPES: frozenset[OrderType] = frozenset(
     }
 )
 
+# Order types that require an explicit ``trigger_price``. Note:
+# TRAILING_STOP is INTENTIONALLY excluded — at every supported broker
+# (Alpaca, Schwab, Webull, IBKR, Zerodha…) a trailing stop's trigger
+# is computed dynamically by the broker from ``trailing_offset``
+# (dollars or percent of high-water mark). Including it here used to
+# block every TRAILING_STOP placement at /api/v2/orders with
+# ``order_type=TRAILING_STOP requires trigger_price`` despite the
+# normalized field that actually carries the stop semantics
+# (``trailing_offset``) being correctly populated.
 _STOP_TYPES: frozenset[OrderType] = frozenset(
-    {OrderType.STOP, OrderType.STOP_LIMIT, OrderType.TRAILING_STOP}
+    {OrderType.STOP, OrderType.STOP_LIMIT}
 )
 
 
