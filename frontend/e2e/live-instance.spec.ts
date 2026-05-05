@@ -55,12 +55,25 @@ test.describe('Live Flask instance — unauthenticated routes', () => {
   ]
 
   for (const route of routes) {
-    test(`route ${route.path} loads + has no console errors`, async ({ page }) => {
+    test(`route ${route.path} loads + has no console errors`, async ({ page }, testInfo) => {
+      // 30s default test timeout is too tight when this runs late
+      // in a 25+min suite — the React SPA polls /auth/check-setup +
+      // /auth/csrf-token in the background and ``networkidle``
+      // (no in-flight requests for 500ms) becomes a moving target.
+      // 60s is well above the observed p99.
+      testInfo.setTimeout(60_000)
       const obs = attachObservers(page)
       const resp = await page.goto(`${BASE}${route.path}`)
       expect(resp).not.toBeNull()
       expect(resp!.status(), `${route.path} HTTP status`).toBeLessThan(400)
-      await page.waitForLoadState('networkidle')
+      // Cap networkidle wait at 30s — long-poll background requests
+      // can keep the network active forever; we don't need to
+      // wait for them to settle to validate the route.
+      try {
+        await page.waitForLoadState('networkidle', { timeout: 30_000 })
+      } catch {
+        /* SPA polling never goes idle; continue with what's mounted */
+      }
 
       // React mount sentinel
       await expect(page.locator('#root')).toBeAttached()

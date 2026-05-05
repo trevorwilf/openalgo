@@ -485,7 +485,14 @@ const SAFE_API_CALLS: ApiCall[] = [
 ]
 
 for (const call of SAFE_API_CALLS) {
-  test(`API ${call.method} ${call.path}`, async ({ browser }) => {
+  test(`API ${call.method} ${call.path}`, async ({ browser }, testInfo) => {
+    // Each test spawns a fresh Chromium context. By the time the
+    // suite has run for 20+ minutes (with WS subscriptions piling
+    // up, master-contract sync running periodically), context
+    // creation + the HTTP roundtrip can exceed the default 30s
+    // test timeout. Bump to 60s — same as the auth-instance UI
+    // tests above.
+    testInfo.setTimeout(60_000)
     expect(API_KEY, 'API key not yet acquired').toBeTruthy()
     const ctx = await browser.newContext({ storageState: storageStateFile! })
     const url = `${BASE}${call.path}`
