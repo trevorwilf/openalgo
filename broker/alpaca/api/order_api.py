@@ -875,14 +875,79 @@ def modify_order(
         return {"status": "error", "message": str(e)}, 500
 
 
-def get_order_book(auth_token: str) -> tuple[dict[str, Any], int]:
-    """Module-level shim — used by legacy ``services.orderbook_service``."""
+def get_order_book(auth_token: str) -> dict[str, Any]:
+    """Module-level shim — used by legacy ``services.orderbook_service``.
+
+    Returns a plain dict (NOT a ``(dict, status)`` tuple) so the
+    legacy service can do ``order_data["status"]`` directly, matching
+    the convention of every Indian-broker plugin's ``get_order_book``.
+    Errors surface as ``{"status": "error", "message": ...}`` and the
+    service maps that to a 500 itself.
+    """
     try:
         translator = AlpacaOrderTranslator()
         rows = translator.list_orders_via_token(auth_token, status="all")
-        return {"status": "success", "data": rows}, 200
+        return {"status": "success", "data": rows}
     except Exception as e:  # noqa: BLE001
-        return {"status": "error", "message": str(e)}, 500
+        return {"status": "error", "message": str(e)}
+
+
+def get_positions(auth_token: str) -> dict[str, Any]:
+    """Module-level shim — used by legacy ``services.positionbook_service``.
+
+    Returns the raw Alpaca ``/v2/positions`` response wrapped in
+    OpenAlgo's ``{"status": "success", "data": [...]}`` envelope. The
+    mapping module handles symbol / quantity / sign translation.
+    """
+    from broker.alpaca.api.auth_api import auth_handle_from_token
+
+    try:
+        auth = auth_handle_from_token(auth_token)
+        with httpx.Client(
+            base_url=auth.base_url,
+            headers=dict(auth.headers),
+            timeout=httpx.Timeout(15.0, connect=5.0),
+        ) as c:
+            r = c.get("/v2/positions")
+        r.raise_for_status()
+        return {"status": "success", "data": r.json() or []}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": str(e)}
+
+
+def get_holdings(auth_token: str) -> dict[str, Any]:
+    """Module-level shim — used by legacy ``services.holdings_service``.
+
+    Alpaca does not separate "intraday positions" (MIS) from
+    "delivery holdings" (CNC) the way Indian brokers do — every
+    position is held overnight unless explicitly closed. We surface
+    the same ``/v2/positions`` rows here; the mapping module
+    transforms them into the holdings-shaped output.
+    """
+    return get_positions(auth_token)
+
+
+def get_trade_book(auth_token: str) -> dict[str, Any]:
+    """Module-level shim — used by legacy ``services.tradebook_service``.
+
+    Maps to Alpaca's ``/v2/account/activities/FILL`` (per-execution
+    fill activity). One fill activity per trade — partials are
+    separate rows, mirroring Indian broker tradebook semantics.
+    """
+    from broker.alpaca.api.auth_api import auth_handle_from_token
+
+    try:
+        auth = auth_handle_from_token(auth_token)
+        with httpx.Client(
+            base_url=auth.base_url,
+            headers=dict(auth.headers),
+            timeout=httpx.Timeout(15.0, connect=5.0),
+        ) as c:
+            r = c.get("/v2/account/activities/FILL")
+        r.raise_for_status()
+        return {"status": "success", "data": r.json() or []}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "message": str(e)}
 
 
 def close_all_positions(api_key: Any, auth_token: str) -> tuple[Any, int]:
@@ -1053,8 +1118,11 @@ __all__ = [
     "cancel_all_orders_api",
     "cancel_order",
     "close_all_positions",
+    "get_holdings",
     "get_open_position",
     "get_order_book",
+    "get_positions",
+    "get_trade_book",
     "modify_order",
     "place_smartorder_api",
 ]
