@@ -101,6 +101,15 @@ def test_promoted_us_plugin_with_explicit_fields_passes(monkeypatch) -> None:
         "default_currency": "USD",
         "base_currency": "USD",
         "supported_exchanges": ["XNAS", "XNYS"],
+        # T-09 (Phase 3) — non-India plugins must declare the
+        # master-contract refresh policy explicitly. Mirrors the
+        # shape Alpaca/Schwab/Webull plugins ship in production.
+        "master_contract_refresh_policy": {
+            "timezone": "America/New_York",
+            "cutoff_local": "08:00",
+            "frequency": "daily",
+            "skip_if_24x7": False,
+        },
     }
     caps = infer_capabilities_from_legacy(plugin, "fakeus")
     # No silent IN_stock leak.
