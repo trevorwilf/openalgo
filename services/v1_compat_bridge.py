@@ -367,6 +367,8 @@ def _tradebook() -> tuple[Any, int]:
 
     if broker == "alpaca":
         try:
+            from decimal import Decimal
+
             from broker.alpaca.api.order_api import AlpacaOrderTranslator
             from domain.enums import OrderStatus
 
@@ -383,7 +385,16 @@ def _tradebook() -> tuple[Any, int]:
             canonical = AlpacaOrderTranslator.normalize_order_status(r.get("status"))
             if canonical not in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
                 continue
-            if (r.get("filled_qty") or "0") in ("0", "0.0"):
+            # Decimal compare so we skip every spelling of zero —
+            # Alpaca returns "0", "0.0", "0.00", and for crypto
+            # 9dp shapes like "0.000000000". A naive ``in ("0",
+            # "0.0")`` check let "0.00" through, leaking empty-
+            # fill rows into the tradebook.
+            try:
+                filled_qty_dec = Decimal(str(r.get("filled_qty") or "0"))
+            except (ArithmeticError, ValueError):
+                filled_qty_dec = Decimal("0")
+            if filled_qty_dec == 0:
                 continue
             trades.append(_alpaca_order_to_v1(r, kind="trade"))
         return jsonify(_v1_envelope(data=trades)), 200
