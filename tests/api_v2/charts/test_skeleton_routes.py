@@ -73,22 +73,45 @@ def test_layouts_post_returns_201_with_layout_shape(client, stub_auth):
 
 
 def test_layout_get_put_delete(client, stub_auth):
-    resp = client.get("/api/v2/chart/layouts/42?apikey=test-key-123")
+    # Phase 5 wires real DB-backed CRUD. Create first so the GET/PUT/DELETE
+    # operate on a real row.
+    resp = client.post(
+        "/api/v2/chart/layouts",
+        json=_api_key_body({"name": "Test", "schema_version": 1, "cells_json": {}}),
+    )
+    assert resp.status_code == 201
+    layout_id = resp.get_json()["data"]["id"]
+
+    resp = client.get(f"/api/v2/chart/layouts/{layout_id}?apikey=test-key-123")
     assert resp.status_code == 200
-    resp = client.put("/api/v2/chart/layouts/42", json=_api_key_body({"name": "x"}))
+    resp = client.put(
+        f"/api/v2/chart/layouts/{layout_id}",
+        json=_api_key_body({"name": "x"}),
+    )
     assert resp.status_code == 200
-    assert resp.get_json()["data"]["id"] == 42
-    resp = client.delete("/api/v2/chart/layouts/42?apikey=test-key-123")
+    assert resp.get_json()["data"]["id"] == layout_id
+    resp = client.delete(f"/api/v2/chart/layouts/{layout_id}?apikey=test-key-123")
     assert resp.status_code == 204
 
 
 def test_layout_cells_get_and_put(client, stub_auth):
-    resp = client.get("/api/v2/chart/layouts/7/cells?apikey=test-key-123")
+    # Phase 5: GET/PUT for /<id>/cells operates on a real layout row.
+    resp = client.post(
+        "/api/v2/chart/layouts",
+        json=_api_key_body({"name": "Cells Test", "schema_version": 1, "cells_json": {"cells": []}}),
+    )
+    assert resp.status_code == 201
+    layout_id = resp.get_json()["data"]["id"]
+
+    resp = client.get(f"/api/v2/chart/layouts/{layout_id}/cells?apikey=test-key-123")
     assert resp.status_code == 200
     body = resp.get_json()["data"]
-    assert body["layout_id"] == 7
+    assert body["layout_id"] == layout_id
     assert body["cells"] == []
-    resp = client.put("/api/v2/chart/layouts/7/cells", json=_api_key_body({"cells": []}))
+    resp = client.put(
+        f"/api/v2/chart/layouts/{layout_id}/cells",
+        json=_api_key_body({"cells": []}),
+    )
     assert resp.status_code == 200
 
 
@@ -100,10 +123,13 @@ def test_drawings_full_crud(client, stub_auth):
         json=_api_key_body({"layout_id": 1, "cell_id": "c1", "kind": "trendline"}),
     )
     assert resp.status_code == 201
+    drawing_id = resp.get_json()["data"]["id"]
     assert resp.get_json()["data"]["kind"] == "trendline"
-    resp = client.put("/api/v2/chart/drawings/9", json=_api_key_body({}))
+    resp = client.put(
+        f"/api/v2/chart/drawings/{drawing_id}", json=_api_key_body({"kind": "trendline"})
+    )
     assert resp.status_code == 200
-    resp = client.delete("/api/v2/chart/drawings/9?apikey=test-key-123")
+    resp = client.delete(f"/api/v2/chart/drawings/{drawing_id}?apikey=test-key-123")
     assert resp.status_code == 204
 
 
@@ -121,13 +147,14 @@ def test_indicators_full_crud(client, stub_auth):
     )
     assert resp.status_code == 201
     data = resp.get_json()["data"]
+    indicator_id = data["id"]
     assert data["indicator_key"] == "RSI"
     assert data["params_json"] == {"period": 14}
     assert client.put(
-        "/api/v2/chart/indicators/3", json=_api_key_body({})
+        f"/api/v2/chart/indicators/{indicator_id}", json=_api_key_body({})
     ).status_code == 200
     assert (
-        client.delete("/api/v2/chart/indicators/3?apikey=test-key-123").status_code
+        client.delete(f"/api/v2/chart/indicators/{indicator_id}?apikey=test-key-123").status_code
         == 204
     )
 

@@ -69,6 +69,7 @@ def _build() -> tuple[Blueprint, Api]:
         templates_ns,
         watchlists_ns,
     )
+    from restx_api.v2.indicators_series import api as indicators_series_ns
     from restx_api.v2.instruments import api as instruments_ns
     from restx_api.v2.orders import api as orders_ns
     from restx_api.v2.orders_combo import api as orders_combo_ns
@@ -95,6 +96,7 @@ def _build() -> tuple[Blueprint, Api]:
     api.add_namespace(watchlists_ns, path="/chart/watchlists")
     api.add_namespace(templates_ns, path="/chart/templates")
     api.add_namespace(active_layout_ns, path="/chart/active-layout")
+    api.add_namespace(indicators_series_ns, path="/indicators/series")
     api.add_namespace(broker_compliance_ns, path="/admin/broker_compliance")
 
     return bp, api
