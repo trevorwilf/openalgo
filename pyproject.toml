@@ -124,6 +124,15 @@ dependencies = [
   "redis>=5.0.0",
   # Phase 4 (charting) — live incremental indicator math.
   "talipp>=2.7.0",
+  # Phase 5 (charting) — pandas-ta is an OPTIONAL runtime dep used by
+  # the modern-indicator path (SuperTrend, Donchian, Heikin-Ashi,
+  # Keltner, Ichimoku, VWAP). When absent the compute service falls
+  # back to TA-Lib for talib-supported indicators and surfaces a
+  # 503 compute_unavailable for modern-only indicators. Operators
+  # add pandas-ta to their site requirements; we do not pin it here
+  # because the upstream package's install hooks conflict with some
+  # numpy versions on Windows. Documented in frontend/LICENSES.md
+  # along with the MerlinR/Pandas-ta-fork fallback (P-13).
   "referencing==0.37.0",
   "requests==2.33.0",
   "rich==13.7.1",
