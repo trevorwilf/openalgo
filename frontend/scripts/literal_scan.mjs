@@ -17,7 +17,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const FRONTEND_ROOT = resolve(__dirname, '..')
 const SRC_ROOT = resolve(FRONTEND_ROOT, 'src')
 
-const SCAN_SUBDIRS = ['hooks', 'components', 'lib', 'pages', 'api']
+const SCAN_SUBDIRS = ['hooks', 'components', 'lib', 'pages', 'api', 'charts']
 const SCAN_EXTS = ['.ts', '.tsx']
 
 const INDIA_LITERALS = [

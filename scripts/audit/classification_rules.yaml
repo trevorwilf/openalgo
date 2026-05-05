@@ -518,6 +518,17 @@ rules:
   - path: services/strategy/__init__.py
     classification: PROMOTED_CORE
 
+  # ---------------- Premier Charting System (region-neutral) ----------------
+  # All chart-workspace code is region-agnostic — broker capabilities
+  # and venue session service feed in display tz, supported intervals,
+  # currency, etc. India literals are forbidden in this subtree.
+  - path_prefix: services/charts/
+    classification: PROMOTED_CORE
+  - path_prefix: restx_api/v2/chart/
+    classification: PROMOTED_CORE
+  - path: database/chart_workspace_db.py
+    classification: PROMOTED_CORE
+
 # Excluded path prefixes: classifier ignores these entirely.
 excluded:
   - .venv/
