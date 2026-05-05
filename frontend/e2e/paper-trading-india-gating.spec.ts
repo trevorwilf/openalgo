@@ -88,37 +88,52 @@ const INDIA_ONLY_ROUTES = [
 
 for (const route of INDIA_ONLY_ROUTES) {
   test(`${route} renders the india-only empty state for Alpaca`, async ({ browser }) => {
+    // We construct a context manually because we need to load the
+    // auth state file that was written in beforeAll. Using
+    // Playwright's auto-managed `page` fixture would require
+    // wiring storageState through a project-level config which
+    // complicates the live-config we already ship.
+    //
+    // The TRY/FINALLY here is the regression fix: previously, if the
+    // body raised before reaching ``ctx.close()`` (e.g. networkidle
+    // hung past the test timeout), the context leaked into the
+    // worker process. Across 15 tests in this file, 7-8 leaked
+    // contexts pushed Chromium past its memory ceiling and the
+    // worker was killed with SIGTERM (exit 143), wiping out the
+    // remaining tests with "worker process exited unexpectedly".
     const ctx = await browser.newContext({ storageState: storageStateFile })
-    const page = await ctx.newPage()
-    const failures: { url: string; status: number }[] = []
-    page.on('response', (r) => {
-      const status = r.status()
-      if (status >= 400 && status < 600) {
-        failures.push({ url: r.url(), status })
-      }
-    })
+    try {
+      const page = await ctx.newPage()
+      const failures: { url: string; status: number }[] = []
+      page.on('response', (r) => {
+        const status = r.status()
+        if (status >= 400 && status < 600) {
+          failures.push({ url: r.url(), status })
+        }
+      })
 
-    const resp = await page.goto(`${BASE}${route}`)
-    expect(resp?.status()).toBeLessThan(400)
-    await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
+      const resp = await page.goto(`${BASE}${route}`)
+      expect(resp?.status()).toBeLessThan(400)
+      await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
 
-    // Empty-state element MUST be present.
-    await expect(
-      page.getByTestId('india-only-feature-blocked'),
-      `${route} did not render the india-only empty state`,
-    ).toBeVisible({ timeout: 5_000 })
+      // Empty-state element MUST be present.
+      await expect(
+        page.getByTestId('india-only-feature-blocked'),
+        `${route} did not render the india-only empty state`,
+      ).toBeVisible({ timeout: 5_000 })
 
-    // No broken India-specific subroute requests should fire.
-    const brokenSubroutes = failures.filter((f) =>
-      /\/(api\/v1\/expiry|pnltracker\/api|api\/intervals|api\/historify-intervals)/.test(
-        f.url,
-      ),
-    )
-    expect(
-      brokenSubroutes,
-      `${route} fired broken India sub-routes: ${JSON.stringify(brokenSubroutes)}`,
-    ).toEqual([])
-
-    await ctx.close()
+      // No broken India-specific subroute requests should fire.
+      const brokenSubroutes = failures.filter((f) =>
+        /\/(api\/v1\/expiry|pnltracker\/api|api\/intervals|api\/historify-intervals)/.test(
+          f.url,
+        ),
+      )
+      expect(
+        brokenSubroutes,
+        `${route} fired broken India sub-routes: ${JSON.stringify(brokenSubroutes)}`,
+      ).toEqual([])
+    } finally {
+      await ctx.close()
+    }
   })
 }
