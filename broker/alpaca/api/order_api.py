@@ -812,7 +812,21 @@ def modify_order(
         ) as c:
             r = c.patch(f"/v2/orders/{orderid}", json=patch_body)
         if r.status_code >= 400:
-            return {"status": "error", "message": r.text[:500]}, r.status_code
+            # Surface Alpaca's structured JSON error message
+            # (``"cannot replace order in accepted status"``,
+            # ``"stop price must be > 0"`` etc.) instead of the raw
+            # text. Mirrors ``cancel_order`` above. Falls back to
+            # raw text when the body isn't JSON.
+            msg = r.text[:500]
+            try:
+                body = r.json()
+                if isinstance(body, dict) and body.get("message"):
+                    msg = body["message"]
+                    if body.get("code"):
+                        msg = f"(code {body['code']}) {msg}"
+            except (ValueError, TypeError):
+                pass
+            return {"status": "error", "message": msg}, r.status_code
         return {"status": "success", "orderid": orderid}, 200
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": str(e)}, 500
