@@ -16,6 +16,10 @@ from services.charts.indicator_compute import (
     compute,
 )
 
+# Timing-sensitive — excluded from the default suite. Run with
+# ``pytest -m perf``. See pyproject.toml [tool.pytest.ini_options].
+pytestmark = pytest.mark.perf
+
 
 def _bars(n: int) -> list[dict]:
     base = 1700000040

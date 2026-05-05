@@ -21,6 +21,10 @@ import pytest
 
 from services.charts.bar_aggregator import BarAggregator
 
+# Timing-sensitive — excluded from the default suite. Run with
+# ``pytest -m perf``. See pyproject.toml [tool.pytest.ini_options].
+pytestmark = pytest.mark.perf
+
 
 def test_aggregator_per_tick_under_50us():
     """Per-tick aggregator overhead is O(1). 50_000 ticks should
