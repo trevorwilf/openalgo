@@ -41,6 +41,31 @@ QUOTE_PAYLOAD = {
     },
 }
 
+# Snapshot endpoint shape — what AlpacaQuoteAdapter actually calls
+# post-snapshot fix. Combines latestTrade + latestQuote +
+# dailyBar + prevDailyBar.
+SNAPSHOT_PAYLOAD = {
+    "symbol": "AAPL",
+    "latestTrade": {
+        "t": "2026-04-23T14:30:00.123Z",
+        "p": 175.01, "s": 100, "x": "V",
+    },
+    "latestQuote": {
+        "t": "2026-04-23T14:30:00.150Z",
+        "ap": 175.02, "as": 200,
+        "bp": 175.00, "bs": 100,
+        "x": "XNAS",
+    },
+    "dailyBar": {
+        "t": "2026-04-23T00:00:00Z",
+        "o": 174.50, "h": 175.10, "l": 174.20, "c": 175.01, "v": 12345678,
+    },
+    "prevDailyBar": {
+        "t": "2026-04-22T00:00:00Z",
+        "o": 173.00, "h": 174.80, "l": 172.90, "c": 174.55, "v": 11111111,
+    },
+}
+
 BARS_PAYLOAD = {
     "bars": {
         "AAPL": [
@@ -69,7 +94,11 @@ def _paper_auth() -> AlpacaAuth:
 def _data_client() -> httpx.Client:
     def handler(req: httpx.Request) -> httpx.Response:
         path = req.url.path
+        if path == "/v2/stocks/AAPL/snapshot":
+            return httpx.Response(200, json=SNAPSHOT_PAYLOAD)
         if path == "/v2/stocks/AAPL/quotes/latest":
+            # Legacy fixture path — kept for any test that might
+            # still hit the old endpoint shape.
             return httpx.Response(200, json=QUOTE_PAYLOAD)
         if path == "/v2/stocks/bars":
             return httpx.Response(200, json=BARS_PAYLOAD)

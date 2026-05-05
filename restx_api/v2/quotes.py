@@ -273,6 +273,8 @@ def _dispatch_promoted(refs: list, *, broker: str, auth_token: str, adapter):
 
 
 def _quote_dict(q) -> dict[str, Any]:
+    from decimal import Decimal
+
     d = asdict(q)
     d["instrument_id"] = str(d.get("instrument_id")) if d.get("instrument_id") else None
     for k in ("bid", "ask", "last", "bid_size", "ask_size"):
@@ -280,6 +282,16 @@ def _quote_dict(q) -> dict[str, Any]:
             d[k] = str(d[k])
     if d.get("timestamp") is not None and hasattr(q.timestamp, "isoformat"):
         d["timestamp"] = q.timestamp.astimezone(timezone.utc).isoformat()
+    # Metadata may contain Decimal values (e.g. Alpaca's snapshot
+    # endpoint surfaces OHLC as Decimal). Flask's default JSON
+    # encoder doesn't handle Decimal, so the response would 500.
+    # Stringify any Decimal values defensively.
+    meta = d.get("metadata") or {}
+    if isinstance(meta, dict):
+        d["metadata"] = {
+            mk: (str(mv) if isinstance(mv, Decimal) else mv)
+            for mk, mv in meta.items()
+        }
     return d
 
 
