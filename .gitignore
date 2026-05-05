@@ -16,6 +16,7 @@ Thumbs.db
 .idea/
 .claude/settings.json
 .claude/settings.local.json
+.claude/schedule*
 .python-version
 config.ini
 .venvv
@@ -98,3 +99,4 @@ nul
 frontend/test-results-live/*
 frontend/playwright-report-live/*
 test-results-live/*
+.claude/scheduled_tasks.lock
