@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **1035**.
+Total classified files: **1040**.
 
 Classification semantics:
 
@@ -18,7 +18,7 @@ Classification semantics:
 | `BROKER_PLUGIN` | Under `broker/*` — broker facts only. |
 | `COMPATIBILITY_SHIM` | Explicit bridge between lanes (e.g. `domain/translators.py`). |
 
-## PROMOTED_CORE (144 files)
+## PROMOTED_CORE (149 files)
 
 - `__init__.py`
 - `conftest.py`
@@ -70,6 +70,7 @@ Classification semantics:
 - `restx_api/v2/chart/layouts.py`
 - `restx_api/v2/chart/templates.py`
 - `restx_api/v2/chart/watchlists.py`
+- `restx_api/v2/chart_audit.py`
 - `restx_api/v2/indicators_series.py`
 - `restx_api/v2/instruments.py`
 - `restx_api/v2/orders.py`
@@ -77,6 +78,7 @@ Classification semantics:
 - `restx_api/v2/plugins.py`
 - `restx_api/v2/quotes.py`
 - `restx_api/v2/regions.py`
+- `restx_api/v2/strategy_signals.py`
 - `restx_api/v2/streaming.py`
 - `restx_api/v2/venues.py`
 - `services/account_context_service.py`
@@ -88,12 +90,15 @@ Classification semantics:
 - `services/cancel_all_order_service.py`
 - `services/cancel_order_service.py`
 - `services/charts/__init__.py`
+- `services/charts/audit_logger.py`
 - `services/charts/bar_aggregator.py`
 - `services/charts/bar_resampler.py`
 - `services/charts/indicator_catalog.py`
 - `services/charts/indicator_compute.py`
 - `services/charts/intervals_service.py`
 - `services/charts/normalized_bar.py`
+- `services/charts/pre_trade_validator.py`
+- `services/charts/safety_defaults.py`
 - `services/charts/talipp_indicator_service.py`
 - `services/charts/tick_publisher.py`
 - `services/charts/valkey_client.py`
