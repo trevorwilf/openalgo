@@ -82,14 +82,22 @@ def get_margin_data(auth_token: str) -> dict[str, str]:
     long_mv = _coerce_decimal(body.get("long_market_value"))
     short_mv = _coerce_decimal(body.get("short_market_value"))
 
-    # Unrealized = current equity − (cash + cost basis approximation).
-    # Since /v2/account doesn't carry per-position cost basis, use the
-    # standard Alpaca derivation: long_market_value + short_market_value
-    # is the position MV; subtracting that from (equity - cash) gives
-    # an approximation of the unrealized component when positions are
-    # priced at last trade. For accounts without open positions this
-    # collapses to 0.
-    position_mv = long_mv + short_mv
+    # Gross position exposure (used to populate the funds-widget's
+    # "utiliseddebits" margin-used field).
+    #
+    # Alpaca's ``/v2/account`` reports ``short_market_value`` as a
+    # NEGATIVE number (the value owed on short positions, per their
+    # API docs). Naively summing ``long_mv + short_mv`` would NET the
+    # short exposure against the long exposure, understating the
+    # margin actually committed by short positions. We want gross
+    # exposure (long-side dollars + short-side dollars), so we take
+    # the absolute value of the short component before adding.
+    #
+    # Concrete example: long $10k AAPL, short $5k MSFT →
+    #   long_mv = 10000, short_mv = -5000
+    #   naive (buggy):   position_mv = 5000   (under-reports margin)
+    #   correct (gross): position_mv = 15000
+    position_mv = long_mv + abs(short_mv)
     available_cash = cash
     # ``equity - last_equity`` is intraday P&L — a useful proxy when
     # Alpaca doesn't expose explicit unrealized fields at the account

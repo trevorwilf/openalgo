@@ -94,20 +94,22 @@ class AlpacaOrderTranslator:
                 ),
             )
         if order.order_type not in _SUPPORTED_TYPES:
+            supported = sorted(t.value for t in _SUPPORTED_TYPES)
             raise UnsupportedCapability(
                 broker_code=self.broker_code,
                 capability_name="order_type",
                 details=(
-                    f"Alpaca MVP supports MARKET/LIMIT only, got "
+                    f"Alpaca supports order types {supported}; got "
                     f"{order.order_type.value}"
                 ),
             )
         if order.time_in_force not in _SUPPORTED_TIF:
+            supported_tif = sorted(t.value for t in _SUPPORTED_TIF)
             raise UnsupportedCapability(
                 broker_code=self.broker_code,
                 capability_name="time_in_force",
                 details=(
-                    f"Alpaca MVP supports DAY/GTC only, got "
+                    f"Alpaca supports time-in-force {supported_tif}; got "
                     f"{order.time_in_force.value}"
                 ),
             )

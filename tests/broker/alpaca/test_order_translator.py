@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections import namedtuple
 from decimal import Decimal
 
 import httpx
 import pytest
+
+_EnumStub = namedtuple("_EnumStub", ["value"])  # hashable, exposes .value
 
 from broker.alpaca.api.auth_api import AlpacaAuth, DATA_BASE_URL, PAPER_BASE_URL
 from broker.alpaca.api.order_api import AlpacaOrderTranslator
@@ -491,3 +494,57 @@ def test_cancel_order_delete():
     finally:
         t._client.close()
     assert called["delete"] is True
+
+
+class _BadOrder:
+    """Minimal order-shaped object for exercising AlpacaOrderTranslator
+    .validate() against bogus values. Bypasses NormalizedOrderRequest's
+    type-checked construction so we can simulate the error path that
+    fires when a future enum addition or a misuse slips an unsupported
+    value in.
+    """
+
+    def __init__(self, *, order_type=OrderType.MARKET, tif=TimeInForce.DAY):
+        self.order_type = order_type
+        self.time_in_force = tif
+        self.session = Session.REGULAR
+        self.quantity_unit = QuantityUnit.WHOLE
+
+
+def test_validate_unsupported_order_type_message_lists_actual_supported_set():
+    """Regression: the ``UnsupportedCapability`` raised for a bad
+    order_type used to advertise "MVP supports MARKET/LIMIT only"
+    even after STOP / STOP_LIMIT / TRAILING_STOP and the four auction
+    variants were added. Operators saw a misleading hint pointing to
+    a smaller set than the translator actually accepts.
+
+    The corrected message must enumerate the live set so an operator
+    debugging a 422 has the actual list to choose from.
+    """
+    t = AlpacaOrderTranslator()
+    bad = _BadOrder()
+    # Enum-shaped stub so the validator's ``.value`` formatting works
+    # the same way it would for a real (but unsupported) enum member.
+    bad.order_type = _EnumStub(value="garbage_type_str")
+    with pytest.raises(UnsupportedCapability) as exc:
+        t.validate(bad, _Resolved(), {"broker_code": "alpaca"})
+    # The new message must NOT contain the stale hint and MUST
+    # mention at least one of the actually-supported types.
+    msg = str(exc.value)
+    assert "MARKET/LIMIT only" not in msg
+    assert "TRAILING_STOP" in msg or "STOP_LIMIT" in msg
+
+
+def test_validate_unsupported_tif_message_lists_actual_supported_set():
+    """Regression: the TIF-rejection error used to advertise
+    "DAY/GTC only" but the translator now accepts IOC / FOK / OPG /
+    ATC as well. Surface the actual supported set.
+    """
+    t = AlpacaOrderTranslator()
+    bad = _BadOrder()
+    bad.time_in_force = _EnumStub(value="garbage_tif")
+    with pytest.raises(UnsupportedCapability) as exc:
+        t.validate(bad, _Resolved(), {"broker_code": "alpaca"})
+    msg = str(exc.value)
+    assert "DAY/GTC only" not in msg
+    assert "IOC" in msg or "GTC" in msg
