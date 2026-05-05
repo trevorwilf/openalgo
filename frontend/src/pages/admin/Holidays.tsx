@@ -99,13 +99,14 @@ export default function HolidaysPage() {
 
   // Convert HH:MM time string to epoch milliseconds for a given date.
   //
-  // Phase 4 (ADR 0009): The legacy admin Holidays page is India-only by
-  // design — the backing market_holidays table is the legacy India
-  // calendar. The +05:30 anchor below preserves that behavior. Phase 6
-  // gates this entire page to India-region; non-India deployments
-  // consume venue calendar via /api/v2/venues/<venue>/sessions instead.
-  // TODO(phase-6): replace this helper once the page is gated by
-  // is_india_region_active().
+  // Phase 4 (ADR 0009) + Phase 6 gate: this page is wrapped in
+  // ``<IndiaOnly>`` at App.tsx so the +05:30 anchor below only
+  // executes for an India-region session. Non-India deployments hit
+  // the structured "feature unavailable" empty state and never reach
+  // this code path. The backing market_holidays table is the legacy
+  // India calendar; non-India brokers consume their venue calendar
+  // via ``/api/v2/regions/<code>/holidays`` and
+  // ``/api/v2/venues/<code>/sessions``.
   const timeToEpochMs = (dateStr: string, timeStr: string): number => {
     const [hours, minutes] = timeStr.split(':').map(Number)
     const date = new Date(dateStr + 'T00:00:00+05:30') // legacy India venue tz

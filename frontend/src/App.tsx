@@ -420,8 +420,38 @@ function App() {
                 {/* Phase 7: Admin */}
                 <Route path="/admin" element={<AdminIndex />} />
                 <Route path="/admin/freeze" element={<FreezeQty />} />
-                <Route path="/admin/holidays" element={<Holidays />} />
-                <Route path="/admin/timings" element={<MarketTimings />} />
+                {/* /admin/holidays and /admin/timings target the legacy
+                 * India calendar (market_holidays table + IST-anchored
+                 * session windows). Non-India brokers (Alpaca / Schwab /
+                 * Webull / EU / UK) consume venue calendars via
+                 * /api/v2/regions/<code>/holidays and
+                 * /api/v2/venues/<code>/sessions instead — gate at the
+                 * route layer so a bookmarked URL surfaces the
+                 * structured "feature unavailable" empty state instead
+                 * of an India-shaped page that mis-renders in a
+                 * non-India deployment. */}
+                <Route
+                  path="/admin/holidays"
+                  element={
+                    <IndiaOnly
+                      feature="Trading Holidays admin"
+                      rationale="The admin Holidays page edits the legacy India market_holidays table (NSE/BSE/NFO/BFO holidays + Muhurat special sessions, anchored at +05:30). Non-India brokers consume their venue calendar via /api/v2/regions/<code>/holidays."
+                    >
+                      <Holidays />
+                    </IndiaOnly>
+                  }
+                />
+                <Route
+                  path="/admin/timings"
+                  element={
+                    <IndiaOnly
+                      feature="Market Timings admin"
+                      rationale="The admin Market Timings page edits IST-anchored exchange session windows specific to the legacy India calendar. Non-India brokers consume their venue session schedule via /api/v2/venues/<code>/sessions."
+                    >
+                      <MarketTimings />
+                    </IndiaOnly>
+                  }
+                />
                 {/* Phase 7: Telegram */}
                 <Route path="/telegram" element={<TelegramIndex />} />
                 <Route path="/telegram/config" element={<TelegramConfig />} />
