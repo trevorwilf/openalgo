@@ -172,13 +172,12 @@ def sync_instruments(
     sync_version = _sync_version()
     sync_id = uuid.uuid4()
     new_instruments = 0
-    map_rows: list[tuple[str, BrokerMapRow]] = []
 
     # Group by venue so we can batch broker_map inserts.
     by_venue: dict[str, list[BrokerMapRow]] = {}
     for row in rows:
-        symbol = row.get("symbol")
-        if not symbol:
+        broker_symbol = row.get("symbol")
+        if not broker_symbol:
             continue
         is_crypto = (row.get("class") or "").lower() == "crypto"
         if is_crypto:
@@ -187,18 +186,28 @@ def sync_instruments(
             tick_size = Decimal("0.0001")  # finer than equities
             currency = "USD"
             quantity_precision = 9  # crypto fractionable by default
+            # OpenAlgo canonical form for crypto uses '-' (BTC-USD)
+            # while Alpaca uses '/' (BTC/USD). Store the dash form
+            # as canonical_symbol so a v2 caller posting
+            # ``canonical_symbol=BTC-USD, venue_code=ALPACA_CRYPTO``
+            # resolves; keep ``broker_native_symbol`` as Alpaca's
+            # slash form on the broker_map row so the order layer
+            # round-trips it back unchanged when sending to /v2/orders.
+            canonical_symbol = broker_symbol.replace("/", "-")
         else:
             venue = _normalize_venue(row.get("exchange"))
             asset_class = "EQUITY"
             tick_size = Decimal("0.01")
             currency = "USD"
             quantity_precision = 9 if row.get("fractionable") else 0
+            # US equities round-trip identity — canonical == Alpaca form.
+            canonical_symbol = broker_symbol
 
-        existing = instruments_get_by_venue_symbol(venue, symbol)
+        existing = instruments_get_by_venue_symbol(venue, canonical_symbol)
         if existing is None:
             created = instruments_create(
                 venue_code=venue,
-                canonical_symbol=symbol,
+                canonical_symbol=canonical_symbol,
                 asset_class=asset_class,
                 instrument_kind="CASH",
                 tick_size=tick_size,
@@ -224,7 +233,7 @@ def sync_instruments(
 
         by_venue.setdefault(venue, []).append(
             BrokerMapRow(
-                external_symbol=symbol,
+                external_symbol=broker_symbol,
                 external_token=str(row.get("id", "")) or None,
                 instrument_id=instrument_id,
             )
