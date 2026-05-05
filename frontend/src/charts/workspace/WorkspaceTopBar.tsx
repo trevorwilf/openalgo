@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useBrokerStore } from '@/stores/brokerStore'
 import { makeTab, selectActiveTab, useWorkspaceStore } from '../state/workspaceStore'
+import { EngineSelector } from './EngineSelector'
 
 interface WorkspaceTopBarProps {
   /** Test override — when set, the top bar reports this paper/live
@@ -100,6 +101,7 @@ export function WorkspaceTopBar({
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        <EngineSelector className="rounded-sm border bg-background px-2 py-1 text-xs" />
         {broker && (
           <span
             data-testid="broker-label"
