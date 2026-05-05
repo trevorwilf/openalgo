@@ -72,16 +72,27 @@ export interface AdapterImporters {
   loadAdvanced(): Promise<{ createAdapter: () => ChartEngineAdapter }>
 }
 
-let _importers: AdapterImporters = {
-  // Phase 3 wires real implementations. Phase 2 ships only the
-  // contract surface — these throw if invoked, signalling "Phase 3
-  // hasn't shipped yet" rather than silently producing a stub.
-  loadLightweight: () =>
-    Promise.reject(new Error('Lightweight adapter not yet implemented (Phase 3 ships it)')),
-  loadKlineChartPro: () =>
-    Promise.reject(new Error('KLineChartPro adapter not yet implemented (Phase 3 ships it)')),
-  loadAdvanced: () =>
-    Promise.reject(new Error('Advanced Charts adapter is a Phase 3 stub — SDK absent')),
+let _importers: AdapterImporters = makeDefaultImporters()
+
+function makeDefaultImporters(): AdapterImporters {
+  return {
+    loadLightweight: () =>
+      import('./lightweight/LightweightAdapter').then((m) => ({
+        createAdapter: m.createAdapter,
+      })),
+    loadKlineChartPro: () =>
+      import('./klinechart/KLineChartProAdapter').then((m) => ({
+        createAdapter: m.createAdapter,
+      })),
+    // Advanced Charts: dynamic-import the stub adapter. The loader's
+    // `tradingViewSdkAvailable()` probe gates this — when the SDK
+    // files are absent (the OSS default), the loader falls back to
+    // Lightweight before reaching this importer.
+    loadAdvanced: () =>
+      import('./tradingview/AdvancedChartsAdapter').then((m) => ({
+        createAdapter: m.createAdapter,
+      })),
+  }
 }
 
 /** Test-only seam. Phase 3 will assign the real importers. */
@@ -89,16 +100,9 @@ export function setAdapterImporters(importers: Partial<AdapterImporters>): void 
   _importers = { ..._importers, ...importers }
 }
 
-/** Reset the importers to their Phase 2 defaults. */
+/** Reset the importers to the Phase 3 defaults (real adapters). */
 export function resetAdapterImportersForTests(): void {
-  _importers = {
-    loadLightweight: () =>
-      Promise.reject(new Error('Lightweight adapter not yet implemented (Phase 3 ships it)')),
-    loadKlineChartPro: () =>
-      Promise.reject(new Error('KLineChartPro adapter not yet implemented (Phase 3 ships it)')),
-    loadAdvanced: () =>
-      Promise.reject(new Error('Advanced Charts adapter is a Phase 3 stub — SDK absent')),
-  }
+  _importers = makeDefaultImporters()
   _tvProbe = () => false
 }
 
