@@ -49,15 +49,40 @@ Phases 2–7 systematically close every CONFIRMED and PARTIAL row in
 `docs/refactor/v3_baseline_audit.md`. Each gap row is updated to FIXED
 with a pointer to the closing phase by Phase 12.
 
-### B — Hard-block v1 for non-India brokers.
+### B — Hard-block v1 for non-India brokers (with v1→v2 compatibility bridge).
 
 The legacy `/api/v1/*` routes carry implicit India semantics in their
 schemas, response shapes, and underlying services. Allowing a non-India
-broker to call them is a correctness hazard. Phase 2 adds a request-
-time guard returning HTTP 410 Gone with structured payload
-`{"status":"error","code":"v1_unavailable_for_non_india_broker"}` for
-every v1 route when the active broker's `supported_regions` excludes
-`india`.
+broker to invoke the legacy India services is a correctness hazard.
+Phase 2 adds a request-time guard. The guard runs for every v1 route
+when the active broker's `supported_regions` excludes `india`, and:
+
+1. **Bridges first.** A registered handler in
+   `services/v1_compat_bridge.py::BRIDGES` (keyed on the v1 path) takes
+   the request, re-shapes it onto the equivalent `/api/v2` payload, and
+   dispatches through the promoted-lane services. The legacy India
+   services are NEVER invoked on this path. Today the bridge covers
+   `funds`, `positionbook`, `holdings`, `orderbook`, `tradebook`,
+   `placeorder`, `cancelorder`, `quotes`, `multiquotes`, `depth`, and
+   `history`. Bridged paths return whatever shape the bridge handler
+   produces (typically the v1 envelope, populated from v2 data).
+
+2. **Falls back to 410.** When the path is *not* covered by a bridge
+   handler, the guard returns HTTP 410 Gone with structured payload
+   `{"status":"error","code":"v1_unavailable_for_non_india_broker"}`.
+   This is the original v4 contract for paths the bridge does not
+   handle.
+
+The spirit of "non-India brokers must never invoke the legacy India
+services" is preserved — the bridge is the *only* code path a non-India
+session reaches on `/api/v1`, and every bridge handler dispatches
+internally through `/api/v2`. The URL surface stays compatible for
+external clients (TradingView, Excel, MCP) that have integrations
+predating `/api/v2`.
+
+The v1 sunset described in ADR 0029 retires the bridge alongside the
+underlying URL surface; until then the bridge is the canonical
+behavior for promoted brokers on `/api/v1`.
 
 ### C — Generalize four advanced features into provider contracts.
 
