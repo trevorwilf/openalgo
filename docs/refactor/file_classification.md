@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **1026**.
+Total classified files: **1032**.
 
 Classification semantics:
 
@@ -18,7 +18,7 @@ Classification semantics:
 | `BROKER_PLUGIN` | Under `broker/*` — broker facts only. |
 | `COMPATIBILITY_SHIM` | Explicit bridge between lanes (e.g. `domain/translators.py`). |
 
-## PROMOTED_CORE (136 files)
+## PROMOTED_CORE (141 files)
 
 - `__init__.py`
 - `conftest.py`
@@ -76,6 +76,7 @@ Classification semantics:
 - `restx_api/v2/plugins.py`
 - `restx_api/v2/quotes.py`
 - `restx_api/v2/regions.py`
+- `restx_api/v2/streaming.py`
 - `restx_api/v2/venues.py`
 - `services/account_context_service.py`
 - `services/action_center_service.py`
@@ -86,11 +87,15 @@ Classification semantics:
 - `services/cancel_all_order_service.py`
 - `services/cancel_order_service.py`
 - `services/charts/__init__.py`
+- `services/charts/bar_aggregator.py`
 - `services/charts/bar_resampler.py`
 - `services/charts/intervals_service.py`
 - `services/charts/normalized_bar.py`
+- `services/charts/talipp_indicator_service.py`
+- `services/charts/tick_publisher.py`
 - `services/charts/valkey_client.py`
 - `services/charts/ws_envelope.py`
+- `services/charts/ws_fanout.py`
 - `services/close_position_service.py`
 - `services/depth_service.py`
 - `services/feature_gate_service.py`
@@ -385,7 +390,7 @@ Classification semantics:
 - `services/screeners/providers/uk/__init__.py`
 - `services/screeners/providers/us/__init__.py`
 
-## BROKER_PLUGIN (577 files)
+## BROKER_PLUGIN (578 files)
 
 - `broker/__init__.py`
 - `broker/_mock_schwab_like/__init__.py`
@@ -443,6 +448,7 @@ Classification semantics:
 - `broker/alpaca/mapping/transform_data.py`
 - `broker/alpaca/streaming/__init__.py`
 - `broker/alpaca/streaming/alpaca_adapter.py`
+- `broker/alpaca/streaming/alpaca_market_data_stream.py`
 - `broker/alpaca/streaming/alpaca_trade_updates.py`
 - `broker/alpaca/streaming/alpaca_websocket.py`
 - `broker/alpaca/sync/__init__.py`
