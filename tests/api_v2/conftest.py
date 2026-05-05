@@ -28,13 +28,25 @@ def flask_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag_on):
     from flask import Flask
 
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'phase6.db'}")
-    from database import broker_rules_repo, instruments_repo, venue_schedule_repo
+    from database import (
+        broker_rules_repo,
+        chart_workspace_db,
+        instruments_repo,
+        venue_schedule_repo,
+    )
 
     instruments_repo._reset_engine_for_tests()
     instruments_repo.init_instrument_tables()
     broker_rules_repo._reset_engine_for_tests()
     broker_rules_repo.init_broker_rules_tables()
     venue_schedule_repo.init_venue_schedule_tables()
+    # Chart workspace tests rely on the same per-test SQLite, but the
+    # module's get_engine() lazily caches an engine bound to whichever
+    # DATABASE_URL was set at first-call time. Reset the cache and
+    # initialize the chart tables on the per-test DB so chart layout
+    # state does not leak across tests via the global db/openalgo.db.
+    chart_workspace_db._reset_engine_for_tests()
+    chart_workspace_db.init_chart_workspace_db()
 
     app = Flask(__name__)
     app.secret_key = "phase6-test"
@@ -46,6 +58,7 @@ def flask_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag_on):
     yield app
     instruments_repo._reset_engine_for_tests()
     broker_rules_repo._reset_engine_for_tests()
+    chart_workspace_db._reset_engine_for_tests()
 
 
 @pytest.fixture
