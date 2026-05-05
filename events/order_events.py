@@ -67,6 +67,13 @@ class OrderCancelledEvent(OrderEvent):
     topic: str = "order.cancelled"
     orderid: str = ""
     status: str = ""
+    # symbol/exchange match the schema of every other order event
+    # (placed/modified/failed). Without them, ``**common`` unpack
+    # from broker streaming code (which builds one shared payload
+    # per event_type) raises ``TypeError: unexpected keyword
+    # argument 'symbol'`` and the cancel never reaches the bus.
+    symbol: str = ""
+    exchange: str = ""
 
 
 @dataclass
