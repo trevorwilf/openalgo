@@ -13,6 +13,8 @@
 // remain stable across resizes because `react-resizable-panels` keys on
 // the Panel id (we set it to the cell id).
 
+import type { ReactElement } from 'react'
+
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { cn } from '@/lib/utils'
 import type { CellConfig, LayoutTemplate, TabState } from '../state/workspaceStore'
@@ -43,12 +45,12 @@ function Layout1({ cells }: { cells: CellConfig[] }) {
 function Layout2H({ cells }: { cells: CellConfig[] }) {
   return (
     <div data-testid="layout-2H" className="h-full w-full">
-      <ResizablePanelGroup direction="vertical" className="h-full w-full">
-        <ResizablePanel id={cells[0].id} order={0} defaultSize={50}>
+      <ResizablePanelGroup orientation="vertical" className="h-full w-full">
+        <ResizablePanel id={cells[0].id} defaultSize={50}>
           <PanelHost cell={cells[0]} />
         </ResizablePanel>
         <ResizableHandle withHandle />
-        <ResizablePanel id={cells[1].id} order={1} defaultSize={50}>
+        <ResizablePanel id={cells[1].id} defaultSize={50}>
           <PanelHost cell={cells[1]} />
         </ResizablePanel>
       </ResizablePanelGroup>
@@ -59,12 +61,12 @@ function Layout2H({ cells }: { cells: CellConfig[] }) {
 function Layout2V({ cells }: { cells: CellConfig[] }) {
   return (
     <div data-testid="layout-2V" className="h-full w-full">
-      <ResizablePanelGroup direction="horizontal" className="h-full w-full">
-        <ResizablePanel id={cells[0].id} order={0} defaultSize={50}>
+      <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
+        <ResizablePanel id={cells[0].id} defaultSize={50}>
           <PanelHost cell={cells[0]} />
         </ResizablePanel>
         <ResizableHandle withHandle />
-        <ResizablePanel id={cells[1].id} order={1} defaultSize={50}>
+        <ResizablePanel id={cells[1].id} defaultSize={50}>
           <PanelHost cell={cells[1]} />
         </ResizablePanel>
       </ResizablePanelGroup>
@@ -75,18 +77,18 @@ function Layout2V({ cells }: { cells: CellConfig[] }) {
 function Layout3({ cells }: { cells: CellConfig[] }) {
   return (
     <div data-testid="layout-3-1+2" className="h-full w-full">
-      <ResizablePanelGroup direction="horizontal" className="h-full w-full">
-        <ResizablePanel id={cells[0].id} order={0} defaultSize={60}>
+      <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
+        <ResizablePanel id={cells[0].id} defaultSize={60}>
           <PanelHost cell={cells[0]} />
         </ResizablePanel>
         <ResizableHandle withHandle />
-        <ResizablePanel order={1} defaultSize={40}>
-          <ResizablePanelGroup direction="vertical">
-            <ResizablePanel id={cells[1].id} order={0} defaultSize={50}>
+        <ResizablePanel defaultSize={40}>
+          <ResizablePanelGroup orientation="vertical">
+            <ResizablePanel id={cells[1].id} defaultSize={50}>
               <PanelHost cell={cells[1]} />
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel id={cells[2].id} order={1} defaultSize={50}>
+            <ResizablePanel id={cells[2].id} defaultSize={50}>
               <PanelHost cell={cells[2]} />
             </ResizablePanel>
           </ResizablePanelGroup>
@@ -99,26 +101,26 @@ function Layout3({ cells }: { cells: CellConfig[] }) {
 function Layout4Quad({ cells }: { cells: CellConfig[] }) {
   return (
     <div data-testid="layout-4-quad" className="h-full w-full">
-      <ResizablePanelGroup direction="vertical" className="h-full w-full">
-        <ResizablePanel order={0} defaultSize={50}>
-          <ResizablePanelGroup direction="horizontal">
-            <ResizablePanel id={cells[0].id} order={0} defaultSize={50}>
+      <ResizablePanelGroup orientation="vertical" className="h-full w-full">
+        <ResizablePanel defaultSize={50}>
+          <ResizablePanelGroup orientation="horizontal">
+            <ResizablePanel id={cells[0].id} defaultSize={50}>
               <PanelHost cell={cells[0]} />
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel id={cells[1].id} order={1} defaultSize={50}>
+            <ResizablePanel id={cells[1].id} defaultSize={50}>
               <PanelHost cell={cells[1]} />
             </ResizablePanel>
           </ResizablePanelGroup>
         </ResizablePanel>
         <ResizableHandle withHandle />
-        <ResizablePanel order={1} defaultSize={50}>
-          <ResizablePanelGroup direction="horizontal">
-            <ResizablePanel id={cells[2].id} order={0} defaultSize={50}>
+        <ResizablePanel defaultSize={50}>
+          <ResizablePanelGroup orientation="horizontal">
+            <ResizablePanel id={cells[2].id} defaultSize={50}>
               <PanelHost cell={cells[2]} />
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel id={cells[3].id} order={1} defaultSize={50}>
+            <ResizablePanel id={cells[3].id} defaultSize={50}>
               <PanelHost cell={cells[3]} />
             </ResizablePanel>
           </ResizablePanelGroup>
@@ -131,19 +133,19 @@ function Layout4Quad({ cells }: { cells: CellConfig[] }) {
 function Layout6Grid({ cells }: { cells: CellConfig[] }) {
   return (
     <div data-testid="layout-6-grid" className="h-full w-full">
-      <ResizablePanelGroup direction="vertical" className="h-full w-full">
-        <ResizablePanel order={0} defaultSize={50}>
-          <ResizablePanelGroup direction="horizontal">
+      <ResizablePanelGroup orientation="vertical" className="h-full w-full">
+        <ResizablePanel defaultSize={50}>
+          <ResizablePanelGroup orientation="horizontal">
             {cells.slice(0, 3).map((c, i) => (
-              <PanelGroupRow key={c.id} cell={c} order={i} isLast={i === 2} />
+              <PanelGroupRow key={c.id} cell={c} isLast={i === 2} />
             ))}
           </ResizablePanelGroup>
         </ResizablePanel>
         <ResizableHandle withHandle />
-        <ResizablePanel order={1} defaultSize={50}>
-          <ResizablePanelGroup direction="horizontal">
+        <ResizablePanel defaultSize={50}>
+          <ResizablePanelGroup orientation="horizontal">
             {cells.slice(3, 6).map((c, i) => (
-              <PanelGroupRow key={c.id} cell={c} order={i} isLast={i === 2} />
+              <PanelGroupRow key={c.id} cell={c} isLast={i === 2} />
             ))}
           </ResizablePanelGroup>
         </ResizablePanel>
@@ -154,16 +156,14 @@ function Layout6Grid({ cells }: { cells: CellConfig[] }) {
 
 function PanelGroupRow({
   cell,
-  order,
   isLast,
 }: {
   cell: CellConfig
-  order: number
   isLast: boolean
 }) {
   return (
     <>
-      <ResizablePanel id={cell.id} order={order} defaultSize={33}>
+      <ResizablePanel id={cell.id} defaultSize={33}>
         <PanelHost cell={cell} />
       </ResizablePanel>
       {!isLast && <ResizableHandle withHandle />}
@@ -171,7 +171,7 @@ function PanelGroupRow({
   )
 }
 
-const LAYOUT_RENDERERS: Record<LayoutTemplate, (props: { cells: CellConfig[] }) => JSX.Element> = {
+const LAYOUT_RENDERERS: Record<LayoutTemplate, (props: { cells: CellConfig[] }) => ReactElement> = {
   '1': Layout1,
   '2H': Layout2H,
   '2V': Layout2V,

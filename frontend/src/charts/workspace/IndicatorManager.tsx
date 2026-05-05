@@ -8,7 +8,6 @@
 import { Plus, Trash2, X } from 'lucide-react'
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { getIndicator, INDICATOR_CATALOG, type IndicatorDef } from '../types/indicators'
 

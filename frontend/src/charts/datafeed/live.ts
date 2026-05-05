@@ -67,9 +67,9 @@ export function resetLiveStateForTests(): void {
 }
 
 export async function subscribeBars(args: SubscribeBarsArgs): Promise<BarSubscription> {
-  const symbol = args.ref.canonical_symbol ?? args.ref.broker_symbol ?? null
+  const symbol = args.ref.canonical_symbol ?? null
   if (!symbol) {
-    throw new Error('subscribeBars: ref must include canonical_symbol or broker_symbol')
+    throw new Error('subscribeBars: ref must include canonical_symbol')
   }
   const subscription_id = nextSubId()
   const transport: 'websocket' | 'polling' =
