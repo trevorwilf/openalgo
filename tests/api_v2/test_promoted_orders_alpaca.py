@@ -135,4 +135,8 @@ def test_place_market_aapl_via_promoted_alpaca(flask_app, monkeypatch):
     assert resp.status_code == 200, resp.get_json()
     j = resp.get_json()
     assert j["data"]["order_id"] == "alpaca-order-1"
-    assert j["data"]["status"] == "new"
+    # ``status`` is canonical (domain.enums.OrderStatus.NEW.value =
+    # "NEW") — the native Alpaca status "new" is preserved at
+    # ``native_status``.
+    assert j["data"]["status"] == "NEW"
+    assert j["data"]["native_status"] == "new"
