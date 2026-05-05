@@ -56,13 +56,21 @@ def test_invariant_7_advanced_feature_provider_contracts_exist():
 
 
 def test_invariant_5_v1_lane_blocks_non_india_brokers():
-    """Invariant 5 (request-time) — v1 routes return 410 for non-India."""
+    """Invariant 5 (request-time) — v1 routes return 410 for non-India,
+    OR pass through the v1→v2 compatibility bridge (per the v6 update
+    to ADR 0023 Decision B). Either way the legacy India services are
+    never invoked on the non-India request path.
+    """
+    # Smoke-import the live test names so this contract test fails
+    # loudly if either the bridge-passthrough test or the 410-fallback
+    # test is removed in a future refactor.
     from tests.contracts.test_v1_lane_blocks_non_india import (
-        test_non_india_broker_blocked_with_410,
-        flask_app as _flask_app_fixture,
+        test_non_india_broker_bridged_when_handler_matches,  # noqa: F401
+        test_non_india_broker_blocked_with_410_when_bridge_misses,  # noqa: F401
+        flask_app as _flask_app_fixture,  # noqa: F401
     )
 
-    # Cannot directly invoke the test here because it depends on a
+    # Cannot directly invoke those tests here because they depend on a
     # pytest fixture. Instead assert the guard module exists.
     # Phase 9-bis-physical (T-23 Group D) — guard relocated to
     # market_regions/india/legacy_v1/restx_api/_v1_lane_guard.py;
