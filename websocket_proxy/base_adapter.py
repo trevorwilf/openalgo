@@ -317,9 +317,17 @@ class BaseBrokerWebSocketAdapter(ABC):
             return
         self._zmq_cleaned_up = True
 
+        # During ``__del__`` Python may have already started tearing down
+        # the instance ``__dict__``, so ``self.logger`` can be missing
+        # even though it was set in ``__init__``. Fall back to the
+        # module-level ``logger`` so cleanup never logs a stack-trace
+        # of its own. (The actual ZMQ teardown is the important part —
+        # the logging is just observability.)
+        log = getattr(self, "logger", logger)
+
         # Skip cleanup if using shared ZMQ (managed by ConnectionPool)
         if hasattr(self, "_uses_shared_zmq") and self._uses_shared_zmq:
-            self.logger.debug("Skipping ZMQ cleanup - using shared publisher")
+            log.debug("Skipping ZMQ cleanup - using shared publisher")
             # Still decrement instance count (only once due to _zmq_cleaned_up flag)
             with self._context_lock:
                 BaseBrokerWebSocketAdapter._instance_count = max(0, BaseBrokerWebSocketAdapter._instance_count - 1)
@@ -330,31 +338,31 @@ class BaseBrokerWebSocketAdapter(ABC):
             if hasattr(self, "zmq_port") and self.zmq_port:
                 with self._port_lock:
                     self._bound_ports.discard(self.zmq_port)
-                    self.logger.info(f"Released port {self.zmq_port}")
+                    log.info(f"Released port {self.zmq_port}")
 
             # Close the socket
             if hasattr(self, "socket") and self.socket:
                 self.socket.close(linger=0)  # Don't linger on close
                 self.socket = None
-                self.logger.info("ZeroMQ socket closed")
+                log.info("ZeroMQ socket closed")
 
             # Decrement instance count and cleanup shared context if last instance
             with self._context_lock:
                 BaseBrokerWebSocketAdapter._instance_count = max(0, BaseBrokerWebSocketAdapter._instance_count - 1)
-                self.logger.debug(f"Adapter instance count after cleanup: {BaseBrokerWebSocketAdapter._instance_count}")
+                log.debug(f"Adapter instance count after cleanup: {BaseBrokerWebSocketAdapter._instance_count}")
 
                 # If this was the last instance, clean up shared context
                 if BaseBrokerWebSocketAdapter._instance_count == 0 and BaseBrokerWebSocketAdapter._shared_context:
-                    self.logger.info("Last adapter instance - cleaning up shared ZMQ context")
+                    log.info("Last adapter instance - cleaning up shared ZMQ context")
                     try:
                         BaseBrokerWebSocketAdapter._shared_context.term()
                     except Exception as ctx_err:
-                        self.logger.warning(f"Error terminating shared context: {ctx_err}")
+                        log.warning(f"Error terminating shared context: {ctx_err}")
                     finally:
                         BaseBrokerWebSocketAdapter._shared_context = None
 
         except Exception as e:
-            self.logger.exception(f"Error cleaning up ZeroMQ resources: {e}")
+            log.exception(f"Error cleaning up ZeroMQ resources: {e}")
 
     def __del__(self):
         """
