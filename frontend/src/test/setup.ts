@@ -22,19 +22,41 @@ Object.defineProperty(window, 'matchMedia', {
   })),
 })
 
-// Mock ResizeObserver
-window.ResizeObserver = vi.fn().mockImplementation(() => ({
-  observe: vi.fn(),
-  unobserve: vi.fn(),
-  disconnect: vi.fn(),
-}))
+// Mock ResizeObserver — must be class-shaped so `new ResizeObserver(...)`
+// works (react-resizable-panels and similar libraries instantiate it).
+class MockResizeObserver {
+  observe(): void {
+    /* no-op */
+  }
+  unobserve(): void {
+    /* no-op */
+  }
+  disconnect(): void {
+    /* no-op */
+  }
+}
+window.ResizeObserver = MockResizeObserver as unknown as typeof window.ResizeObserver
 
-// Mock IntersectionObserver
-window.IntersectionObserver = vi.fn().mockImplementation(() => ({
-  observe: vi.fn(),
-  unobserve: vi.fn(),
-  disconnect: vi.fn(),
-}))
+// Mock IntersectionObserver — same constructor-shape requirement.
+class MockIntersectionObserver {
+  readonly root: Element | null = null
+  readonly rootMargin: string = ''
+  readonly thresholds: readonly number[] = []
+  observe(): void {
+    /* no-op */
+  }
+  unobserve(): void {
+    /* no-op */
+  }
+  disconnect(): void {
+    /* no-op */
+  }
+  takeRecords(): IntersectionObserverEntry[] {
+    return []
+  }
+}
+window.IntersectionObserver =
+  MockIntersectionObserver as unknown as typeof window.IntersectionObserver
 
 // Mock scrollTo
 window.scrollTo = vi.fn()
