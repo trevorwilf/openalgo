@@ -65,6 +65,33 @@ _SUPPORTED_TYPES = _ROUND_TRIPPABLE_ORDER_TYPES | AUCTION_ORDER_TYPES
 _SUPPORTED_VENUES = _SUPPORTED_VENUES | _CRYPTO_VENUES
 
 
+class _ComboLegOrder:
+    """Order-shaped view of a combo ``OrderLeg`` for ``validate()``.
+
+    A combo leg only carries per-leg fields (side, order_type, qty,
+    price, trigger_price); ``time_in_force`` and ``session`` live on
+    the parent ``NormalizedComboOrderRequest``. ``validate()`` reads
+    both flavors of field, so this lightweight wrapper composes them
+    into a single object per leg without mutating the immutable
+    pydantic models.
+    """
+
+    __slots__ = (
+        "order_type",
+        "time_in_force",
+        "session",
+        "quantity_unit",
+        "extended_hours",
+    )
+
+    def __init__(self, combo: Any, leg: Any) -> None:
+        self.order_type = leg.order_type
+        self.time_in_force = combo.time_in_force
+        self.session = combo.session
+        self.quantity_unit = leg.quantity_unit
+        self.extended_hours = bool((combo.metadata or {}).get("extended_hours"))
+
+
 class AlpacaOrderTranslator:
     broker_code = "alpaca"
 
@@ -321,6 +348,20 @@ class AlpacaOrderTranslator:
         if len(instruments_by_leg) != len(combo.legs):
             raise ValueError(
                 "instruments_by_leg length must match combo.legs length"
+            )
+
+        # Per-leg invariants: defer to ``validate()`` so the same
+        # venue / order_type / time_in_force / session / quantity_unit
+        # / extended-hours rules apply to each leg as they would to a
+        # standalone single order. The combo-level TIF and session
+        # propagate from the parent (per ``_to_native_single_leg``),
+        # so a bracket leg whose order_type isn't in the supported set
+        # fails validate-time with an ``order_type`` capability code
+        # rather than waiting for serialization to surface a
+        # ``*_price`` failure further downstream.
+        for leg, inst in zip(combo.legs, instruments_by_leg):
+            self.validate(
+                _ComboLegOrder(combo, leg), inst, account_ctx
             )
 
         # Combo-level invariant: every leg must trade the same

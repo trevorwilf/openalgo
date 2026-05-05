@@ -160,6 +160,68 @@ def test_validate_otoco_take_profit_must_be_limit():
         )
 
 
+def test_validate_combo_rejects_unsupported_leg_venue():
+    """Regression: ``validate_combo`` used to skip per-leg validation
+    despite a docstring promising otherwise. A leg routed to a venue
+    Alpaca doesn't trade should be rejected at validate-time with a
+    ``venue`` capability code, not silently passed to serialization
+    where the failure mode is less clear.
+    """
+    combo = NormalizedComboOrderRequest(
+        combo_type=ComboType.OCO,
+        time_in_force=TimeInForce.DAY,
+        session=Session.REGULAR,
+        legs=[
+            _leg(order_type=OrderType.LIMIT, price="200.00",
+                 side=OrderSide.SELL),
+            _leg(order_type=OrderType.STOP, trigger="175.00",
+                 side=OrderSide.SELL),
+        ],
+    )
+    with pytest.raises(UnsupportedCapability) as exc:
+        AlpacaOrderTranslator().validate_combo(
+            combo,
+            # Both legs pin the same symbol (so the cross-symbol check
+            # doesn't trip first), but legs[1]'s instrument is on
+            # XLON — Alpaca doesn't trade that venue.
+            [_Resolved(), _Resolved(venue="XLON")],
+            _ctx(),
+        )
+    assert exc.value.capability_name == "venue"
+
+
+def test_validate_combo_rejects_lots_quantity_unit_in_a_leg():
+    """Regression: ``validate_combo`` must reject any leg whose
+    ``quantity_unit`` is LOTS — Alpaca doesn't support lot-based
+    sizing. Previously the leg slipped through and only failed at
+    serialization with an unrelated code.
+    """
+    combo = NormalizedComboOrderRequest(
+        combo_type=ComboType.OCO,
+        time_in_force=TimeInForce.DAY,
+        session=Session.REGULAR,
+        legs=[
+            OrderLeg(
+                instrument_ref=InstrumentRef(
+                    venue_code="XNAS", canonical_symbol="AAPL"
+                ),
+                side=OrderSide.SELL,
+                quantity=Decimal("1"),
+                quantity_unit=QuantityUnit.LOTS,  # unsupported on Alpaca
+                order_type=OrderType.LIMIT,
+                price=Decimal("200.00"),
+            ),
+            _leg(order_type=OrderType.STOP, trigger="175.00",
+                 side=OrderSide.SELL),
+        ],
+    )
+    with pytest.raises(UnsupportedCapability) as exc:
+        AlpacaOrderTranslator().validate_combo(
+            combo, [_Resolved(), _Resolved()], _ctx()
+        )
+    assert exc.value.capability_name == "quantity_unit"
+
+
 def test_validate_combo_cross_symbol_rejected():
     combo = NormalizedComboOrderRequest(
         combo_type=ComboType.OCO,
