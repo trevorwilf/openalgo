@@ -72,6 +72,8 @@ const WebSocketTest = lazy(() => import('@/pages/WebSocketTest'))
 const Playground = lazy(() => import('@/pages/Playground'))
 const Historify = lazy(() => import('@/india_legacy/pages/Historify'))
 const HistorifyCharts = lazy(() => import('@/india_legacy/pages/HistorifyCharts'))
+// Phase 2 (Premier Charting System) — region-agnostic /charts workspace.
+const ChartWorkspace = lazy(() => import('@/charts/workspace/ChartWorkspace'))
 
 // Tools & Option Chain
 const Tools = lazy(() => import('@/india_legacy/pages/Tools'))
@@ -471,6 +473,10 @@ function App() {
                 />
                 {/* Flow Editor (full-width for canvas) */}
                 <Route path="/flow/editor/:id" element={<FlowEditor />} />
+                {/* Phase 2 (Premier Charting System) — region-agnostic
+                    /charts workspace. Visible to ALL authenticated
+                    brokers; NOT wrapped in <IndiaOnly>. */}
+                <Route path="/charts" element={<ChartWorkspace />} />
               </Route>
 
               {/* 404 Not Found */}

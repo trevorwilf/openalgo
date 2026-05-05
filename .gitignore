@@ -100,3 +100,12 @@ frontend/test-results-live/*
 frontend/playwright-report-live/*
 test-results-live/*
 .claude/scheduled_tasks.lock
+
+# Phase 2 (Premier Charting System) — TradingView Advanced Charts SDK
+# is FAC-licensed and never committed. Keep the README that explains
+# how to drop your SDK files in locally; ignore every other file under
+# `frontend/private/`.
+frontend/private/**
+!frontend/private/
+!frontend/private/tradingview/
+!frontend/private/tradingview/README.md
