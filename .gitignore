@@ -111,10 +111,20 @@ frontend/private/**
 !frontend/private/tradingview/README.md
 reports/*
 
-# strategies
+# strategies — block user-uploaded scripts but track the canonical
+# bowaka deployment artifacts (the bat files / xml task definitions /
+# canonical .py and .yaml configs operators rely on).
 strategies/scripts/*
+!strategies/scripts/run_bowaka_prefilter.bat
+!strategies/scripts/BowakaPrefilter.xml
+!strategies/scripts/bowaka_prefilter.py
+!strategies/scripts/bowaka_prefilter.yaml
+!strategies/scripts/bowaka_strategy.py
+!strategies/scripts/bowaka_strategy.yaml
+!strategies/scripts/bowaka_strategy_README.md
 strategies/scripts/data/state.json
 strategies/scripts/data/state.json.tmp
 strategies/scripts/logs/*.log
 strategies/scripts/KILL_*.flag
 strategies/scripts/data/daily_summary.jsonl
+tests/e2e_smoke/_artifacts/*
