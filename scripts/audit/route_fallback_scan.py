@@ -135,13 +135,27 @@ class RouteEntry:
 
 
 def _parse_v1_namespace_paths() -> dict[str, str]:
-    """Map module name -> URL path from `restx_api/__init__.py`."""
+    """Map module name -> URL path from `restx_api/__init__.py`.
+
+    Handles both legacy relative imports (``from .module import``) and
+    the absolute-path form used after the Phase 9-bis-physical
+    relocation of v1 internals to
+    ``market_regions/india/legacy_v1/restx_api/``.
+    """
     text = V1_INIT.read_text(encoding="utf-8")
     ns_alias_to_module: dict[str, str] = {}
+    # Pattern A — legacy relative form: ``from .module import api as alias``
+    rel_pat = re.compile(
+        r"\s*from\s+\.([\w_]+)\s+import\s+api\s+as\s+([\w_]+)\s*$"
+    )
+    # Pattern B — absolute form after physical relocation:
+    # ``from market_regions.india.legacy_v1.restx_api.module import api as alias``
+    abs_pat = re.compile(
+        r"\s*from\s+market_regions\.india\.legacy_v1\.restx_api\.([\w_]+)"
+        r"\s+import\s+api\s+as\s+([\w_]+)\s*$"
+    )
     for line in text.splitlines():
-        m = re.match(
-            r"\s*from\s+\.([\w_]+)\s+import\s+api\s+as\s+([\w_]+)\s*$", line
-        )
+        m = rel_pat.match(line) or abs_pat.match(line)
         if m:
             module, alias = m.group(1), m.group(2)
             ns_alias_to_module[alias] = module
@@ -312,9 +326,20 @@ def _gather_entries() -> list[RouteEntry]:
     v2_paths = _parse_v2_namespace_paths()
 
     entries: list[RouteEntry] = []
+    # v1 modules can live in two places after the Phase 9-bis-physical
+    # relocation: the original ``restx_api/`` (re-export shims) or the
+    # canonical ``market_regions/india/legacy_v1/restx_api/`` (real code).
+    v1_search_dirs = [
+        REPO_ROOT / "restx_api",
+        REPO_ROOT / "market_regions" / "india" / "legacy_v1" / "restx_api",
+    ]
     for module_stem, ns_path in v1_paths.items():
-        path = REPO_ROOT / "restx_api" / f"{module_stem}.py"
-        if not path.is_file():
+        path = next(
+            (d / f"{module_stem}.py" for d in v1_search_dirs
+             if (d / f"{module_stem}.py").is_file()),
+            None,
+        )
+        if path is None:
             continue
         entries.append(_scan_module(path, f"/api/v1{ns_path}", version="v1"))
 
