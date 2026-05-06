@@ -37,7 +37,7 @@ is the high-traffic surface every client should learn:
 | `POST /api/v1/openposition`     | `GET  /api/v2/positions/<symbol>`| **Shipped** — single-symbol position scoped via URL path; 404 when flat. |
 | `POST /api/v1/holdings`         | `GET  /api/v2/holdings`          | **Shipped** — translator must implement `list_holdings_via_token`. Alpaca implementation maps to `GET /v2/positions` (Alpaca doesn't separate intraday vs delivery). |
 | `POST /api/v1/optionchain`      | `GET  /api/v2/options/chain`     | **Shipped** — region-driven via `services.options.dispatcher.get_options_provider`. Per-region provider implementations live under `services.options.providers.*`. |
-| `POST /api/v1/optiongreeks`     | `GET  /api/v2/options/greeks`    | Phase 5/8-bis |
+| `POST /api/v1/optiongreeks`     | `GET  /api/v2/options/greeks`    | **Shipped** — region-driven; calls provider's `compute_greeks(contract, market, iv)`. Black-Scholes per-contract Greeks. |
 | `POST /api/v1/optionsorder`     | `POST /api/v2/orders/options`    | Phase 5/8-bis |
 | `POST /api/v1/symbol`           | `GET  /api/v2/instruments/<id>`  | both lanes live |
 | `POST /api/v1/expiry`           | `GET  /api/v2/options/expiries`  | **Shipped** — region-driven; calls provider's `list_expiries(underlying, asof)`. |
