@@ -2,10 +2,10 @@
   "cookies": [
     {
       "name": "session",
-      "value": ".eJxtUm1P2zAY_CvIn0mx49fkW1nHSt8GomzrVMly7Mcla5NWcdIJEP99bjM-IPH1nrvz3cmvaPi4HOvl9-nXBcrR6xqZQ6m38LxG-cUa3U3HjM_pj_nsfrK6HS6uZ0zOpys6_L1Glxc9OYBtoO351I-We_Lrhd-k02c1Od5X_gkWm_koPPDlzXF8hL8_6Wr2ZT5--dM7lEEfzAGak75tOjhhhQmgu2bXez617SHkV1dnWhJfHJjdwVgzqEyzhTb0Ps60Rn8uPJ0-1Rhr913d6tL1AkcJxcLyRIAXCWMiSxQrbIKVEwWl2MhCflTWXVX02eNWQ_rtVtxdj_ho0rNs1zRQ2_9bPj6M1ugNXSIde1SmhrpF-bkyKpr9Fpq4f58ycmxovG4jWkcUy4xJIwizXgkmnMeEC8xT6XwRcxU8dRk4S6Jut99swOmyfreOQFnrtqwgGqU4FQnmCRZLTHOS5iwdxMoZZwlmOcbRIEAI5b6Om0S-Yox4qagsPMHAM4ctYZnnlEhiqAJGLPWOcAVKKeOlT01qrRTKCGCqcNGvC-dioYuljatisB7T7w_Fv_bx_vYP7QPL_A.afrp7g.59Kycu5Pu1PC-aoFlMfVAky0HMI",
+      "value": ".eJxtUllP3DAY_CvIz2Rx4iNx3pamdNmrIELbrSJZvrKkuzkUO1sB4r_X2ZQHJF7nmxnPjPwK5o_5guffV1-3IAWvBRBdxQ_muQDpRQHuVgtMNujHZn2_3N3Ot9drHG9WOzT_XYDLi4lsjeqNm_iozPI2_PVCbqLVc7I83dflk9nuN5l9IPnNaXEyf3-i3frLZvHyZ3KoLO9EZ_pR7_rBjJgU1vChP06eT851Nr26OtMC_-JMHDuhxKwW_cE4O_lo4QT_XDiePtUIpdqhcbzSk0CjEEGqSEBNSQOMKQsSLFUAE00lQlDEMv6obIZaTtn9VnP07ZbeXWckW04sNfS9adT_LR8fsgK8gUvAfY9aNKZxID1XBrJvD6b3-08pPUfZvuTOo41HQ4ZRiLUuFcOCCMlomUSKJIhQphENmYgoknHpdcd2vzeaV827tQeqhruqNt4oghENIAkgzSFLEU4Jm0UkYREKIE4h9AbWWFu1jd_E82MYl7GfIYp0QrSiFGORxJpghugYRGocEYZpoqBkRCfaYKFLjWIojJFo9BvsuZgdfGmhax9swvj7Q_6vfby__QP3hMwj.aftDgw.CqQGgqGx2BTZObmoAJ-rd4p1fxE",
       "domain": "127.0.0.1",
       "path": "/",
-      "expires": 1778137204.366258,
+      "expires": 1778137200.489741,
       "httpOnly": true,
       "secure": false,
       "sameSite": "Lax"
@@ -17,7 +17,7 @@
       "localStorage": [
         {
           "name": "openalgo-auth",
-          "value": "{\"state\":{\"user\":{\"username\":\"superadmin\",\"broker\":\"alpaca\",\"isLoggedIn\":true,\"loginTime\":\"2026-05-06T07:12:46.275Z\"},\"apiKey\":null,\"isAuthenticated\":true},\"version\":0}"
+          "value": "{\"state\":{\"user\":{\"username\":\"superadmin\",\"broker\":\"alpaca\",\"isLoggedIn\":true,\"loginTime\":\"2026-05-06T13:34:59.394Z\"},\"apiKey\":null,\"isAuthenticated\":true},\"version\":0}"
         }
       ]
     }
