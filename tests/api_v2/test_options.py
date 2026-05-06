@@ -16,9 +16,10 @@ def _install_fake_auth_expiries(monkeypatch, broker="alpaca"):
 
 def test_expiries_us_region_returns_list(flask_app, monkeypatch):
     _install_fake_auth_expiries(monkeypatch)
+    from types import SimpleNamespace
     monkeypatch.setattr(
-        "services.feature_gate_service.active_region_code",
-        lambda: "us",
+        "utils.plugin_loader.get_broker_capabilities",
+        lambda b: SimpleNamespace(supported_regions=["us"]),
     )
     resp = flask_app.test_client().get(
         "/api/v2/options/expiries",
@@ -39,9 +40,10 @@ def test_expiries_us_region_returns_list(flask_app, monkeypatch):
 
 def test_expiries_underlying_uppercased(flask_app, monkeypatch):
     _install_fake_auth_expiries(monkeypatch)
+    from types import SimpleNamespace
     monkeypatch.setattr(
-        "services.feature_gate_service.active_region_code",
-        lambda: "us",
+        "utils.plugin_loader.get_broker_capabilities",
+        lambda b: SimpleNamespace(supported_regions=["us"]),
     )
     resp = flask_app.test_client().get(
         "/api/v2/options/expiries",
@@ -61,9 +63,10 @@ def test_expiries_missing_underlying_returns_400(flask_app, monkeypatch):
 
 def test_expiries_bad_asof_returns_400(flask_app, monkeypatch):
     _install_fake_auth_expiries(monkeypatch)
+    from types import SimpleNamespace
     monkeypatch.setattr(
-        "services.feature_gate_service.active_region_code",
-        lambda: "us",
+        "utils.plugin_loader.get_broker_capabilities",
+        lambda b: SimpleNamespace(supported_regions=["us"]),
     )
     resp = flask_app.test_client().get(
         "/api/v2/options/expiries",
@@ -74,9 +77,10 @@ def test_expiries_bad_asof_returns_400(flask_app, monkeypatch):
 
 def test_expiries_no_provider_returns_503(flask_app, monkeypatch):
     _install_fake_auth_expiries(monkeypatch)
+    from types import SimpleNamespace
     monkeypatch.setattr(
-        "services.feature_gate_service.active_region_code",
-        lambda: "made-up-region",
+        "utils.plugin_loader.get_broker_capabilities",
+        lambda b: SimpleNamespace(supported_regions=["made-up-region"]),
     )
     monkeypatch.setattr(
         "services.options.dispatcher.get_options_provider_or_none",
@@ -93,9 +97,10 @@ def test_expiries_no_provider_returns_503(flask_app, monkeypatch):
 
 def test_chain_us_region_returns_calls_and_puts(flask_app, monkeypatch):
     _install_fake_auth_expiries(monkeypatch)
+    from types import SimpleNamespace
     monkeypatch.setattr(
-        "services.feature_gate_service.active_region_code",
-        lambda: "us",
+        "utils.plugin_loader.get_broker_capabilities",
+        lambda b: SimpleNamespace(supported_regions=["us"]),
     )
     resp = flask_app.test_client().get(
         "/api/v2/options/chain",
