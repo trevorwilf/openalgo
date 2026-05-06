@@ -630,6 +630,81 @@ class AlpacaOrderTranslator:
         if r.status_code not in (200, 204):
             r.raise_for_status()
 
+    def modify_order_via_token(
+        self,
+        auth_token: str,
+        order_id: str,
+        *,
+        quantity: str | None = None,
+        price: str | None = None,
+        trigger_price: str | None = None,
+        time_in_force: str | None = None,
+        client_order_id: str | None = None,
+    ) -> dict[str, Any]:
+        """PATCH /v2/orders/<id>. Maps OpenAlgo's canonical modify fields
+        onto Alpaca's PATCH body (qty / limit_price / stop_price /
+        time_in_force / client_order_id). Returns the full updated order
+        body Alpaca returns.
+
+        Raises ``ValueError`` when no modifiable fields are supplied so
+        the dispatcher can return a structured 422 instead of waiting
+        for Alpaca to reject an empty PATCH.
+        """
+        from broker.alpaca.api.auth_api import auth_handle_from_token
+        from broker.alpaca.mapping.transform_data import TIF_TO_ALPACA
+
+        patch: dict[str, Any] = {}
+        if quantity is not None and str(quantity).strip() not in ("", "0"):
+            patch["qty"] = str(quantity)
+        if price is not None and str(price).strip() not in ("", "0"):
+            patch["limit_price"] = str(price)
+        if trigger_price is not None and str(trigger_price).strip() not in ("", "0"):
+            patch["stop_price"] = str(trigger_price)
+        if time_in_force is not None:
+            tif_native = TIF_TO_ALPACA.get(
+                TimeInForce(time_in_force) if not isinstance(time_in_force, TimeInForce)
+                else time_in_force
+            )
+            if tif_native is None:
+                raise UnsupportedCapability(
+                    broker_code=self.broker_code,
+                    capability_name="time_in_force",
+                    details=f"Alpaca cannot translate time_in_force={time_in_force!r}",
+                )
+            patch["time_in_force"] = tif_native
+        if client_order_id is not None and str(client_order_id).strip():
+            patch["client_order_id"] = str(client_order_id)
+
+        if not patch:
+            raise ValueError(
+                "no modifiable fields supplied; provide at least one of "
+                "quantity, price, trigger_price, time_in_force, client_order_id"
+            )
+
+        if self._client is not None:
+            r = self._client.patch(f"/v2/orders/{order_id}", json=patch)
+        else:
+            auth = auth_handle_from_token(auth_token)
+            with httpx.Client(**self._client_kwargs(auth)) as c:
+                r = c.patch(f"/v2/orders/{order_id}", json=patch)
+        if r.status_code >= 400:
+            # Surface Alpaca's structured JSON error message
+            # (``"cannot replace order in accepted status"``,
+            # ``"stop price must be > 0"`` etc.) instead of httpx's
+            # generic raise_for_status text. Mirrors the legacy
+            # ``modify_order`` shim's error handling.
+            msg = r.text[:500]
+            try:
+                body = r.json()
+                if isinstance(body, dict) and body.get("message"):
+                    msg = body["message"]
+                    if body.get("code"):
+                        msg = f"(alpaca code {body['code']}) {msg}"
+            except (ValueError, TypeError):
+                pass
+            raise RuntimeError(f"alpaca modify HTTP {r.status_code}: {msg}")
+        return r.json() if r.content else {}
+
     def cancel_all_orders_via_token(
         self,
         auth_token: str,
