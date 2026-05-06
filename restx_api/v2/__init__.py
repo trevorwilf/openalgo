@@ -64,6 +64,7 @@ def _build() -> tuple[Blueprint, Api]:
         api_holidays as calendar_holidays_ns,
         api_timings as calendar_timings_ns,
     )
+    from restx_api.v2.depth import api as depth_ns
     from restx_api.v2.broker_compliance import api as broker_compliance_ns
     from restx_api.v2.capabilities import api as capabilities_ns
     from restx_api.v2.chart import (
@@ -91,6 +92,7 @@ def _build() -> tuple[Blueprint, Api]:
     api.add_namespace(capabilities_ns, path="/capabilities")
     api.add_namespace(instruments_ns, path="/instruments")
     api.add_namespace(quotes_ns, path="/quotes")
+    api.add_namespace(depth_ns, path="/depth")
     api.add_namespace(bars_ns, path="/bars")
     api.add_namespace(bars_intervals_ns, path="/bars/intervals")
     api.add_namespace(calendar_holidays_ns, path="/calendar/holidays")

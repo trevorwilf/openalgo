@@ -6,7 +6,7 @@ classifier after each phase. The check mode
 non-zero if any file's classification has changed without an
 explicit rule update.
 
-Total classified files: **1047**.
+Total classified files: **1048**.
 
 Classification semantics:
 
@@ -18,7 +18,7 @@ Classification semantics:
 | `BROKER_PLUGIN` | Under `broker/*` — broker facts only. |
 | `COMPATIBILITY_SHIM` | Explicit bridge between lanes (e.g. `domain/translators.py`). |
 
-## PROMOTED_CORE (154 files)
+## PROMOTED_CORE (155 files)
 
 - `__init__.py`
 - `conftest.py`
@@ -73,6 +73,7 @@ Classification semantics:
 - `restx_api/v2/chart/templates.py`
 - `restx_api/v2/chart/watchlists.py`
 - `restx_api/v2/chart_audit.py`
+- `restx_api/v2/depth.py`
 - `restx_api/v2/holdings.py`
 - `restx_api/v2/indicators_series.py`
 - `restx_api/v2/instruments.py`
