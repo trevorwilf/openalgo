@@ -1,0 +1,388 @@
+{
+  "base": "http://127.0.0.1:5000",
+  "passed": 34,
+  "total": 34,
+  "results": [
+    {
+      "method": "GET",
+      "path": "/auth/csrf-token",
+      "status": 200,
+      "ms": 34.7,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"csrf_token\": \"IjA3OTQ3YTYxNGNmODY0NmRmMDE1NjA1MjdkZmJiMzNiNTJkOWVkYzEi.afrqmg.8LpnCHv-P8GX-3TJcB9pSUaTuVk\"}"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/session",
+      "status": 200,
+      "ms": 26.7,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "\"<!doctype html>\\r\\n<html lang=\\\"en\\\">\\r\\n  <head>\\r\\n    <meta charset=\\\"UTF-8\\\" />\\r\\n    <link rel=\\\"icon\\\" href=\\\"/favicon.ico\\\" />\\r\\n    <link rel=\\\"apple-touch-icon\\\" href=\\\"/apple-touch-icon.png\\\" />\\r\\n    <meta name\""
+    },
+    {
+      "method": "GET",
+      "path": "/auth/brokers",
+      "status": 200,
+      "ms": 34.3,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "\"<!doctype html>\\r\\n<html lang=\\\"en\\\">\\r\\n  <head>\\r\\n    <meta charset=\\\"UTF-8\\\" />\\r\\n    <link rel=\\\"icon\\\" href=\\\"/favicon.ico\\\" />\\r\\n    <link rel=\\\"apple-touch-icon\\\" href=\\\"/apple-touch-icon.png\\\" />\\r\\n    <meta name\""
+    },
+    {
+      "method": "GET",
+      "path": "/auth/check-setup",
+      "status": 200,
+      "ms": 27.0,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"needs_setup\": false, \"status\": \"success\"}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/master-contract/status",
+      "status": 200,
+      "ms": 28.0,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"broker\": \"alpaca\", \"download_date\": \"2026-05-06\", \"download_duration_seconds\": 82, \"exchange_stats\": null, \"is_ready\": true, \"last_download_time\": \"2026-05-06T01:14:08.256031\", \"last_updated\": \"2026-05-06T01:14:08.236041\", \"message\": \"Mas..."
+    },
+    {
+      "method": "GET",
+      "path": "/api/master-contract/ready",
+      "status": 200,
+      "ms": 23.5,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"message\": \"Master contracts are ready\", \"ready\": true}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/master-contract/smart-status",
+      "status": 200,
+      "ms": 32.0,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"broker\": \"alpaca\", \"download_date\": \"2026-05-06\", \"download_duration_seconds\": 82, \"exchange_stats\": null, \"is_ready\": true, \"last_download_time\": \"2026-05-06T01:14:08.256031\", \"last_updated\": \"2026-05-06T01:14:08.236041\", \"message\": \"Mas..."
+    },
+    {
+      "method": "GET",
+      "path": "/api/cache/status",
+      "status": 200,
+      "ms": 47.9,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"active_broker\": null, \"cache_loaded\": false, \"cache_valid\": false, \"next_reset\": null, \"session_start\": null, \"stats\": {\"bulk_queries\": 0, \"cache_loads\": 0, \"db_queries\": 0, \"hit_rate\": \"0.00%\", \"hits\": 0, \"last_loaded\": null, \"memory_usa..."
+    },
+    {
+      "method": "GET",
+      "path": "/api/cache/health",
+      "status": 200,
+      "ms": 22.1,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"cache_loaded\": false, \"cache_valid\": false, \"db_queries\": 0, \"health_score\": 0, \"hit_rate\": \"0.00%\", \"memory_usage_mb\": \"0.00\", \"recommendations\": [\"Cache is not loaded. Run master contract download.\"], \"status\": \"unhealthy\", \"total_symbo..."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/regions",
+      "status": 200,
+      "ms": 47.8,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"regions\": [{\"region_code\": \"crypto\", \"display_name\": \"Crypto\", \"description\": \"Region plugin for crypto-derivatives venues (no country, 24/7 sessions, USDT/USDC quote currencies). T-30 v7 Phase 8.\", \"timezone_name\": \"UTC\", \"marke..."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/regions/india",
+      "status": 200,
+      "ms": 26.0,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"region_code\": \"india\", \"display_name\": \"India\", \"description\": \"Default region metadata for Indian cash, derivatives, and index venues.\", \"timezone_name\": \"Asia/Kolkata\", \"market_families\": [\"IN_STOCK\"], \"default_currency\": \"INR\"..."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/regions/us",
+      "status": 200,
+      "ms": 23.7,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"region_code\": \"us\", \"display_name\": \"United States\", \"description\": \"Default region metadata for U.S. cash-equity brokers and venues.\", \"timezone_name\": \"America/New_York\", \"market_families\": [\"US_STOCK\"], \"default_currency\": \"US..."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/regions/eu",
+      "status": 200,
+      "ms": 27.0,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"region_code\": \"eu\", \"display_name\": \"Continental Europe\", \"description\": \"Starter region metadata for EU cash-equity venues. Country-specific modules can override this with stricter defaults.\", \"timezone_name\": \"Europe/Paris\", \"m..."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/regions/uk",
+      "status": 200,
+      "ms": 23.5,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"region_code\": \"uk\", \"display_name\": \"United Kingdom\", \"description\": \"Default region metadata for U.K. cash-equity venues.\", \"timezone_name\": \"Europe/London\", \"market_families\": [\"UK_STOCK\"], \"default_currency\": \"GBP\", \"default_v..."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/regions/india/flow_defaults",
+      "status": 200,
+      "ms": 25.0,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"region_code\": \"india\", \"flow_templates_enabled\": true, \"exchanges\": [\"NSE\", \"BSE\", \"NFO\", \"BFO\", \"CDS\", \"MCX\"], \"products\": [\"MIS\", \"CNC\", \"NRML\"], \"option_underlyings\": [\"NIFTY\", \"BANKNIFTY\", \"SENSEX\", \"BANKEX\", \"FINNIFTY\", \"MID..."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/regions/us/flow_defaults",
+      "status": 200,
+      "ms": 22.7,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"region_code\": \"us\", \"flow_templates_enabled\": false, \"exchanges\": [], \"products\": [], \"option_underlyings\": [], \"lot_sizes\": {}, \"schedule_default\": null}}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/venues",
+      "status": 200,
+      "ms": 28.2,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"venues\": [{\"venue_code\": \"ARCX\", \"display_name\": null, \"market_family\": \"US_STOCK\", \"country_code\": null, \"timezone_name\": \"America/New_York\", \"base_currency\": null, \"settlement_template\": null, \"session_model\": null, \"metadata\":..."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/venues/XNAS",
+      "status": 200,
+      "ms": 26.1,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"venue_code\": \"XNAS\", \"display_name\": null, \"market_family\": \"US_STOCK\", \"country_code\": null, \"timezone_name\": \"America/New_York\", \"base_currency\": null, \"settlement_template\": null, \"session_model\": null, \"metadata\": {}}}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/venues/CRYPTO",
+      "status": 200,
+      "ms": 51.2,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"venue_code\": \"CRYPTO\", \"display_name\": \"Crypto Derivatives\", \"market_family\": \"CRYPTO\", \"country_code\": \"\", \"timezone_name\": \"UTC\", \"base_currency\": \"USDT\", \"settlement_template\": \"T+0\", \"session_model\": \"ALL_DAY\", \"metadata\": {\"..."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/venues/XNAS/sessions",
+      "status": 200,
+      "ms": 71.2,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"venue_code\": \"XNAS\", \"date\": \"2026-05-06\", \"timezone_name\": \"America/New_York\", \"sessions\": [{\"session_type\": \"PRE_MARKET\", \"start_utc\": \"2026-05-06T08:00:00+00:00\", \"end_utc\": \"2026-05-06T13:30:00+00:00\", \"venue_timezone_name\": ..."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/balances",
+      "status": 200,
+      "ms": 657.7,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"balance\": {\"cash\": \"100005.38\", \"equity\": \"100005.38\", \"buying_power\": \"200010.76\", \"margin_used\": null, \"currency\": \"USD\"}}}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/positions",
+      "status": 200,
+      "ms": 587.8,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"positions\": []}}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/orders",
+      "status": 200,
+      "ms": 643.1,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"orders\": [], \"count\": 0}}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/orders",
+      "status": 200,
+      "ms": 689.6,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"orders\": [{\"id\": \"d321176d-feb6-46e6-a78c-ca8c42b1a0db\", \"client_order_id\": \"acb2704c-86d5-419f-93ea-662d2efba3ff\", \"created_at\": \"2026-05-06T07:07:45.337221Z\", \"updated_at\": \"2026-05-06T07:07:46.479499Z\", \"submitted_at\": \"2026-0..."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/quotes",
+      "status": 200,
+      "ms": 629.6,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": [{\"instrument\": {\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4eb14c30\", \"venue_code\": \"XNAS\", \"canonical_symbol\": \"AAPL\"}, \"timestamp\": \"2026-05-05T19:59:59.920100+00:00\", \"quote\": {\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4..."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/bars",
+      "status": 200,
+      "ms": 609.5,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"instrument\": {\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4eb14c30\", \"venue_code\": \"XNAS\", \"canonical_symbol\": \"AAPL\"}, \"interval\": \"1d\", \"bars\": [{\"ts\": \"2026-04-01T04:00:00+00:00\", \"open\": \"254.08\", \"high\": \"256.18\", \"low\": \"..."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/funds",
+      "status": 200,
+      "ms": 602.2,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"availablecash\": \"100005.38\", \"collateral\": \"0.00\", \"m2mrealized\": \"0.00\", \"m2munrealized\": \"5.38\", \"utiliseddebits\": \"0.00\"}, \"status\": \"success\"}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/positionbook",
+      "status": 200,
+      "ms": 587.3,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": [], \"status\": \"success\"}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orderbook",
+      "status": 200,
+      "ms": 690.9,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"orders\": [{\"action\": \"SELL\", \"average_price\": \"0\", \"canonical_status\": \"CANCELED\", \"exchange\": \"XNAS\", \"filled_quantity\": \"0\", \"native_status\": \"canceled\", \"order_status\": \"cancelled\", \"order_type\": \"LIMIT\", \"orderid\": \"d321176d-..."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/holdings",
+      "status": 200,
+      "ms": 31.8,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": {\"holdings\": [], \"statistics\": {\"totalholdingvalue\": 0, \"totalinvvalue\": 0, \"totalpnlpercentage\": 0, \"totalprofitandloss\": 0}}, \"status\": \"success\"}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tradebook",
+      "status": 200,
+      "ms": 1617.8,
+      "passed": true,
+      "expected": [
+        200
+      ],
+      "body_preview": "{\"data\": [{\"action\": \"SELL\", \"average_price\": \"284.102\", \"canonical_status\": \"FILLED\", \"exchange\": \"XNAS\", \"filled_quantity\": \"0.704639699\", \"native_status\": \"filled\", \"order_status\": \"complete\", \"order_type\": \"MARKET\", \"orderid\": \"a914b3e8..."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/quotes",
+      "status": 200,
+      "ms": 2686.0,
+      "passed": true,
+      "expected": [
+        200,
+        400,
+        404,
+        422
+      ],
+      "body_preview": "{\"data\": {\"ask\": 296.71, \"bid\": 268.8, \"high\": 284.555, \"low\": 276.51, \"ltp\": 284.18, \"oi\": 0, \"open\": 276.94, \"prev_close\": 276.87, \"volume\": 1525477.0}, \"status\": \"success\"}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/ping",
+      "status": 200,
+      "ms": 862.4,
+      "passed": true,
+      "expected": [
+        200,
+        404,
+        405
+      ],
+      "body_preview": "\"<!doctype html>\\r\\n<html lang=\\\"en\\\">\\r\\n  <head>\\r\\n    <meta charset=\\\"UTF-8\\\" />\\r\\n    <link rel=\\\"icon\\\" href=\\\"/favicon.ico\\\" />\\r\\n    <link rel=\\\"apple-touch-icon\\\" href=\\\"/apple-touch-icon.png\\\" />\\r\\n    <meta name\""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/version",
+      "status": 200,
+      "ms": 218.1,
+      "passed": true,
+      "expected": [
+        200,
+        404,
+        405
+      ],
+      "body_preview": "\"<!doctype html>\\r\\n<html lang=\\\"en\\\">\\r\\n  <head>\\r\\n    <meta charset=\\\"UTF-8\\\" />\\r\\n    <link rel=\\\"icon\\\" href=\\\"/favicon.ico\\\" />\\r\\n    <link rel=\\\"apple-touch-icon\\\" href=\\\"/apple-touch-icon.png\\\" />\\r\\n    <meta name\""
+    }
+  ]
+}

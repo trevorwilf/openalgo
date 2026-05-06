@@ -1,0 +1,73 @@
+OpenAlgo
+Dashboard
+Orderbook
+Tradebook
+Positions
+Action Center
+Platforms
+Strategy
+Logs
+Tools
+alpaca
+PAPER
+Live Mode
+S
+Trading Dashboard
+
+Overview of your trading account and market positions
+
+Master Contract:
+Downloading...
+
+Available Balance
+
+$100,005.38
+
+Cash Balance
+
+Unrealized P&L
+
+$5.38
+
+Mark to Market
+
+Utilised Margin
+
+$0.00
+
+Used Margin
+Quick Access
+OpenAlgo Symbols
+
+Universal symbology across brokers
+
+Live Logs
+
+Real-time trading activity logs
+
+Documentation
+
+Tutorials, API docs & features
+
+P&L Tracker
+
+Live intraday MTM tracker
+
+Telegram Alerts
+
+Configure telegram notifications
+
+Latency Monitor
+
+Monitor order & API latency
+
+Copyright 2026
+|
+www.openalgo.in
+|
+Open Source Algo Platform for Everyone
+|
+v
+2.0.0.4
+|
+1 session

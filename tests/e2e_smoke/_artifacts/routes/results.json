@@ -1,0 +1,238 @@
+{
+  "results": [
+    {
+      "route": "/dashboard",
+      "final_url": "/dashboard",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Trading Dashboard  Overview of y",
+      "console_error_count": 0
+    },
+    {
+      "route": "/orderbook",
+      "final_url": "/orderbook",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Order Book  View and manage your",
+      "console_error_count": 0
+    },
+    {
+      "route": "/tradebook",
+      "final_url": "/tradebook",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Trade Book  View your executed t",
+      "console_error_count": 0
+    },
+    {
+      "route": "/positions",
+      "final_url": "/positions",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Positions  Monitor and manage yo",
+      "console_error_count": 0
+    },
+    {
+      "route": "/action-center",
+      "final_url": "/action-center",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S OpenAlgo Action Center Centraliz",
+      "console_error_count": 0
+    },
+    {
+      "route": "/platforms",
+      "final_url": "/platforms",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Trading Platforms  Connect your ",
+      "console_error_count": 0
+    },
+    {
+      "route": "/strategy",
+      "final_url": "/strategy",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Webhook Strategies  Manage your ",
+      "console_error_count": 0
+    },
+    {
+      "route": "/logs",
+      "final_url": "/logs",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Logs & Monitoring  Access tradin",
+      "console_error_count": 0
+    },
+    {
+      "route": "/tools",
+      "final_url": "/tools",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Tools  Analytical tools for opti",
+      "console_error_count": 0
+    },
+    {
+      "route": "/profile",
+      "final_url": "/profile",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Profile Settings  Manage your ac",
+      "console_error_count": 0
+    },
+    {
+      "route": "/apikey",
+      "final_url": "/apikey",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S API Key Management Your API key ",
+      "console_error_count": 0
+    },
+    {
+      "route": "/master-contract",
+      "final_url": "/master-contract",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Master Contract  Manage master c",
+      "console_error_count": 0
+    },
+    {
+      "route": "/telegram",
+      "final_url": "/telegram",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Telegram Bot  Manage your Telegr",
+      "console_error_count": 0
+    },
+    {
+      "route": "/holdings",
+      "final_url": "/holdings",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Investor Summary  View your hold",
+      "console_error_count": 0
+    },
+    {
+      "route": "/flow",
+      "final_url": "/flow",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Flow Editor  Create and manage y",
+      "console_error_count": 0
+    },
+    {
+      "route": "/python",
+      "final_url": "/python",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Python Strategies  Manage and ru",
+      "console_error_count": 0
+    },
+    {
+      "route": "/pnl-tracker",
+      "final_url": "/pnl-tracker",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Intraday P&L Tracker  This featu",
+      "console_error_count": 0
+    },
+    {
+      "route": "/charts",
+      "final_url": "/charts",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "Workspace Lightweight KLineChart Pro Advanced (FAC) alpaca PAPER Kill SYMBOL SEARCH Find WATCHLISTS No watchlists yet. Create one below. LAYOUT Single",
+      "console_error_count": 0
+    },
+    {
+      "route": "/search/token",
+      "final_url": "/search/token",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Symbol Search  Search for symbol",
+      "console_error_count": 0
+    },
+    {
+      "route": "/sandbox",
+      "final_url": "/sandbox",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Sandbox Configuration  Configure",
+      "console_error_count": 0
+    },
+    {
+      "route": "/funds",
+      "final_url": "/funds",
+      "is_404": true,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "404 - Page Not Found  The page you're looking for doesn't exist or has been moved. Don't worry, let's get you back on track.  Back to Home Login QUICK",
+      "console_error_count": 0
+    },
+    {
+      "route": "/health",
+      "final_url": "/health",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S System Health Monitor  Real-time",
+      "console_error_count": 0
+    },
+    {
+      "route": "/logs/traffic",
+      "final_url": "/logs/traffic",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Traffic Dashboard  Monitor HTTP ",
+      "console_error_count": 0
+    },
+    {
+      "route": "/logs/latency",
+      "final_url": "/logs/latency",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Order Latency Monitor  Track how",
+      "console_error_count": 0
+    },
+    {
+      "route": "/playground",
+      "final_url": "/playground",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "openalgo REST API WebSocket Live Mode Dashboard S ACCOUNT POST Analyzer Status POST Analyzer Toggle POST funds POST holdings POST Margin Calculator PO",
+      "console_error_count": 0
+    },
+    {
+      "route": "/leverage",
+      "final_url": "/dashboard",
+      "is_404": false,
+      "is_india_only": false,
+      "redirected_to_login": false,
+      "text_preview": "OpenAlgo Dashboard Orderbook Tradebook Positions Action Center Platforms Strategy Logs Tools alpaca PAPER Live Mode S Trading Dashboard  Overview of y",
+      "console_error_count": 0
+    }
+  ]
+}

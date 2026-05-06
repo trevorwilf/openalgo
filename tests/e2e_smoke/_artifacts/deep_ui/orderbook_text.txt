@@ -1,0 +1,119 @@
+OpenAlgo
+Dashboard
+Orderbook
+Tradebook
+Positions
+Action Center
+Platforms
+Strategy
+Logs
+Tools
+alpaca
+PAPER
+Live Mode
+S
+Order Book
+
+View and manage your orders
+
+Filters
+Refresh
+Export
+Cancel All
+Buy Orders
+69
+Sell Orders
+31
+Completed
+8
+Open
+3
+Rejected
+89
+Symbol
+	Exchange	
+Action
+	Qty	Price	Trigger	Type	Product	Order ID	
+Status
+	
+Time
+	Cancel	Modify
+AAPL	NASDAQ	BUY	1	$1.00	$0.00		DAY	d624a823-b7cf-4a69-9ccc-5e88a014f184	
+cancelled
+	01:39:59 am		
+AAPL	NASDAQ	BUY	1	$1.00	$0.00		DAY	62aa1f44-875e-4597-8b9e-3b03d5696982	
+cancelled
+	01:38:51 am		
+AAPL	NASDAQ	BUY	1	$1.00	$0.00		DAY	75fa1d84-9c1e-444d-a880-a5e3084ef1f8	
+cancelled
+	01:37:54 am		
+AAPL	NASDAQ	BUY	1	$1.00	$0.00		DAY	f0e805a7-5ac5-4ba4-8c50-1de9c8e40d4b	
+cancelled
+	01:34:13 am		
+AAPL	NASDAQ	SELL	1	$0.00	$0.50		DAY	bc9d3c65-70e0-4622-9cb5-1dcbf9693824	
+cancelled
+	01:16:27 am		
+AAPL	NASDAQ	SELL	1	$9,999.00	$0.00		DAY	64976fde-dc8d-4057-b92e-9621c61681f7	
+cancelled
+	01:16:27 am		
+AAPL	NASDAQ	BUY	1	$1.00	$0.00		DAY	1e1cfd5c-e3ea-4ef6-bed9-7cb7a1d52988	
+cancelled
+	01:16:27 am		
+AAPL	NASDAQ	BUY	1	$1.00	$0.00		DAY	ca1e17f9-554c-43ef-af41-b65bf93fd02e	
+cancelled
+	01:16:25 am		
+AAPL	NASDAQ	SELL	1	$0.00	$0.50		DAY	e997d3a0-ad26-41dc-8e53-742d8cff3ed9	
+cancelled
+	01:16:00 am		
+AAPL	NASDAQ	SELL	1	$9,999.00	$0.00		DAY	d5603cb7-8f97-420e-a498-b96c3ee49420	
+cancelled
+	01:16:00 am		
+AAPL	NASDAQ	BUY	1	$1.00	$0.00		DAY	be9b56cb-3a6c-4772-94f9-2e3fd77341da	
+cancelled
+	01:16:00 am		
+AAPL	NASDAQ	BUY	1	$1.00	$0.00		DAY	b3ecc1af-0d66-4e70-bda9-8d3d012bb8a9	
+cancelled
+	01:15:58 am		
+AAPL	NASDAQ	SELL	1	$9,999.00	$0.00		DAY	d321176d-feb6-46e6-a78c-ca8c42b1a0db	
+cancelled
+	01:07:45 am		
+AAPL	NASDAQ	BUY	1	$1.00	$0.00		DAY	7b3f8f87-4faa-4d36-9817-9bb2be9cc852	
+cancelled
+	01:07:45 am		
+AAPL	NASDAQ	SELL	1	$0.00	$0.50		DAY	58996c3c-2f53-4374-93f0-61199d7cd94b	
+cancelled
+	01:07:45 am		
+AAPL	NASDAQ	BUY	1	$1.00	$0.00		DAY	c3b3a2d6-71c5-4afd-89fa-9f7657331071	
+cancelled
+	01:07:43 am		
+AAPL	NASDAQ	SELL	1	$0.00	$0.50		DAY	d781565b-1e31-466d-b6b8-164ba6440801	
+cancelled
+	03:26:57 pm		
+AAPL	NASDAQ	SELL	1	$999.00	$0.00		DAY	9ba2c293-23e4-4ac6-9539-6a4bd512c7dd	
+cancelled
+	03:26:57 pm		
+AAPL	NASDAQ	BUY	1	$1.00	$0.00		DAY	90edd44f-215b-494b-8699-c5785eb94d83	
+cancelled
+	03:26:57 pm		
+NVDA	NASDAQ	SELL	1	$0.00	$192.47		DAY	b0654b7d-aa79-41d5-ab90-f08d28e3d6e1	
+cancelled
+	03:26:57 pm		
+GOOGL	NASDAQ	SELL	1	$95.00	$100.00		DAY	5dfe0b98-7c9a-4d10-8f5f-3bacdf593823	
+cancelled
+	03:26:57 pm		
+MSFT	NASDAQ	BUY	1	$1.00	$0.00		DAY	f4a3a348-79af-4fe0-9f75-e8558aeb3744	
+cancelled
+	03:26:57 pm		
+AAPL	NASDAQ	BUY	1	$0.00	$0.00		DAY	5cd361d0-0623-4da0-a412-91f61b02141e	
+cancelled
+	03:26:57 pm		
+AAPL	NASDAQ	BUY	1	$50.00	$0.00		DAY	754862d9-2b1b-4da8-a5bb-fb244dbe508d	
+cancelled
+	01:58:32 pm		
+AAPL	NASDAQ	BUY	1	$50.00	$0.00		DAY	599abd3b-426b-4021-aac9-3e44f9f5fa1b	
+cancelled
+	01:58:31 pm		
+AAPL	NASDAQ	BUY	1	$50.00	$0.00		DAY	4715bbb3-492d-4e99-9801-35122475fa87	
+cancelled
+	01:58:27 pm		
+AAPL	NASDAQ	BUY	1	$50.00	$0.00		DAY	7b05e605-05f0-444c-93a0-3e96fd52fc
