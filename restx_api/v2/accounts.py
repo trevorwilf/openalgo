@@ -144,6 +144,98 @@ class Positions(Resource):
         return ok({"positions": rows}), 200
 
 
+@positions_api.route("/<string:symbol>")
+class PositionsBySymbol(Resource):
+    """GET /api/v2/positions/<symbol> — single-symbol position lookup.
+
+    Closes the v1 ``/api/v1/openposition`` migration target: instead of
+    POSTing a body with symbol+exchange, the v2 surface scopes a
+    position fetch to a single canonical symbol via the URL path.
+
+    Returns the position record on hit, ``404 not_found`` when flat.
+
+    For brokers with a registered ``BrokerPositionAdapter`` the route
+    filters the full positions list by ``canonical_symbol`` so any
+    adapter-shaped fields (instrument_id, currency, …) flow through.
+    For India brokers without an adapter the route falls back to the
+    legacy positionbook service and filters in Python (the v1 service
+    doesn't accept a per-symbol filter).
+    """
+
+    def get(self, symbol: str):
+        auth_token, broker, auth_err = resolve_auth()
+        if auth_err is not None:
+            return error("unauthorized", auth_err), 401
+
+        sym_upper = symbol.upper()
+
+        from services.broker_market_data_registry import (
+            get_broker_position_adapter,
+        )
+
+        adapter = get_broker_position_adapter(broker or "")
+        if adapter is not None:
+            try:
+                positions = adapter.get_positions(_account_ctx(broker, auth_token))
+            except Exception as e:
+                logger.exception("position adapter failed for %s: %s", broker, e)
+                return error("broker_error", f"position adapter failed: {e}"), 502
+            for p in positions:
+                if (p.canonical_symbol or "").upper() == sym_upper:
+                    return ok({
+                        "position": {
+                            "instrument_id": str(p.instrument_id),
+                            "venue_code": p.venue_code,
+                            "canonical_symbol": p.canonical_symbol,
+                            "quantity": str(p.quantity),
+                            "average_price": str(p.average_price) if p.average_price is not None else None,
+                            "market_value": str(p.market_value) if p.market_value is not None else None,
+                            "realized_pnl": str(p.realized_pnl) if p.realized_pnl is not None else None,
+                            "unrealized_pnl": str(p.unrealized_pnl) if p.unrealized_pnl is not None else None,
+                            "currency": p.currency,
+                        }
+                    }), 200
+            return error("not_found",
+                         f"no open position for {sym_upper}",
+                         details={"canonical_symbol": sym_upper}), 404
+
+        # Non-India broker without an adapter: fail-closed.
+        if not _broker_is_india(broker):
+            return error(
+                ErrorCode.PROMOTED_CAPABILITY_UNAVAILABLE,
+                f"positions are not available for broker {broker!r} — no "
+                "BrokerPositionAdapter registered.",
+                details={
+                    "broker_code": broker,
+                    "sub_code": ErrorCode.POSITION_ADAPTER_NOT_REGISTERED,
+                },
+            ), 503
+
+        # India broker — filter the legacy positionbook in Python.
+        try:
+            from services.positionbook_service import get_positionbook_with_auth
+        except Exception as e:
+            return error("unimplemented",
+                         f"positions service not available: {e}"), 501
+
+        ok_flag, resp, status = get_positionbook_with_auth(
+            auth_token=auth_token, broker=broker,
+        )
+        if not ok_flag:
+            return error("broker_error",
+                         resp.get("message", "positions fetch failed")), status
+
+        for row in resp.get("data", []):
+            row_sym = (row.get("symbol")
+                       or row.get("canonical_symbol")
+                       or row.get("tradingsymbol") or "").upper()
+            if row_sym == sym_upper:
+                return ok({"position": row}), 200
+        return error("not_found",
+                     f"no open position for {sym_upper}",
+                     details={"canonical_symbol": sym_upper}), 404
+
+
 @balances_api.route("")
 @balances_api.route("/")
 class Balances(Resource):
