@@ -12,6 +12,7 @@ running Flask. Reports:
 """
 from __future__ import annotations
 
+import io
 import json
 import re
 import sys
@@ -21,6 +22,26 @@ import httpx
 ROOT = Path(__file__).resolve().parents[2]
 API_KEY = (ROOT / "tests" / "e2e_smoke" / "_artifacts" / "api_key.txt").read_text().strip()
 BASE = "http://127.0.0.1:5000"
+
+# Force UTF-8 stdout so the summary's right-arrow character renders on
+# Windows consoles that default to cp1252.
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+# Routes that exist in v1 but are intentionally NOT exposed as a bare
+# `/api/v2/<path>` endpoint. Mapped here so the audit doesn't keep
+# reporting them as MISSING:
+#   * `/optionsmultiorder` — superseded by `/api/v2/orders/combo` (ADR 0022)
+#   * `/telegram`          — admin/UI surface, not part of the v2 trading API
+#   * `/chart`             — parent path for `/chart/<sub>` CRUD; no bare endpoint
+V1_OUT_OF_SCOPE_FOR_V2 = {
+    "/optionsmultiorder": "/api/v2/orders/combo",
+    "/telegram": "(out of v2 scope — admin/UI only)",
+    "/chart": "(parent path for /chart/<sub> CRUD; no bare endpoint)",
+}
 
 # v1 namespace path -> candidate v2 path. Conventions:
 # - kebab-case path stays the same on v2
@@ -113,7 +134,13 @@ def main() -> int:
     print(f"=== v1 has {len(v1_paths)} namespaces ===\n")
 
     missing = []
+    out_of_scope = []
     for v1 in v1_paths:
+        if v1 in V1_OUT_OF_SCOPE_FOR_V2:
+            note = V1_OUT_OF_SCOPE_FOR_V2[v1]
+            print(f"  ~ v1 {v1:25s} -> {note}")
+            out_of_scope.append((v1, note))
+            continue
         v2 = V1_TO_V2_OVERRIDES.get(v1, v1)  # default: keep same path
         verdict, status, preview = classify(v2)
         ind = {"OK": "+", "MISSING": "-", "ROUTED": "*",
@@ -124,9 +151,10 @@ def main() -> int:
         if verdict == "MISSING":
             missing.append((v1, v2))
 
-    print(f"\n=== summary: {len(missing)} missing v2 routes ===")
+    print(f"\n=== summary: {len(missing)} missing v2 routes "
+          f"({len(out_of_scope)} out-of-scope) ===")
     for v1, v2 in missing:
-        print(f"  v1 {v1} → v2 {v2}")
+        print(f"  v1 {v1} -> v2 {v2}")
     return 0 if not missing else 1
 
 
