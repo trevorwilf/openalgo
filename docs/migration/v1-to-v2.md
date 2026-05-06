@@ -32,7 +32,7 @@ is the high-traffic surface every client should learn:
 | `POST /api/v1/depth`            | `GET  /api/v2/depth`             | Phase 8-bis |
 | `POST /api/v1/funds`            | `GET  /api/v2/balances`          | both lanes live |
 | `POST /api/v1/orderbook`        | `GET  /api/v2/orders`            | Phase 8-bis |
-| `POST /api/v1/tradebook`        | `GET  /api/v2/trades`            | Phase 8-bis |
+| `POST /api/v1/tradebook`        | `GET  /api/v2/trades`            | **Shipped** — translator must implement `list_trades_via_token`. Alpaca implementation maps to `GET /v2/account/activities?activity_types=FILL`. |
 | `POST /api/v1/positionbook`     | `GET  /api/v2/positions`         | both lanes live |
 | `POST /api/v1/holdings`         | `GET  /api/v2/holdings`          | Phase 8-bis |
 | `POST /api/v1/optionchain`      | `GET  /api/v2/options/chain`     | Phase 5/8-bis |
