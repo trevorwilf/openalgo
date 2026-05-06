@@ -1,0 +1,48 @@
+# bowaka_prefilter.yaml — config for the daily US microcap prefilter.
+#
+# All threshold values here are starting guesses derived from the
+# Bowaka strategy doc. They are NOT the real thresholds — Bowaka
+# explicitly withheld those. Calibrate against your own backtest
+# before trusting any of these.
+
+alpaca:
+  paper: true                 # paper-trading account is fine for data-only
+  feed: "iex"                 # "iex" (free) or "sip" (paid SIP feed)
+
+universe:
+  cache_path: "data/universe_us_equity.json"
+  refresh_days: 7
+  allowed_exchanges: ["NASDAQ", "NYSE", "ARCA", "AMEX", "BATS"]
+
+  # Universe gates — applied to today's bar before signal gates
+  price_min: 1.0              # filter out true penny territory
+  price_max: 20.0             # keep small/mid bias
+  avg_dollar_volume_min: 250000
+  avg_dollar_volume_max: null # null = no upper cap
+
+bars:
+  lookback_calendar_days: 45  # enough for ≥20 trading days of indicators
+  batch_size: 100             # symbols per Alpaca bars request
+
+indicators:
+  lookback_days: 20           # rolling window for RVOL / ADV averages
+  atr_days: 14
+  ema_days: 10
+  ema_slope_lookback: 3
+
+signals:
+  # Set any of these to null to disable that gate.
+  rvol_min: 1.5               # today's volume >= 1.5x rolling-20d avg
+  atr_pct_min: 0.06           # ATR is at least 6% of price
+  range_expansion_min: 1.25   # today's range >= 1.25x ATR
+  close_location_min: 0.60    # close in upper 40% of today's range
+  ema_distance_min: 0.0       # close above EMA
+  ema_slope_min: 0.0          # EMA rising
+
+output:
+  candidates_path: "data/in_play_candidates.json"
+  diagnostic_csv: "data/in_play_diagnostic.csv"
+
+logging:
+  level: "INFO"
+  file: "logs/bowaka_prefilter.log"

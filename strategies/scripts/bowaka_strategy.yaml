@@ -1,0 +1,65 @@
+strategy:
+  name: "Bowaka"
+  strategy_id: "bowaka"
+
+paths:
+  candidates_path: "data/in_play_candidates.json"
+  state_path: "data/state.json"
+  log_path: "logs/bowaka_strategy.log"
+  kill_switch_dir: "."
+  daily_summary_path: "data/daily_summary.jsonl"
+
+session:
+  timezone: "America/New_York"
+  start: "09:30"
+  end: "15:55"
+  signal_fade_eval_time: "16:05"
+  loop_interval_seconds: 5
+
+prefilter_handshake:
+  expected_config_hash: null   # null = accept any; pin to a value to enforce
+  max_age_trading_days: 1
+
+broker:
+  base_url_env: "HOST_SERVER"
+  base_url_default: "http://127.0.0.1:5000"
+  timeout_seconds: 15
+  poll_interval_seconds: 5
+
+sizing:
+  per_trade_pct: 0.10
+  max_concurrent_positions: 5
+  default_venue_code: "XNAS"
+
+risk:
+  daily_loss_pct: 0.03
+  max_gross_exposure_pct: 0.50
+  max_per_trade_dollars: null         # nullable absolute floor
+  max_gross_exposure_dollars: null    # nullable absolute floor
+
+exits:
+  stop_pct: 0.08
+  target_pct: 0.15
+  max_hold_days: 3
+  signal_fade_enabled: true
+
+# Phase 3 will populate this from the prefilter YAML at strategy start time.
+# Duplication is intentional. A regression test (see Phase 3) pins parity
+# with the prefilter's compute_features.
+signal_gates:
+  rvol_min: 1.5
+  atr_pct_min: 0.06
+  range_expansion_min: 1.25
+  close_location_min: 0.60
+  ema_distance_min: 0.0
+  ema_slope_min: 0.0
+
+indicators:
+  lookback_days: 20
+  atr_days: 14
+  ema_days: 10
+  ema_slope_lookback: 3
+
+logging:
+  level: "INFO"
+  file: "logs/bowaka_strategy.log"

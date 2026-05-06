@@ -1,8 +1,12 @@
 # Ignore all strategy scripts uploaded by users
 *.py
 
-# But keep this .gitignore file
+# But keep this .gitignore file and the canonical Bowaka artifacts
+# (the root .gitignore also negates these, but the nested one wins
+# without an explicit negation here).
 !.gitignore
+!bowaka_prefilter.py
+!bowaka_strategy.py
 
 # Ignore log files if any
 *.log
