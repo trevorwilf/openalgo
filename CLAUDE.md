@@ -30,7 +30,7 @@ The ADRs are the source of truth:
 5. **No new code may import `VALID_EXCHANGES`, `VALID_PRODUCT_TYPES`, or `VALID_PRICE_TYPES` from `utils/constants.py`.** These are legacy. New code uses the domain enums from Phase 1a.
 6. **No new code may reference `Asia/Kolkata` or `IST` as a literal.** Timezones come from the venue record (Phase 4).
 7. Feature flags gate every new read/write path. Default off until Phase 9 canary.
-8. US and European support is a *design target*, not a *delivery target*. The model must not hardcode Indian assumptions, but do not add US/EU-specific code (e.g., FINRA, MiFID) without explicit instruction.
+8. US and European support is a *delivery target*. The model must not hardcode Indian assumptions; US-specific code (Alpaca paper + live, NMS / Reg-NMS, NBBO, attribution-logo for lightweight-charts, etc.) and EU-specific code (MiFID II / MiFIR best-execution and reporting, FX hedging, eIDAS attestation hooks) are in scope. Region-specific behavior must still go through the region-plugin contract (`market_regions/<code>/plugin.json` + the provider contracts in ADRs 0026–0028) rather than `if region == "us"` branches scattered across services.
 
 **Never extend** `VALID_EXCHANGES`, `VALID_PRODUCT_TYPES`, or the `SymToken` schema. If a change seems to require one of these, stop and re-read the ADRs.
 
