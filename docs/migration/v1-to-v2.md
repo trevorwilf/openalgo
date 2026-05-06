@@ -29,7 +29,7 @@ is the high-traffic surface every client should learn:
 | `POST /api/v1/quotes`           | `GET  /api/v2/quotes`            | both lanes live |
 | `POST /api/v1/multiquotes`      | `GET  /api/v2/quotes` (batch)    | both lanes live |
 | `POST /api/v1/history`          | `GET  /api/v2/bars`              | both lanes live |
-| `POST /api/v1/depth`            | `GET  /api/v2/depth`             | Phase 8-bis |
+| `POST /api/v1/depth`            | `POST /api/v2/depth`             | **Shipped** — translator must implement `get_depth_via_token`. Alpaca's v2 stocks API exposes top-of-book only (no L2) → returns 501; clients fall back to `/api/v2/quotes`. |
 | `POST /api/v1/funds`            | `GET  /api/v2/balances`          | both lanes live |
 | `POST /api/v1/orderbook`        | `GET  /api/v2/orders`            | **Shipped** — `GET /api/v2/orders?status=open\|closed\|all` dispatches to translator's `list_orders_via_token`. Alpaca implementation included. |
 | `POST /api/v1/tradebook`        | `GET  /api/v2/trades`            | **Shipped** — translator must implement `list_trades_via_token`. Alpaca implementation maps to `GET /v2/account/activities?activity_types=FILL`. |
@@ -40,11 +40,11 @@ is the high-traffic surface every client should learn:
 | `POST /api/v1/optionsorder`     | `POST /api/v2/orders/options`    | Phase 5/8-bis |
 | `POST /api/v1/symbol`           | `GET  /api/v2/instruments/<id>`  | both lanes live |
 | `POST /api/v1/expiry`           | `GET  /api/v2/options/expiries`  | Phase 5/8-bis |
-| `POST /api/v1/intervals`        | `GET  /api/v2/bars/intervals`    | both lanes live |
+| `POST /api/v1/intervals`        | `GET  /api/v2/bars/intervals`    | **Shipped** — thin wrapper around `services.intervals_service.get_intervals_with_auth`. |
 | `POST /api/v1/instruments`      | `GET  /api/v2/instruments`       | both lanes live |
-| `POST /api/v1/market/holidays`  | `GET  /api/v2/calendar/holidays` | both lanes live |
-| `POST /api/v1/market/timings`   | `GET  /api/v2/calendar/timings`  | both lanes live |
-| `POST /api/v1/ping`             | `GET  /api/v2/ping`              | both lanes live |
+| `POST /api/v1/market/holidays`  | `GET  /api/v2/calendar/holidays` | **Shipped** — venue-driven (`venue_code` query); uses `pandas_market_calendars` for NYSE/NASDAQ/NSE/BSE/etc. |
+| `POST /api/v1/market/timings`   | `GET  /api/v2/calendar/timings`  | **Shipped** — venue-driven; returns session_open/session_close UTC for the requested date. |
+| `POST /api/v1/ping`             | `GET  /api/v2/ping`              | **Shipped** — no auth required (liveness probe). |
 
 ## Per-broker readiness
 
