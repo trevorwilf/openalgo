@@ -6,7 +6,7 @@
       "method": "GET",
       "path": "/api/v2/instruments/search",
       "status": 200,
-      "ms": 45.2,
+      "ms": 46.3,
       "passed": true,
       "body_preview": "{\"data\": [{\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4eb14c30\", \"venue_code\": \"XNAS\", \"canonical_symbol\": \"AAPL\", \"asset_class\": \"EQUITY\", \"instrument_kind\": \"CASH\", \"tick_size\": \"0.0100000000\", \"lot_size\": null, \"quantity_precision\": 9, \"min_quantity\": null, \"underlying_instrument_id\": null, \"expiration_at\": null, \"option_right\": null, \"strike\": null, \"currency\": \"USD\", \"display_name\": \"Apple"
     },
@@ -14,7 +14,7 @@
       "method": "GET",
       "path": "/api/v2/capabilities",
       "status": 200,
-      "ms": 26.0,
+      "ms": 25.4,
       "passed": true,
       "body_preview": "{\"data\": {\"broker_code\": \"alpaca\", \"broker_display_name\": \"alpaca\", \"market_families\": [\"US_STOCK\", \"CRYPTO\"], \"supported_regions\": [\"us\"], \"supported_venue_codes\": [\"XNAS\", \"XNYS\", \"ARCX\", \"BATS\", \"CRYPTO\"], \"supported_asset_classes\": [\"EQUITY\", \"ETF\", \"SPOT\"], \"supported_order_types\": [\"MARKET\", \"LIMIT\", \"STOP\", \"STOP_LIMIT\", \"TRAILING_STOP\", \"MARKET_ON_OPEN\", \"LIMIT_ON_OPEN\", \"MARKET_ON_CLOSE\","
     },
@@ -22,7 +22,7 @@
       "method": "GET",
       "path": "/api/v2/plugins",
       "status": 302,
-      "ms": 36.4,
+      "ms": 22.8,
       "passed": true,
       "body_preview": "\"<!doctype html>\\n<html lang=en>\\n<title>Redirecting...</title>\\n<h1>Redirecting...</h1>\\n<p>You should be redirected automatically to the target URL: <a href=\\\"/api/v2/plugins/diagnostics\\\">/api/v2/plugins/\""
     },
@@ -30,7 +30,7 @@
       "method": "GET",
       "path": "/api/v2/plugins/diagnostics",
       "status": 200,
-      "ms": 23.2,
+      "ms": 43.9,
       "passed": true,
       "body_preview": "{\"data\": {\"summary\": {\"loaded\": 37, \"loaded_with_warnings\": 0, \"skipped\": 0, \"promoted_loaded\": 6}, \"brokers\": {\"_mock_schwab_like\": {\"state\": \"loaded\", \"promoted\": true, \"broker_type\": \"US_stock\", \"supported_regions\": [\"us\"]}, \"_mock_webull_like\": {\"state\": \"loaded\", \"promoted\": true, \"broker_type\": \"US_stock\", \"supported_regions\": [\"us\"]}, \"aliceblue\": {\"state\": \"loaded\", \"promoted\": false, \"bro"
     },
@@ -38,39 +38,39 @@
       "method": "POST",
       "path": "/api/v2/orders",
       "status": 200,
-      "ms": 581.8,
+      "ms": 608.7,
       "passed": true,
-      "body_preview": "{\"data\": {\"instrument\": {\"instrument_id\": null, \"venue_code\": \"XNAS\", \"canonical_symbol\": \"AAPL\"}, \"order_id\": \"eeb3ab36-11cf-4c26-9d6b-c48d99a9b9d5\", \"status\": \"PENDING_NEW\", \"native_status\": \"pending_new\", \"filled_quantity\": \"0\", \"filled_avg_price\": null, \"native\": {\"id\": \"eeb3ab36-11cf-4c26-9d6b-c48d99a9b9d5\", \"client_order_id\": \"585fcee0-b959-4c8a-8b0a-b0a40c5e0b0f\", \"created_at\": \"2026-05-06T"
+      "body_preview": "{\"data\": {\"instrument\": {\"instrument_id\": null, \"venue_code\": \"XNAS\", \"canonical_symbol\": \"AAPL\"}, \"order_id\": \"236c59c3-6e86-432f-9454-17eb7aa8a9cc\", \"status\": \"PENDING_NEW\", \"native_status\": \"pending_new\", \"filled_quantity\": \"0\", \"filled_avg_price\": null, \"native\": {\"id\": \"236c59c3-6e86-432f-9454-17eb7aa8a9cc\", \"client_order_id\": \"9079547e-dcfc-4468-b86e-4f60c5a2e146\", \"created_at\": \"2026-05-06T"
     },
     {
       "method": "DELETE",
-      "path": "/api/v2/orders/eeb3ab36-11cf-4c26-9d6b-c48d99a9b9d5",
+      "path": "/api/v2/orders/236c59c3-6e86-432f-9454-17eb7aa8a9cc",
       "status": 200,
-      "ms": 753.2,
+      "ms": 592.2,
       "passed": true,
-      "body_preview": "{\"data\": {\"order_id\": \"eeb3ab36-11cf-4c26-9d6b-c48d99a9b9d5\", \"status\": \"canceled\"}}"
+      "body_preview": "{\"data\": {\"order_id\": \"236c59c3-6e86-432f-9454-17eb7aa8a9cc\", \"status\": \"canceled\"}}"
     },
     {
       "method": "POST",
       "path": "/api/v2/orders/combo",
       "status": 200,
-      "ms": 612.1,
+      "ms": 633.2,
       "passed": true,
-      "body_preview": "{\"data\": {\"combo_type\": \"OTOCO\", \"link_id\": \"SWEEP-1778080574\", \"legs\": [{\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4eb14c30\", \"venue_code\": \"XNAS\", \"canonical_symbol\": \"AAPL\"}, {\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4eb14c30\", \"venue_code\": \"XNAS\", \"canonical_symbol\": \"AAPL\"}, {\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4eb14c30\", \"venue_code\": \"XNAS\", \"canonical_symbol\": \"AAPL\"}],"
+      "body_preview": "{\"data\": {\"combo_type\": \"OTOCO\", \"link_id\": \"SWEEP-1778089426\", \"legs\": [{\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4eb14c30\", \"venue_code\": \"XNAS\", \"canonical_symbol\": \"AAPL\"}, {\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4eb14c30\", \"venue_code\": \"XNAS\", \"canonical_symbol\": \"AAPL\"}, {\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4eb14c30\", \"venue_code\": \"XNAS\", \"canonical_symbol\": \"AAPL\"}],"
     },
     {
       "method": "DELETE",
-      "path": "/api/v2/orders/7be4ca24-4144-49ab-b129-dee9e47f84ae",
+      "path": "/api/v2/orders/166f50fb-8237-4ad4-b060-8d06fc8757f1",
       "status": 200,
-      "ms": 616.2,
+      "ms": 634.7,
       "passed": true,
-      "body_preview": "{\"data\": {\"order_id\": \"7be4ca24-4144-49ab-b129-dee9e47f84ae\", \"status\": \"canceled\"}}"
+      "body_preview": "{\"data\": {\"order_id\": \"166f50fb-8237-4ad4-b060-8d06fc8757f1\", \"status\": \"canceled\"}}"
     },
     {
       "method": "DELETE",
       "path": "/api/v2/orders",
       "status": 200,
-      "ms": 585.8,
+      "ms": 602.2,
       "passed": true,
       "body_preview": "{\"data\": {\"canceled\": [], \"failed\": [], \"summary\": {\"canceled_count\": 0, \"failed_count\": 0}}}"
     },
@@ -78,7 +78,7 @@
       "method": "GET",
       "path": "/api/v1/analyzer/status",
       "status": 200,
-      "ms": 66.0,
+      "ms": 46.7,
       "passed": true,
       "body_preview": "\"<!doctype html>\\r\\n<html lang=\\\"en\\\">\\r\\n  <head>\\r\\n    <meta charset=\\\"UTF-8\\\" />\\r\\n    <link rel=\\\"icon\\\" href=\\\"/favicon.ico\\\" />\\r\\n    <link rel=\\\"apple-touch-icon\\\" href=\\\"/apple-touch-icon.png\\\" />\\r\\n    <meta name\""
     }

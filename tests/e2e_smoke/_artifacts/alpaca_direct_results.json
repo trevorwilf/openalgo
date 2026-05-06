@@ -24,13 +24,13 @@
       "url": "https://paper-api.alpaca.markets/v2/orders",
       "status": 200,
       "passed": true,
-      "body_preview": "[{\"id\": \"d781565b-1e31-466d-b6b8-164ba6440801\", \"client_order_id\": \"338faed4-1ce8-4319-8190-53a0fcc5f1da\", \"created_at\": \"2026-05-05T21:26:57.735379Z\", \"updated_at\": \"2026-05-05T21:26:57.828604Z\", \"su..."
+      "body_preview": "[{\"id\": \"8031d4b5-7f4a-4b16-847b-bfbb1c9d0997\", \"client_order_id\": \"bd41e0f2-e7b6-433c-82b9-495517f9f9a3\", \"created_at\": \"2026-05-06T17:44:25.998916Z\", \"updated_at\": \"2026-05-06T17:44:27.10559Z\", \"sub..."
     },
     {
       "url": "https://paper-api.alpaca.markets/v2/clock",
       "status": 200,
       "passed": true,
-      "body_preview": "{\"is_open\": false, \"next_close\": \"2026-05-06T16:00:00-04:00\", \"next_open\": \"2026-05-06T09:30:00-04:00\", \"timestamp\": \"2026-05-06T03:06:29.410975098-04:00\"}"
+      "body_preview": "{\"is_open\": true, \"next_close\": \"2026-05-06T16:00:00-04:00\", \"next_open\": \"2026-05-07T09:30:00-04:00\", \"timestamp\": \"2026-05-06T13:44:30.970349732-04:00\"}"
     },
     {
       "url": "https://paper-api.alpaca.markets/v2/calendar",
@@ -48,7 +48,7 @@
       "url": "https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest",
       "status": 200,
       "passed": true,
-      "body_preview": "{\"quote\": {\"ap\": 296.71, \"as\": 40, \"ax\": \"V\", \"bp\": 268.8, \"bs\": 40, \"bx\": \"V\", \"c\": [\"R\"], \"t\": \"2026-05-05T20:00:02.001487255Z\", \"z\": \"C\"}, \"symbol\": \"AAPL\"}"
+      "body_preview": "{\"quote\": {\"ap\": 286.76, \"as\": 40, \"ax\": \"V\", \"bp\": 286.25, \"bs\": 40, \"bx\": \"V\", \"c\": [\"R\"], \"t\": \"2026-05-06T17:44:31.316479839Z\", \"z\": \"C\"}, \"symbol\": \"AAPL\"}"
     },
     {
       "url": "https://data.alpaca.markets/v2/stocks/AAPL/bars",
@@ -60,7 +60,7 @@
       "url": "https://data.alpaca.markets/v2/stocks/AAPL/snapshot",
       "status": 200,
       "passed": true,
-      "body_preview": "{\"dailyBar\": {\"c\": 284.18, \"h\": 284.555, \"l\": 276.51, \"n\": 27168, \"o\": 276.94, \"t\": \"2026-05-05T04:00:00Z\", \"v\": 1525477, \"vw\": 281.898103}, \"latestQuote\": {\"ap\": 296.71, \"as\": 40, \"ax\": \"V\", \"bp\": 26..."
+      "body_preview": "{\"dailyBar\": {\"c\": 286.65, \"h\": 287.13, \"l\": 281.09, \"n\": 17616, \"o\": 281.92, \"t\": \"2026-05-06T04:00:00Z\", \"v\": 962004, \"vw\": 284.960969}, \"latestQuote\": {\"ap\": 286.76, \"as\": 40, \"ax\": \"V\", \"bp\": 286...."
     }
   ]
 }

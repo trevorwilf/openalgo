@@ -11,27 +11,32 @@
       "new_page_errors": [],
       "new_failed_requests": [
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=76z9d1zh",
+          "url": "http://127.0.0.1:5000/sounds/alert.mp3",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         },
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=76z9ba5u&sid=l3fTJZHhakrRBNp0AAAC",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgd1l4b2&sid=My2FPWjU1HL27XQgAAAC",
           "method": "POST",
           "failure": "net::ERR_ABORTED"
         },
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=76z89i7t&sid=9YbkGoy2odg2SSx0AAAD",
-          "method": "GET",
-          "failure": "net::ERR_ABORTED"
-        },
-        {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=76z7ro2a&sid=l3fTJZHhakrRBNp0AAAC",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgd0qfhs&sid=My2FPWjU1HL27XQgAAAC",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         },
         {
           "url": "http://127.0.0.1:5000/auth/dashboard-data",
+          "method": "GET",
+          "failure": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgd07jcf&sid=MmvDJpAhLsWGWUwGAAAD",
+          "method": "GET",
+          "failure": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgd1mgt8",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         }
@@ -57,12 +62,12 @@
       "new_page_errors": [],
       "new_failed_requests": [
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=7760jshf&sid=vBMpXC_JsF9KDe6dAAAP",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgi77mam&sid=Y9JXUZr5LKc1-BTaAAAI",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         },
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=774kyj2v&sid=Db9o7KGs4Q4-JNOuAAAI",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgi8tmaw&sid=Y6gL5gSmAULp-GvjAAAP",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         }
@@ -98,12 +103,12 @@
       "new_page_errors": [],
       "new_failed_requests": [
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77cwde89&sid=Fc6dYtC2VB8M5mrtAAAS",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgspjzz4&sid=Q_cSOnmfyEWEVjwDAAAR",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         },
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77cw7mtc&sid=HBeuWUJG92vZEEvFAAAR",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgspjn1u&sid=6-blIw8MnoaoImIjAAAS",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         }
@@ -119,12 +124,12 @@
       "new_page_errors": [],
       "new_failed_requests": [
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77iv0w9c&sid=NF-ZNmBpzRazAh8TAAAW",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgzccxlv&sid=2CuMHuGwxLHYc5syAAAW",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         },
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77jea0rq&sid=-8tK6ViV_rc9pQzBAAAZ",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgyb1jxi&sid=oXn97gaORg540kKcAAAZ",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         }
@@ -140,12 +145,12 @@
       "new_page_errors": [],
       "new_failed_requests": [
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77qk0tvj&sid=8zoyZ2Feq1yaiRUuAAAc",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=ch8ec4vb",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         },
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77su58ot",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=ch5nab2w&sid=rxHzPH8tSmcIKMUcAAAc",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         }
@@ -161,12 +166,12 @@
       "new_page_errors": [],
       "new_failed_requests": [
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77yf7x4t&sid=0FXzu2s2aDK8eC06AABB",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=chevh9cn&sid=AvAakDGmLpm7DUU8AABd",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         },
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77za4zj9&sid=AFz2cQvdLs9KtvV9AABg",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cheg545r&sid=NsMW9LWmphntJiOgAABB",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         }
@@ -192,7 +197,7 @@
       "new_page_errors": [],
       "new_failed_requests": [
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=7846h4aj&sid=KWfvrD8Rkca62SmeAABi",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=chk1gv72&sid=rJvGX2WlKcMoosKLAABf",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         }
@@ -208,7 +213,7 @@
       "new_page_errors": [],
       "new_failed_requests": [
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=78ahhm9i&sid=RI94408dbL8BcdTlAABk",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=chq9gepz&sid=mBIoVLIDYVcBs4plAABh",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         }
@@ -224,7 +229,7 @@
       "new_page_errors": [],
       "new_failed_requests": [
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=78gun3c2&sid=W36vknQ0MyHl39mDAABm",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=chwowpnr&sid=sQXjOJwvDjRU5uC-AABj",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         }
@@ -240,7 +245,7 @@
       "new_page_errors": [],
       "new_failed_requests": [
         {
-          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=78nbehb3&sid=Isjrj1zrMQhnJyULAABo",
+          "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=ci2ujtr9&sid=CK6MPriIf2zEoMhCAABl",
           "method": "GET",
           "failure": "net::ERR_ABORTED"
         }
@@ -272,22 +277,17 @@
   "all_page_errors": [],
   "all_failed_requests": [
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=76z9d1zh",
+      "url": "http://127.0.0.1:5000/sounds/alert.mp3",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=76z9ba5u&sid=l3fTJZHhakrRBNp0AAAC",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgd1l4b2&sid=My2FPWjU1HL27XQgAAAC",
       "method": "POST",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=76z89i7t&sid=9YbkGoy2odg2SSx0AAAD",
-      "method": "GET",
-      "failure": "net::ERR_ABORTED"
-    },
-    {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=76z7ro2a&sid=l3fTJZHhakrRBNp0AAAC",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgd0qfhs&sid=My2FPWjU1HL27XQgAAAC",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
@@ -297,72 +297,82 @@
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=7760jshf&sid=vBMpXC_JsF9KDe6dAAAP",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgd07jcf&sid=MmvDJpAhLsWGWUwGAAAD",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=774kyj2v&sid=Db9o7KGs4Q4-JNOuAAAI",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgd1mgt8",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77cwde89&sid=Fc6dYtC2VB8M5mrtAAAS",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgi77mam&sid=Y9JXUZr5LKc1-BTaAAAI",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77cw7mtc&sid=HBeuWUJG92vZEEvFAAAR",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgi8tmaw&sid=Y6gL5gSmAULp-GvjAAAP",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77iv0w9c&sid=NF-ZNmBpzRazAh8TAAAW",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgspjzz4&sid=Q_cSOnmfyEWEVjwDAAAR",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77jea0rq&sid=-8tK6ViV_rc9pQzBAAAZ",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgspjn1u&sid=6-blIw8MnoaoImIjAAAS",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77qk0tvj&sid=8zoyZ2Feq1yaiRUuAAAc",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgzccxlv&sid=2CuMHuGwxLHYc5syAAAW",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77su58ot",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cgyb1jxi&sid=oXn97gaORg540kKcAAAZ",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77yf7x4t&sid=0FXzu2s2aDK8eC06AABB",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=ch8ec4vb",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=77za4zj9&sid=AFz2cQvdLs9KtvV9AABg",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=ch5nab2w&sid=rxHzPH8tSmcIKMUcAAAc",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=7846h4aj&sid=KWfvrD8Rkca62SmeAABi",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=chevh9cn&sid=AvAakDGmLpm7DUU8AABd",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=78ahhm9i&sid=RI94408dbL8BcdTlAABk",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=cheg545r&sid=NsMW9LWmphntJiOgAABB",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=78gun3c2&sid=W36vknQ0MyHl39mDAABm",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=chk1gv72&sid=rJvGX2WlKcMoosKLAABf",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     },
     {
-      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=78nbehb3&sid=Isjrj1zrMQhnJyULAABo",
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=chq9gepz&sid=mBIoVLIDYVcBs4plAABh",
+      "method": "GET",
+      "failure": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=chwowpnr&sid=sQXjOJwvDjRU5uC-AABj",
+      "method": "GET",
+      "failure": "net::ERR_ABORTED"
+    },
+    {
+      "url": "http://127.0.0.1:5000/socket.io/?EIO=4&transport=polling&t=ci2ujtr9&sid=CK6MPriIf2zEoMhCAABl",
       "method": "GET",
       "failure": "net::ERR_ABORTED"
     }
