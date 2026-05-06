@@ -113,3 +113,8 @@ reports/*
 
 # strategies
 strategies/scripts/*
+strategies/scripts/data/state.json
+strategies/scripts/data/state.json.tmp
+strategies/scripts/logs/*.log
+strategies/scripts/KILL_*.flag
+strategies/scripts/data/daily_summary.jsonl
