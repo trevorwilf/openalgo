@@ -60,6 +60,7 @@ Lane semantics:
 | `/api/v2/audit/chart-orders` | DELETE,GET | promoted | n/a | — | no | none | none |
 | `/api/v2/balances` | GET | dual | yes | funds_service, positionbook_service | no | none | none |
 | `/api/v2/bars` | POST | dual | yes | history_service | yes | canonical | none |
+| `/api/v2/bars/intervals` | GET | dual | no | intervals_service | no | none | phase 2 |
 | `/api/v2/capabilities` | GET | promoted | no | — | no | none | phase 2 |
 | `/api/v2/holdings` | GET | promoted | yes | — | yes | none | none |
 | `/api/v2/indicators/series` | POST | promoted | n/a | — | no | none | none |
@@ -118,6 +119,7 @@ Lane semantics:
 - `/api/v1/tradebook` — `market_regions/india/legacy_v1/restx_api/tradebook.py` (Namespace: `tradebook`)
 - `/api/v2/balances` — `restx_api/v2/accounts.py` (Namespace: ``)
 - `/api/v2/bars` — `restx_api/v2/bars.py` (Namespace: `bars`)
+- `/api/v2/bars/intervals` — `restx_api/v2/bars_intervals.py` (Namespace: `bars_intervals`)
 - `/api/v2/admin/broker_compliance` — `restx_api/v2/broker_compliance.py` (Namespace: `broker_compliance`)
 - `/api/v2/capabilities` — `restx_api/v2/capabilities.py` (Namespace: `capabilities`)
 - `/api/v2/audit/chart-orders` — `restx_api/v2/chart_audit.py` (Namespace: `audit-chart-orders`)
