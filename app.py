@@ -935,4 +935,17 @@ if __name__ == "__main__":
             f"{C}{BL}{H*(_W-2)}{BR}{R}", "",
         ]), flush=True)
 
-    socketio.run(app, host=host_ip, port=port, debug=debug, reloader_options=reloader_options)
+    # `app.py` is the standalone / dev-server entry point — production deploys
+    # use Gunicorn + eventlet (see CLAUDE.md "Eventlet + Gunicorn"). flask-socketio
+    # refuses to start under Werkzeug unless `allow_unsafe_werkzeug=True` is set
+    # explicitly when debug=False, which is the default in `.sample.env`. Without
+    # this flag, `uv run app.py` fails immediately for any user who copies the
+    # sample .env unchanged.
+    socketio.run(
+        app,
+        host=host_ip,
+        port=port,
+        debug=debug,
+        reloader_options=reloader_options,
+        allow_unsafe_werkzeug=True,
+    )
