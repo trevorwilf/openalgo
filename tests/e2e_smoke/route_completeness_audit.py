@@ -87,7 +87,11 @@ V1_TO_V2_OVERRIDES = {
     "/telegram":        "/telegram",
     "/margin":          "/margin",
     "/chart":           "/chart",
-    "/pnl":             "/pnl",
+    # The v2 P&L surface lives at /api/v2/pnl/symbols (POST). The bare
+    # /pnl path is intentionally not registered. Map it so the audit
+    # at least reaches the real route — POST-only endpoints come back
+    # as UNKNOWN/405 under GET, which doesn't count as MISSING.
+    "/pnl":             "/pnl/symbols",
 }
 
 
