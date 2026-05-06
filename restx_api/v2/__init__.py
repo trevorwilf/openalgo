@@ -88,6 +88,7 @@ def _build() -> tuple[Blueprint, Api]:
     from restx_api.v2.options_synthetic import api as options_synthetic_ns
     from restx_api.v2.analyzer import api as analyzer_ns
     from restx_api.v2.margin import api as margin_ns
+    from restx_api.v2.pnl import api as pnl_ns
     from restx_api.v2.orders import api as orders_ns
     from restx_api.v2.ping import api as ping_ns
     from restx_api.v2.trades import api as trades_ns
@@ -117,6 +118,7 @@ def _build() -> tuple[Blueprint, Api]:
     api.add_namespace(options_synthetic_ns, path="/options/synthetic-future")
     api.add_namespace(analyzer_ns, path="/analyzer")
     api.add_namespace(margin_ns, path="/margin")
+    api.add_namespace(pnl_ns, path="/pnl")
     api.add_namespace(positions_api, path="/positions")
     api.add_namespace(balances_api, path="/balances")
     api.add_namespace(venues_ns, path="/venues")
