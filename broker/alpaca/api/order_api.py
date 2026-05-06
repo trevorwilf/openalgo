@@ -616,6 +616,43 @@ class AlpacaOrderTranslator:
         r.raise_for_status()
         return r.json()
 
+    def list_holdings_via_token(
+        self,
+        auth_token: str,
+    ) -> list[dict[str, Any]]:
+        """Return the position rows shaped as holdings.
+
+        Alpaca does not separate "intraday positions" (MIS) from
+        "delivery holdings" (CNC) the way Indian brokers do — every
+        position is held overnight unless explicitly closed. We surface
+        the same ``/v2/positions`` rows; the v2 dispatcher returns them
+        verbatim so callers see the raw position records as holdings.
+
+        Indian brokers that DO distinguish ship their own
+        ``list_holdings_via_token`` hook on their translator and the
+        v2 ``/holdings`` route picks that up.
+        """
+        if self._client is not None:
+            r = self._client.get("/v2/positions")
+        else:
+            from broker.alpaca.api.auth_api import auth_handle_from_token
+
+            auth = auth_handle_from_token(auth_token)
+            with httpx.Client(**self._client_kwargs(auth)) as c:
+                r = c.get("/v2/positions")
+        if r.status_code >= 400:
+            msg = r.text[:500]
+            try:
+                body = r.json()
+                if isinstance(body, dict) and body.get("message"):
+                    msg = body["message"]
+                    if body.get("code"):
+                        msg = f"(alpaca code {body['code']}) {msg}"
+            except (ValueError, TypeError):
+                pass
+            raise RuntimeError(f"alpaca list_holdings HTTP {r.status_code}: {msg}")
+        return r.json() or []
+
     def list_trades_via_token(
         self,
         auth_token: str,
