@@ -360,6 +360,79 @@ class OrderById(Resource):
         return ok({"order_id": order_id, "status": "canceled"}), 200
 
 
+@api.route("/<string:order_id>/modify")
+class OrderModify(Resource):
+    """POST /api/v2/orders/<id>/modify — promoted-lane order modify.
+
+    Documented in ``docs/migration/v1-to-v2.md`` as the v2 successor to
+    ``POST /api/v1/modifyorder``. Dispatches to the broker translator's
+    ``modify_order_via_token(auth_token, order_id, **canonical_fields)``
+    when the translator implements it; returns 501 ``unimplemented``
+    when it doesn't (so callers know to fall back to v1 for India
+    brokers, where v1 stays bit-identical per ADR 0005).
+
+    Body shape (all fields optional but at least one required):
+
+        {
+          "apikey": "...",
+          "quantity": "10",            // canonical numeric (string)
+          "price": "150.25",           // for LIMIT-priced orders
+          "trigger_price": "145.00",   // for STOP-priced orders
+          "time_in_force": "DAY",
+          "client_order_id": "..."
+        }
+
+    Per-broker translators map these onto the broker-native fields
+    (Alpaca: ``qty`` / ``limit_price`` / ``stop_price`` / ``time_in_force``
+    / ``client_order_id`` for PATCH /v2/orders/<id>).
+    """
+
+    def post(self, order_id: str):
+        from flask import request as _req
+
+        auth_token, broker, auth_err = resolve_auth()
+        if auth_err is not None:
+            return error("unauthorized", auth_err), 401
+
+        promoted, err_payload, err_status = _ensure_promoted(broker)
+        if promoted is None:
+            return err_payload, err_status
+
+        fn = getattr(promoted, "modify_order_via_token", None)
+        if not callable(fn):
+            return error(
+                "unimplemented",
+                f"broker {broker!r} translator does not implement modify_order_via_token",
+                details={"broker_code": broker},
+            ), 501
+
+        body = _req.get_json(silent=True) or {}
+        kwargs: dict[str, Any] = {}
+        for k in ("quantity", "price", "trigger_price",
+                  "time_in_force", "client_order_id"):
+            if k in body and body[k] is not None and body[k] != "":
+                kwargs[k] = body[k]
+        if not kwargs:
+            return error(
+                "validation_error",
+                "at least one of quantity, price, trigger_price, "
+                "time_in_force, client_order_id must be supplied",
+            ), 422
+
+        try:
+            updated = fn(auth_token, order_id, **kwargs)
+        except ValueError as e:
+            return error("validation_error", str(e)), 422
+        except Exception as e:  # noqa: BLE001 — broker last-resort
+            logger.exception("modify_order failed for %s/%s: %s", broker, order_id, e)
+            return error("broker_error", str(e)), 502
+        return ok({
+            "order_id": order_id,
+            "status": "modified",
+            "broker_response": updated,
+        }), 200
+
+
 def _capability_precheck(normalized, capabilities) -> Any | None:
     """Reject the order with ``unsupported_capability`` when the broker's
     declared capabilities do not include a requested primitive.

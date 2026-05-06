@@ -22,7 +22,7 @@ is the high-traffic surface every client should learn:
 | v1 endpoint | v2 endpoint | Status |
 |---|---|---|
 | `POST /api/v1/placeorder`       | `POST /api/v2/orders`            | both lanes live |
-| `POST /api/v1/modifyorder`      | `POST /api/v2/orders/<id>/modify`| Phase 8-bis (per-broker translator) |
+| `POST /api/v1/modifyorder`      | `POST /api/v2/orders/<id>/modify`| **Shipped** — translator must implement `modify_order_via_token`. Alpaca implementation included. |
 | `POST /api/v1/cancelorder`      | `POST /api/v2/orders/<id>/cancel`| Phase 8-bis |
 | `POST /api/v1/closeposition`    | `POST /api/v2/orders/closeposition` | Phase 8-bis |
 | `POST /api/v1/cancelallorder`   | `POST /api/v2/orders/cancelall`  | Phase 8-bis |
