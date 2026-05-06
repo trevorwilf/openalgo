@@ -16,10 +16,11 @@ from flask import request
 from flask_restx import Namespace, Resource
 
 from domain.errors import ErrorCode
-from restx_api.v2._auth import error, ok, resolve_auth
-from services.feature_gate_service import (
-    active_region_code,
-    is_india_region_active,
+from restx_api.v2._auth import (
+    error,
+    ok,
+    resolve_active_region_from_broker,
+    resolve_auth,
 )
 from utils.logging import get_logger
 
@@ -36,11 +37,8 @@ class MarginV2(Resource):
         if auth_err is not None:
             return error("unauthorized", auth_err), 401
 
-        if not is_india_region_active():
-            try:
-                region = active_region_code()
-            except Exception:
-                region = "unknown"
+        region = resolve_active_region_from_broker(broker)
+        if region != "india":
             return error(
                 ErrorCode.UNSUPPORTED_CAPABILITY,
                 (
@@ -49,6 +47,7 @@ class MarginV2(Resource):
                 ),
                 details={
                     "active_region": region,
+                    "broker_code": broker,
                     "dimension": "margin",
                 },
             ), 422

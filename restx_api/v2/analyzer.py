@@ -10,10 +10,11 @@ from __future__ import annotations
 from flask_restx import Namespace, Resource
 
 from domain.errors import ErrorCode
-from restx_api.v2._auth import error, ok, resolve_auth
-from services.feature_gate_service import (
-    active_region_code,
-    is_india_region_active,
+from restx_api.v2._auth import (
+    error,
+    ok,
+    resolve_active_region_from_broker,
+    resolve_auth,
 )
 from utils.logging import get_logger
 
@@ -31,18 +32,15 @@ class AnalyzerStatusV2(Resource):
         if auth_err is not None:
             return error("unauthorized", auth_err), 401
 
-        if not is_india_region_active():
-            try:
-                region = active_region_code()
-            except Exception:
-                region = "unknown"
+        region = resolve_active_region_from_broker(broker)
+        if region != "india":
             return error(
                 ErrorCode.ANALYZER_INDIA_REGION_ONLY,
                 (
                     "the analyzer / sandbox is India-only per ADR 0004; "
                     f"active region {region!r} is not supported."
                 ),
-                details={"active_region": region},
+                details={"active_region": region, "broker_code": broker},
             ), 422
 
         try:
