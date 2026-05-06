@@ -20,10 +20,11 @@ from flask import request
 from flask_restx import Namespace, Resource
 
 from domain.errors import ErrorCode
-from restx_api.v2._auth import error, ok, resolve_auth
-from services.feature_gate_service import (
-    active_region_code,
-    is_india_region_active,
+from restx_api.v2._auth import (
+    error,
+    ok,
+    resolve_active_region_from_broker,
+    resolve_auth,
 )
 from utils.logging import get_logger
 
@@ -43,11 +44,8 @@ class OptionsSyntheticFuture(Resource):
         if auth_err is not None:
             return error("unauthorized", auth_err), 401
 
-        if not is_india_region_active():
-            try:
-                region = active_region_code()
-            except Exception:
-                region = "unknown"
+        region = resolve_active_region_from_broker(broker)
+        if region != "india":
             return error(
                 ErrorCode.SYNTHETIC_FUTURE_DISABLED_IN_REGION,
                 (
@@ -55,7 +53,7 @@ class OptionsSyntheticFuture(Resource):
                     f"(active region {region!r}); ADR 0023 schedules the "
                     "provider-pluggable rewrite."
                 ),
-                details={"active_region": region},
+                details={"active_region": region, "broker_code": broker},
             ), 422
 
         underlying = (request.args.get("underlying") or "").strip().upper()

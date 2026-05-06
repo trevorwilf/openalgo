@@ -49,3 +49,30 @@ def error(code: str, message: str, *, details: Optional[Dict[str, Any]] = None) 
 def ok(data: Any) -> Dict[str, Any]:
     """v2 success envelope."""
     return {"data": data}
+
+
+def resolve_active_region_from_broker(broker: Optional[str]) -> str:
+    """Return the active region code derived from a broker plugin.
+
+    API-key-authenticated callers don't populate ``flask.session``, so
+    ``services.feature_gate_service.is_india_region_active`` (which
+    reads session) falls through to the settings default and reports
+    "india" for non-India brokers like Alpaca. This helper bypasses
+    the session reader and reads ``supported_regions[0]`` directly
+    from the broker's plugin capabilities, matching the pattern
+    already used by ``restx_api.v2.options._resolve_options_provider``.
+
+    Returns ``"unknown"`` if the broker is missing or its plugin has
+    no ``supported_regions`` declared.
+    """
+    if not broker:
+        return "unknown"
+    try:
+        from utils.plugin_loader import get_broker_capabilities
+        caps = get_broker_capabilities(broker)
+    except Exception:
+        return "unknown"
+    regions = list(getattr(caps, "supported_regions", None) or [])
+    if not regions:
+        return "unknown"
+    return str(regions[0]).strip().lower()
