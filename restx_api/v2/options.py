@@ -44,24 +44,37 @@ api_chain = Namespace("options_chain",
 
 
 def _resolve_options_provider(broker: str | None):
-    """Return ``(provider, error_payload, http_status)``.
+    """Return ``((provider, region_code), error_payload, http_status)``.
 
-    Resolves the active region from the broker's plugin capabilities
-    (Indian broker → "india"; alpaca → "us"; etc.) and looks up the
-    matching options provider. Returns a structured 503 when no
-    provider is registered for the region.
+    Resolves the region from the apikey-resolved broker's plugin
+    capabilities (``supported_regions[0]``) directly, NOT via
+    ``services.feature_gate_service.active_region_code`` which reads
+    Flask session — that reader returns None for apikey-authenticated
+    callers and falls through to the settings default (usually
+    "india"), masking the real region for non-India brokers like
+    Alpaca.
     """
-    from services.feature_gate_service import active_region_code
     from services.options.dispatcher import get_options_provider_or_none
 
-    try:
-        region = active_region_code()
-    except Exception as e:
-        logger.exception("could not resolve active region: %s", e)
+    if not broker:
         return None, error(
             "missing_region_context",
-            f"could not resolve region for broker {broker!r}: {e}",
+            "could not resolve broker — apikey did not bind to a broker",
         ), 503
+
+    try:
+        from utils.plugin_loader import get_broker_capabilities
+        caps = get_broker_capabilities(broker)
+    except Exception:
+        caps = None
+    regions = list(getattr(caps, "supported_regions", None) or [])
+    if not regions:
+        return None, error(
+            "missing_region_context",
+            f"broker {broker!r} has no supported_regions in plugin capabilities",
+            details={"broker_code": broker},
+        ), 503
+    region = str(regions[0]).strip().lower()
 
     provider = get_options_provider_or_none(region)
     if provider is None:
