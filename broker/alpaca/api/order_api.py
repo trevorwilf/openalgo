@@ -616,6 +616,51 @@ class AlpacaOrderTranslator:
         r.raise_for_status()
         return r.json()
 
+    def list_trades_via_token(
+        self,
+        auth_token: str,
+        *,
+        date: str | None = None,
+        page_size: int = 100,
+    ) -> list[dict[str, Any]]:
+        """GET /v2/account/activities/FILL — Alpaca's per-execution
+        fill activity feed. One row per fill (partials are separate
+        rows), mirroring Indian-broker tradebook semantics.
+
+        Optional ``date`` filters to a single trading day (YYYY-MM-DD).
+
+        Honors ``self._client`` for test injection. The on-the-wire
+        payload is returned as-is; the v2 dispatcher is responsible
+        for normalizing field names.
+        """
+        params: dict[str, Any] = {
+            "activity_types": "FILL",
+            "page_size": str(page_size),
+        }
+        if date:
+            params["date"] = date
+
+        if self._client is not None:
+            r = self._client.get("/v2/account/activities", params=params)
+        else:
+            from broker.alpaca.api.auth_api import auth_handle_from_token
+
+            auth = auth_handle_from_token(auth_token)
+            with httpx.Client(**self._client_kwargs(auth)) as c:
+                r = c.get("/v2/account/activities", params=params)
+        if r.status_code >= 400:
+            msg = r.text[:500]
+            try:
+                body = r.json()
+                if isinstance(body, dict) and body.get("message"):
+                    msg = body["message"]
+                    if body.get("code"):
+                        msg = f"(alpaca code {body['code']}) {msg}"
+            except (ValueError, TypeError):
+                pass
+            raise RuntimeError(f"alpaca list_trades HTTP {r.status_code}: {msg}")
+        return r.json() or []
+
     def cancel_order_via_token(
         self,
         auth_token: str,
