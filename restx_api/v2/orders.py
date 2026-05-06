@@ -360,6 +360,83 @@ class OrderById(Resource):
         return ok({"order_id": order_id, "status": "canceled"}), 200
 
 
+@api.route("/cancelall")
+class OrdersCancelAll(Resource):
+    """POST /api/v2/orders/cancelall — alias for ``DELETE /api/v2/orders``.
+
+    Documented v2 successor to ``POST /api/v1/cancelallorder``. Calls
+    the same ``cancel_all_orders_via_token`` translator hook that the
+    DELETE-on-collection path uses, so behavior is bit-identical. The
+    POST shape exists for clients that can't send ``DELETE`` (older
+    HTTP toolchains, some no-code platforms).
+    """
+
+    def post(self):
+        auth_token, broker, auth_err = resolve_auth()
+        if auth_err is not None:
+            return error("unauthorized", auth_err), 401
+
+        promoted, err_payload, err_status = _ensure_promoted(broker)
+        if promoted is None:
+            return err_payload, err_status
+
+        fn = getattr(promoted, "cancel_all_orders_via_token", None)
+        if not callable(fn):
+            return error(
+                "unimplemented",
+                f"broker {broker!r} translator does not implement "
+                "cancel_all_orders_via_token",
+                details={"broker_code": broker},
+            ), 501
+        try:
+            canceled, failed = fn(auth_token)
+        except Exception as e:  # noqa: BLE001 — broker-side last-resort
+            logger.exception("cancel_all_orders failed for %s: %s", broker, e)
+            return error("broker_error", str(e)), 502
+
+        return ok({
+            "canceled": canceled,
+            "failed": failed,
+            "summary": {
+                "canceled_count": len(canceled),
+                "failed_count": len(failed),
+            },
+        }), 200
+
+
+@api.route("/<string:order_id>/cancel")
+class OrderCancelAlias(Resource):
+    """POST /api/v2/orders/<id>/cancel — alias for ``DELETE /api/v2/orders/<id>``.
+
+    Documented v2 successor to ``POST /api/v1/cancelorder``. Same
+    translator hook (``cancel_order_via_token``); same response shape.
+    POST exists for clients that can't send ``DELETE``.
+    """
+
+    def post(self, order_id: str):
+        auth_token, broker, auth_err = resolve_auth()
+        if auth_err is not None:
+            return error("unauthorized", auth_err), 401
+
+        promoted, err_payload, err_status = _ensure_promoted(broker)
+        if promoted is None:
+            return err_payload, err_status
+
+        fn = getattr(promoted, "cancel_order_via_token", None)
+        if not callable(fn):
+            return error(
+                "unimplemented",
+                f"broker {broker!r} translator does not implement cancel_order_via_token",
+                details={"broker_code": broker},
+            ), 501
+        try:
+            fn(auth_token, order_id)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("cancel_order failed for %s/%s: %s", broker, order_id, e)
+            return error("broker_error", str(e)), 502
+        return ok({"order_id": order_id, "status": "canceled"}), 200
+
+
 @api.route("/<string:order_id>/modify")
 class OrderModify(Resource):
     """POST /api/v2/orders/<id>/modify — promoted-lane order modify.
