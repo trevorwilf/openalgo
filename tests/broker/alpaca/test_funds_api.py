@@ -25,12 +25,32 @@ def _token() -> str:
     )
 
 
-def _patch_v2_account(monkeypatch, body: dict, status: int = 200) -> None:
+def _patch_v2_account(
+    monkeypatch,
+    body: dict,
+    status: int = 200,
+    positions: list[dict] | None = None,
+) -> None:
+    """Patch httpx.Client.get to serve both /v2/account and /v2/positions.
+
+    The funds module now also fetches /v2/positions to back out the
+    realized intraday P&L component. Tests opt in to a positions
+    response by passing a ``positions`` list; the default empty list
+    matches the no-open-positions case.
+    """
+    pos_body = list(positions or [])
+
     def _fake_get(self, url, *args, **kwargs):
+        if url.endswith("/v2/positions"):
+            return httpx.Response(
+                200,
+                json=pos_body,
+                request=httpx.Request("GET", f"{PAPER_BASE_URL}{url}"),
+            )
         return httpx.Response(
             status,
             json=body,
-            request=httpx.Request("GET", f"{PAPER_BASE_URL}/v2/account"),
+            request=httpx.Request("GET", f"{PAPER_BASE_URL}{url}"),
         )
 
     monkeypatch.setattr(httpx.Client, "get", _fake_get)
@@ -58,6 +78,8 @@ def test_get_margin_data_returns_widget_shape(monkeypatch):
 
 
 def test_get_margin_data_with_open_positions(monkeypatch):
+    """1500 of intraday P&L, all of it sitting unrealized in an open
+    position → m2munrealized=1500, m2mrealized=0."""
     _patch_v2_account(
         monkeypatch,
         {
@@ -67,11 +89,76 @@ def test_get_margin_data_with_open_positions(monkeypatch):
             "long_market_value": "50000",
             "short_market_value": "0",
         },
+        positions=[{"symbol": "AAPL", "unrealized_intraday_pl": "1500"}],
     )
     funds = get_margin_data(_token())
     assert funds["availablecash"] == "50000.00"
     assert funds["m2munrealized"] == "1500.00"
+    assert funds["m2mrealized"] == "0.00"
     assert funds["utiliseddebits"] == "50000.00"
+
+
+def test_get_margin_data_realized_when_position_closed(monkeypatch):
+    """1500 of intraday P&L with no open positions → all realized."""
+    _patch_v2_account(
+        monkeypatch,
+        {
+            "cash": "100000",
+            "equity": "100000",
+            "last_equity": "98500",
+            "long_market_value": "0",
+            "short_market_value": "0",
+        },
+        positions=[],
+    )
+    funds = get_margin_data(_token())
+    assert funds["m2munrealized"] == "0.00"
+    assert funds["m2mrealized"] == "1500.00"
+
+
+def test_get_margin_data_mixed_realized_and_unrealized(monkeypatch):
+    """2000 intraday P&L = 1200 unrealized (open MSFT) + 800 realized
+    (closed AAPL trade)."""
+    _patch_v2_account(
+        monkeypatch,
+        {
+            "cash": "85000",
+            "equity": "102000",
+            "last_equity": "100000",
+            "long_market_value": "17000",
+            "short_market_value": "0",
+        },
+        positions=[{"symbol": "MSFT", "unrealized_intraday_pl": "1200"}],
+    )
+    funds = get_margin_data(_token())
+    assert funds["m2munrealized"] == "1200.00"
+    assert funds["m2mrealized"] == "800.00"
+
+
+def test_get_margin_data_positions_endpoint_failure_falls_back(monkeypatch):
+    """If /v2/positions fails, m2mrealized falls back to 0 and the
+    widget still renders rather than dropping entirely."""
+    def _fake_get(self, url, *args, **kwargs):
+        if url.endswith("/v2/positions"):
+            raise httpx.ConnectError("positions unavailable")
+        return httpx.Response(
+            200,
+            json={
+                "cash": "50000",
+                "equity": "100000",
+                "last_equity": "98500",
+                "long_market_value": "50000",
+                "short_market_value": "0",
+            },
+            request=httpx.Request("GET", f"{PAPER_BASE_URL}{url}"),
+        )
+
+    monkeypatch.setattr(httpx.Client, "get", _fake_get)
+    funds = get_margin_data(_token())
+    assert funds["availablecash"] == "50000.00"
+    # No position data → unrealized=0, all of intraday counts as realized
+    assert funds["m2munrealized"] == "0.00"
+    assert funds["m2mrealized"] == "1500.00"
 
 
 def test_get_margin_data_handles_invalid_token():
