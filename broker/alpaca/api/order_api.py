@@ -621,12 +621,21 @@ class AlpacaOrderTranslator:
         auth_token: str,
         order_id: str,
     ) -> None:
-        """DELETE /v2/orders/<id>. Returns None on 204 / 200; raises on other status."""
-        from broker.alpaca.api.auth_api import auth_handle_from_token
+        """DELETE /v2/orders/<id>. Returns None on 204 / 200; raises on other status.
 
-        auth = auth_handle_from_token(auth_token)
-        with httpx.Client(**self._client_kwargs(auth)) as c:
-            r = c.delete(f"/v2/orders/{order_id}")
+        Honors ``self._client`` when constructed with one (tests using
+        ``httpx.MockTransport``) so the mock transport intercepts the
+        request. Mirrors ``cancel_all_orders_via_token`` /
+        ``modify_order_via_token``.
+        """
+        if self._client is not None:
+            r = self._client.delete(f"/v2/orders/{order_id}")
+        else:
+            from broker.alpaca.api.auth_api import auth_handle_from_token
+
+            auth = auth_handle_from_token(auth_token)
+            with httpx.Client(**self._client_kwargs(auth)) as c:
+                r = c.delete(f"/v2/orders/{order_id}")
         if r.status_code not in (200, 204):
             r.raise_for_status()
 
