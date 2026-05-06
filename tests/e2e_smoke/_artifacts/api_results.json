@@ -7,18 +7,18 @@
       "method": "GET",
       "path": "/auth/csrf-token",
       "status": 200,
-      "ms": 605.9,
+      "ms": 23.6,
       "passed": true,
       "expected": [
         200
       ],
-      "body_preview": "{\"csrf_token\": \"IjE5NDMxNGRkZmM5NGE1YWI5NmY4MmM1ODM1NjlkMzYxOWEyNjNiN2Yi.aftD6Q.hXlEYSMpeQKyuNu_9LKS_gOaxH4\"}"
+      "body_preview": "{\"csrf_token\": \"IjhhM2NjOWI1NDUzNjFhOWUzNjhiNzFiNjQzZjU3Mjg1NThmYzk5MzUi.aftbLg.GfKvJh81yiKGqK9IczLH3EYbGqk\"}"
     },
     {
       "method": "GET",
       "path": "/auth/session",
       "status": 200,
-      "ms": 539.8,
+      "ms": 22.2,
       "passed": true,
       "expected": [
         200
@@ -29,7 +29,7 @@
       "method": "GET",
       "path": "/auth/brokers",
       "status": 200,
-      "ms": 22.8,
+      "ms": 45.1,
       "passed": true,
       "expected": [
         200
@@ -40,7 +40,7 @@
       "method": "GET",
       "path": "/auth/check-setup",
       "status": 200,
-      "ms": 23.3,
+      "ms": 25.8,
       "passed": true,
       "expected": [
         200
@@ -51,18 +51,18 @@
       "method": "GET",
       "path": "/api/master-contract/status",
       "status": 200,
-      "ms": 46.9,
+      "ms": 35.3,
       "passed": true,
       "expected": [
         200
       ],
-      "body_preview": "{\"broker\": \"alpaca\", \"download_date\": \"2026-05-06\", \"download_duration_seconds\": 75, \"exchange_stats\": null, \"is_ready\": true, \"last_download_time\": \"2026-05-06T07:36:14.447088\", \"last_updated\": \"2026-05-06T07:36:14.421853\", \"message\": \"Mas..."
+      "body_preview": "{\"broker\": \"alpaca\", \"download_date\": \"2026-05-06\", \"download_duration_seconds\": 72, \"exchange_stats\": null, \"is_ready\": true, \"last_download_time\": \"2026-05-06T09:15:26.982914\", \"last_updated\": \"2026-05-06T09:15:26.962683\", \"message\": \"Mas..."
     },
     {
       "method": "GET",
       "path": "/api/master-contract/ready",
       "status": 200,
-      "ms": 24.4,
+      "ms": 25.5,
       "passed": true,
       "expected": [
         200
@@ -73,18 +73,18 @@
       "method": "GET",
       "path": "/api/master-contract/smart-status",
       "status": 200,
-      "ms": 30.8,
+      "ms": 33.2,
       "passed": true,
       "expected": [
         200
       ],
-      "body_preview": "{\"broker\": \"alpaca\", \"download_date\": \"2026-05-06\", \"download_duration_seconds\": 75, \"exchange_stats\": null, \"is_ready\": true, \"last_download_time\": \"2026-05-06T07:36:14.447088\", \"last_updated\": \"2026-05-06T07:36:14.421853\", \"message\": \"Mas..."
+      "body_preview": "{\"broker\": \"alpaca\", \"download_date\": \"2026-05-06\", \"download_duration_seconds\": 72, \"exchange_stats\": null, \"is_ready\": true, \"last_download_time\": \"2026-05-06T09:15:26.982914\", \"last_updated\": \"2026-05-06T09:15:26.962683\", \"message\": \"Mas..."
     },
     {
       "method": "GET",
       "path": "/api/cache/status",
       "status": 200,
-      "ms": 35.5,
+      "ms": 21.7,
       "passed": true,
       "expected": [
         200
@@ -95,7 +95,7 @@
       "method": "GET",
       "path": "/api/cache/health",
       "status": 200,
-      "ms": 22.8,
+      "ms": 41.8,
       "passed": true,
       "expected": [
         200
@@ -106,7 +106,7 @@
       "method": "GET",
       "path": "/api/v2/regions",
       "status": 200,
-      "ms": 45.1,
+      "ms": 54.0,
       "passed": true,
       "expected": [
         200
@@ -117,7 +117,7 @@
       "method": "GET",
       "path": "/api/v2/regions/india",
       "status": 200,
-      "ms": 38.3,
+      "ms": 24.7,
       "passed": true,
       "expected": [
         200
@@ -128,7 +128,7 @@
       "method": "GET",
       "path": "/api/v2/regions/us",
       "status": 200,
-      "ms": 46.5,
+      "ms": 21.6,
       "passed": true,
       "expected": [
         200
@@ -139,7 +139,7 @@
       "method": "GET",
       "path": "/api/v2/regions/eu",
       "status": 200,
-      "ms": 20.0,
+      "ms": 23.2,
       "passed": true,
       "expected": [
         200
@@ -150,7 +150,7 @@
       "method": "GET",
       "path": "/api/v2/regions/uk",
       "status": 200,
-      "ms": 40.5,
+      "ms": 22.5,
       "passed": true,
       "expected": [
         200
@@ -161,7 +161,7 @@
       "method": "GET",
       "path": "/api/v2/regions/india/flow_defaults",
       "status": 200,
-      "ms": 21.4,
+      "ms": 22.0,
       "passed": true,
       "expected": [
         200
@@ -172,7 +172,7 @@
       "method": "GET",
       "path": "/api/v2/regions/us/flow_defaults",
       "status": 200,
-      "ms": 38.3,
+      "ms": 22.8,
       "passed": true,
       "expected": [
         200
@@ -183,7 +183,7 @@
       "method": "GET",
       "path": "/api/v2/venues",
       "status": 200,
-      "ms": 55.0,
+      "ms": 24.3,
       "passed": true,
       "expected": [
         200
@@ -194,7 +194,7 @@
       "method": "GET",
       "path": "/api/v2/venues/XNAS",
       "status": 200,
-      "ms": 38.6,
+      "ms": 27.7,
       "passed": true,
       "expected": [
         200
@@ -205,7 +205,7 @@
       "method": "GET",
       "path": "/api/v2/venues/CRYPTO",
       "status": 200,
-      "ms": 24.8,
+      "ms": 26.9,
       "passed": true,
       "expected": [
         200
@@ -216,7 +216,7 @@
       "method": "GET",
       "path": "/api/v2/venues/XNAS/sessions",
       "status": 200,
-      "ms": 48.1,
+      "ms": 50.7,
       "passed": true,
       "expected": [
         200
@@ -227,7 +227,7 @@
       "method": "GET",
       "path": "/api/v2/balances",
       "status": 200,
-      "ms": 560.7,
+      "ms": 639.6,
       "passed": true,
       "expected": [
         200
@@ -238,7 +238,7 @@
       "method": "GET",
       "path": "/api/v2/positions",
       "status": 200,
-      "ms": 558.0,
+      "ms": 571.5,
       "passed": true,
       "expected": [
         200
@@ -249,7 +249,7 @@
       "method": "GET",
       "path": "/api/v2/orders",
       "status": 200,
-      "ms": 578.5,
+      "ms": 588.2,
       "passed": true,
       "expected": [
         200
@@ -260,29 +260,29 @@
       "method": "GET",
       "path": "/api/v2/orders",
       "status": 200,
-      "ms": 638.8,
+      "ms": 673.4,
       "passed": true,
       "expected": [
         200
       ],
-      "body_preview": "{\"data\": {\"orders\": [{\"id\": \"5114be46-96cb-40e9-9421-7b45dcb4f6f1\", \"client_order_id\": \"edd941d5-89ce-4d2c-b70b-8114a6bcf2b3\", \"created_at\": \"2026-05-06T13:33:30.409831Z\", \"updated_at\": \"2026-05-06T13:34:09.413805Z\", \"submitted_at\": \"2026-0..."
+      "body_preview": "{\"data\": {\"orders\": [{\"id\": \"32278dd1-0b8a-4e12-8336-92a05a9be898\", \"client_order_id\": \"d9cd2af2-2522-4e3c-825e-681126528478\", \"created_at\": \"2026-05-06T14:34:13.22736Z\", \"updated_at\": \"2026-05-06T14:34:14.301623Z\", \"submitted_at\": \"2026-05..."
     },
     {
       "method": "POST",
       "path": "/api/v2/quotes",
       "status": 200,
-      "ms": 594.8,
+      "ms": 688.6,
       "passed": true,
       "expected": [
         200
       ],
-      "body_preview": "{\"data\": [{\"instrument\": {\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4eb14c30\", \"venue_code\": \"XNAS\", \"canonical_symbol\": \"AAPL\"}, \"timestamp\": \"2026-05-06T13:36:45.718765+00:00\", \"quote\": {\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4..."
+      "body_preview": "{\"data\": [{\"instrument\": {\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4eb14c30\", \"venue_code\": \"XNAS\", \"canonical_symbol\": \"AAPL\"}, \"timestamp\": \"2026-05-06T15:16:02.568401+00:00\", \"quote\": {\"instrument_id\": \"c36ff2ff-2019-4402-8e81-5e2d4..."
     },
     {
       "method": "POST",
       "path": "/api/v2/bars",
       "status": 200,
-      "ms": 621.3,
+      "ms": 1561.2,
       "passed": true,
       "expected": [
         200
@@ -293,7 +293,7 @@
       "method": "POST",
       "path": "/api/v1/funds",
       "status": 200,
-      "ms": 549.0,
+      "ms": 2175.3,
       "passed": true,
       "expected": [
         200
@@ -304,7 +304,7 @@
       "method": "POST",
       "path": "/api/v1/positionbook",
       "status": 200,
-      "ms": 570.0,
+      "ms": 1188.9,
       "passed": true,
       "expected": [
         200
@@ -315,18 +315,18 @@
       "method": "POST",
       "path": "/api/v1/orderbook",
       "status": 200,
-      "ms": 643.8,
+      "ms": 669.9,
       "passed": true,
       "expected": [
         200
       ],
-      "body_preview": "{\"data\": {\"orders\": [{\"action\": \"SELL\", \"average_price\": \"281.91\", \"canonical_status\": \"FILLED\", \"exchange\": \"XNAS\", \"filled_quantity\": \"1\", \"native_status\": \"filled\", \"order_status\": \"complete\", \"order_type\": \"MARKET\", \"orderid\": \"5114be46..."
+      "body_preview": "{\"data\": {\"orders\": [{\"action\": \"BUY\", \"average_price\": \"0\", \"canonical_status\": \"CANCELED\", \"exchange\": \"XNAS\", \"filled_quantity\": \"0\", \"native_status\": \"canceled\", \"order_status\": \"cancelled\", \"order_type\": \"LIMIT\", \"orderid\": \"32278dd1-0..."
     },
     {
       "method": "POST",
       "path": "/api/v1/holdings",
       "status": 200,
-      "ms": 24.1,
+      "ms": 26.9,
       "passed": true,
       "expected": [
         200
@@ -337,7 +337,7 @@
       "method": "POST",
       "path": "/api/v1/tradebook",
       "status": 200,
-      "ms": 728.4,
+      "ms": 651.9,
       "passed": true,
       "expected": [
         200
@@ -348,7 +348,7 @@
       "method": "POST",
       "path": "/api/v1/quotes",
       "status": 200,
-      "ms": 567.6,
+      "ms": 573.5,
       "passed": true,
       "expected": [
         200,
@@ -356,13 +356,13 @@
         404,
         422
       ],
-      "body_preview": "{\"data\": {\"ask\": 282.92, \"bid\": 282.51, \"high\": 282.9, \"low\": 281.09, \"ltp\": 282.5, \"oi\": 0, \"open\": 281.92, \"prev_close\": 284.18, \"volume\": 73336.0}, \"status\": \"success\"}"
+      "body_preview": "{\"data\": {\"ask\": 284.39, \"bid\": 284.35, \"high\": 286.695, \"low\": 281.09, \"ltp\": 284.355, \"oi\": 0, \"open\": 281.92, \"prev_close\": 284.18, \"volume\": 614097.0}, \"status\": \"success\"}"
     },
     {
       "method": "GET",
       "path": "/api/v1/ping",
       "status": 200,
-      "ms": 24.9,
+      "ms": 28.5,
       "passed": true,
       "expected": [
         200,
@@ -375,7 +375,7 @@
       "method": "GET",
       "path": "/api/v1/version",
       "status": 200,
-      "ms": 34.0,
+      "ms": 25.4,
       "passed": true,
       "expected": [
         200,

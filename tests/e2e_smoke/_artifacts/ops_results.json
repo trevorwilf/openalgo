@@ -6,7 +6,7 @@
       "method": "GET",
       "path": "/health/status",
       "status": 200,
-      "ms": 23,
+      "ms": 24,
       "passed": true,
       "body": "{\"description\": \"OpenAlgo Trading Platform\", \"serviceId\": \"openalgo\", \"status\": \"pass\", \"version\": \"1.0\"}"
     },
@@ -14,39 +14,39 @@
       "method": "GET",
       "path": "/health/check",
       "status": 200,
-      "ms": 194,
+      "ms": 200,
       "passed": true,
-      "body": "{\"checks\": {\"database:connectivity\": [{\"componentId\": \"openalgo\", \"status\": \"pass\", \"time\": \"2026-05-06T13:36:56.544935Z\"}, {\"componentId\": \"logs\", \"status\": \"pass\", \"time\": \"2026-05-06T13:36:56.544935Z\"}, {\"componentId\": \"latency\", \"status\": \"pass\", \"time\": \"2026-05-06T13:36:56.544935Z\"}], \"system:"
+      "body": "{\"checks\": {\"database:connectivity\": [{\"componentId\": \"openalgo\", \"status\": \"pass\", \"time\": \"2026-05-06T15:16:39.094480Z\"}, {\"componentId\": \"logs\", \"status\": \"pass\", \"time\": \"2026-05-06T15:16:39.094480Z\"}, {\"componentId\": \"latency\", \"status\": \"pass\", \"time\": \"2026-05-06T15:16:39.094480Z\"}], \"system:"
     },
     {
       "method": "GET",
       "path": "/health/api/current",
       "status": 200,
-      "ms": 170,
+      "ms": 195,
       "passed": true,
-      "body": "{\"database\": {\"connections\": {\"apilog\": 0, \"health\": 0, \"latency\": 0, \"logs\": 0, \"openalgo\": 0}, \"status\": \"pass\", \"total\": 0}, \"fd\": {\"count\": 1570, \"limit\": null, \"status\": \"pass\", \"usage_percent\": 0.0}, \"memory\": {\"available_mb\": 109058.4453125, \"percent\": 0.13878597394511916, \"rss_mb\": 272.51953"
+      "body": "{\"database\": {\"connections\": {\"apilog\": 0, \"health\": 0, \"latency\": 0, \"logs\": 0, \"openalgo\": 0}, \"status\": \"pass\", \"total\": 0}, \"fd\": {\"count\": 1578, \"limit\": null, \"status\": \"pass\", \"usage_percent\": 0.0}, \"memory\": {\"available_mb\": 109453.1328125, \"percent\": 0.13757844744637787, \"rss_mb\": 270.14843"
     },
     {
       "method": "GET",
       "path": "/health/api/history",
       "status": 200,
-      "ms": 765,
+      "ms": 797,
       "passed": true,
-      "body": "[{\"db_connections\": 0, \"fd_count\": 2746, \"memory_rss_mb\": 307.19140625, \"overall_status\": \"pass\", \"threads\": 12, \"timestamp\": \"2026-05-05T09:37:02-04:00\", \"ws_connections\": 0}, {\"db_connections\": 0, \"fd_count\": 2745, \"memory_rss_mb\": 307.19140625, \"overall_status\": \"pass\", \"threads\": 12, \"timestamp\""
+      "body": "[{\"db_connections\": 0, \"fd_count\": 2749, \"memory_rss_mb\": 307.19140625, \"overall_status\": \"pass\", \"threads\": 12, \"timestamp\": \"2026-05-05T11:16:52-04:00\", \"ws_connections\": 0}, {\"db_connections\": 0, \"fd_count\": 2746, \"memory_rss_mb\": 307.19140625, \"overall_status\": \"pass\", \"threads\": 12, \"timestamp\""
     },
     {
       "method": "GET",
       "path": "/health/api/stats",
       "status": 200,
-      "ms": 468,
+      "ms": 489,
       "passed": true,
-      "body": "{\"database\": {\"avg\": 0.0, \"current\": 0, \"max\": 0, \"min\": 0}, \"fd\": {\"avg\": 1980.9270368006808, \"current\": 1570, \"fail_count\": 0, \"max\": 8989, \"min\": 651, \"warn_count\": 50}, \"memory\": {\"avg_mb\": 295.92898784833017, \"current_mb\": 272.51953125, \"fail_count\": 0, \"max_mb\": 588.2734375, \"min_mb\": 187.6718"
+      "body": "{\"database\": {\"avg\": 0.0, \"current\": 0, \"max\": 0, \"min\": 0}, \"fd\": {\"avg\": 1923.3075475642902, \"current\": 1578, \"fail_count\": 0, \"max\": 8989, \"min\": 651, \"warn_count\": 51}, \"memory\": {\"avg_mb\": 295.18441942818316, \"current_mb\": 270.1484375, \"fail_count\": 0, \"max_mb\": 588.2734375, \"min_mb\": 187.67187"
     },
     {
       "method": "GET",
       "path": "/health/api/alerts",
       "status": 200,
-      "ms": 43,
+      "ms": 26,
       "passed": true,
       "body": "[]"
     },
@@ -54,33 +54,33 @@
       "method": "GET",
       "path": "/latency/api/stats",
       "status": 200,
-      "ms": 53,
+      "ms": 47,
       "passed": true,
-      "body": "{\"avg_overhead\": 0.17636179074538857, \"avg_rtt\": 101.95018276749201, \"avg_total\": 102.1265445582374, \"broker_histograms\": {\"alpaca\": {\"avg_rtt\": 356.0518211788601, \"bins\": [\"0.5\", \"54.8\", \"109.1\", \"163.4\", \"217.8\", \"272.1\", \"326.4\", \"380.7\", \"435.0\", \"489.3\", \"543.6\", \"598.0\", \"652.3\", \"706.6\", \"760"
+      "body": "{\"avg_overhead\": 0.16927046160544118, \"avg_rtt\": 118.59175562858582, \"avg_total\": 118.76102609019125, \"broker_histograms\": {\"alpaca\": {\"avg_rtt\": 448.47301452878924, \"bins\": [\"0.5\", \"54.8\", \"109.1\", \"163.4\", \"217.8\", \"272.1\", \"326.4\", \"380.7\", \"435.0\", \"489.3\", \"543.6\", \"598.0\", \"652.3\", \"706.6\", \"7"
     },
     {
       "method": "GET",
       "path": "/latency/api/logs",
       "status": 200,
-      "ms": 42,
+      "ms": 46,
       "passed": true,
-      "body": "[{\"broker\": \"alpaca\", \"error\": \"{'exchange': ['Must be one of: NSE, NFO, CDS, BSE, BFO, BCD, MCX, NCDEX, NSE_INDEX, BSE_INDEX.'], 'disclosed_quantity': ['Missing data for required field.'], 'trigger_price': ['Missing data for required field.']}\", \"id\": 510, \"order_id\": \"unknown\", \"order_type\": \"MODI"
+      "body": "[{\"broker\": \"alpaca\", \"error\": null, \"id\": 585, \"order_id\": \"unknown\", \"order_type\": \"INTERVALS\", \"overhead_ms\": 0.0, \"response_latency_ms\": 0.0, \"rtt_ms\": 4.5680999755859375, \"status\": \"SUCCESS\", \"symbol\": null, \"timestamp\": \"2026-05-06T11:16:25-04:00\", \"total_latency_ms\": 4.5680999755859375, \"vali"
     },
     {
       "method": "GET",
       "path": "/traffic/api/stats",
       "status": 200,
-      "ms": 520,
+      "ms": 538,
       "passed": true,
-      "body": "{\"api\": {\"avg_duration\": 455.61, \"error_requests\": 788, \"total_requests\": 2040}, \"endpoints\": {\"basketorder\": {\"avg_duration\": 0.0, \"errors\": 0, \"total\": 0}, \"cancelorder\": {\"avg_duration\": 655.28, \"errors\": 0, \"total\": 48}, \"depth\": {\"avg_duration\": 498.38, \"errors\": 9, \"total\": 34}, \"funds\": {\"avg"
+      "body": "{\"api\": {\"avg_duration\": 451.14, \"error_requests\": 838, \"total_requests\": 2145}, \"endpoints\": {\"basketorder\": {\"avg_duration\": 0.0, \"errors\": 0, \"total\": 0}, \"cancelorder\": {\"avg_duration\": 655.28, \"errors\": 0, \"total\": 48}, \"depth\": {\"avg_duration\": 459.44, \"errors\": 12, \"total\": 37}, \"funds\": {\"av"
     },
     {
       "method": "GET",
       "path": "/traffic/api/logs",
       "status": 200,
-      "ms": 15,
+      "ms": 14,
       "passed": true,
-      "body": "[{\"client_ip\": \"127.0.0.1\", \"duration_ms\": 13.27, \"error\": null, \"host\": \"127.0.0.1:5000\", \"method\": \"GET\", \"path\": \"/latency/api/logs\", \"status_code\": 200, \"timestamp\": \"06-05-2026 09:36:58 AM\"}, {\"client_ip\": \"127.0.0.1\", \"duration_ms\": 16.87, \"error\": null, \"host\": \"127.0.0.1:5000\", \"method\": \"GE"
+      "body": "[{\"client_ip\": \"127.0.0.1\", \"duration_ms\": 14.04, \"error\": null, \"host\": \"127.0.0.1:5000\", \"method\": \"GET\", \"path\": \"/latency/api/logs\", \"status_code\": 200, \"timestamp\": \"06-05-2026 11:16:40 AM\"}, {\"client_ip\": \"127.0.0.1\", \"duration_ms\": 16.67, \"error\": null, \"host\": \"127.0.0.1:5000\", \"method\": \"GE"
     },
     {
       "method": "GET",
@@ -88,45 +88,45 @@
       "status": 200,
       "ms": 31,
       "passed": true,
-      "body": "{\"api_abuse_ips\": [{\"api_keys_tried\": \"[\\\"8254c329a92850f6\\\", \\\"9f86d081884c7d65\\\"]\", \"attempt_count\": 9, \"first_attempt_at\": \"06-05-2026 07:18:26 AM\", \"ip_address\": \"127.0.0.1\", \"last_attempt_at\": \"06-05-2026 07:26:53 AM\"}], \"banned_ips\": [], \"security_settings\": {\"404_ban_duration\": 0, \"404_thresh"
+      "body": "{\"api_abuse_ips\": [{\"api_keys_tried\": \"[\\\"8254c329a92850f6\\\", \\\"9f86d081884c7d65\\\"]\", \"attempt_count\": 51, \"first_attempt_at\": \"06-05-2026 07:18:26 AM\", \"ip_address\": \"127.0.0.1\", \"last_attempt_at\": \"06-05-2026 03:12:00 PM\"}], \"banned_ips\": [], \"security_settings\": {\"404_ban_duration\": 0, \"404_thres"
     },
     {
       "method": "GET",
       "path": "/security/api/login-activity",
       "status": 200,
-      "ms": 50,
+      "ms": 30,
       "passed": true,
-      "body": "{\"attempts\": [{\"broker\": \"alpaca\", \"device_info\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36\", \"failure_reason\": null, \"ip_address\": \"127.0.0.1\", \"login_type\": \"resume\", \"status\": \"success\", \"timestamp\": \"2026-05-06T13:"
+      "body": "{\"attempts\": [{\"broker\": \"alpaca\", \"device_info\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36\", \"failure_reason\": null, \"ip_address\": \"127.0.0.1\", \"login_type\": \"resume\", \"status\": \"success\", \"timestamp\": \"2026-05-06T15:"
     },
     {
       "method": "GET",
       "path": "/security/api/active-sessions",
       "status": 200,
-      "ms": 40,
+      "ms": 42,
       "passed": true,
-      "body": "{\"current_session_id\": \"707f746922d85dc6644a87d54936a5abbd4259468c0b95d8de4adfd370aeeb30\", \"sessions\": [{\"broker\": \"alpaca\", \"device_info\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36\", \"ip_address\": \"127.0.0.1\", \"last_s"
+      "body": "{\"current_session_id\": \"b14eb661a1bdb88762a0ed4227dd29aca6fffa5c33fb136efd68d4dd6d4bef23\", \"sessions\": [{\"broker\": \"alpaca\", \"device_info\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36\", \"ip_address\": \"127.0.0.1\", \"last_s"
     },
     {
       "method": "GET",
       "path": "/api/master-contract/status",
       "status": 200,
-      "ms": 25,
+      "ms": 44,
       "passed": true,
-      "body": "{\"broker\": \"alpaca\", \"download_date\": \"2026-05-06\", \"download_duration_seconds\": 75, \"exchange_stats\": null, \"is_ready\": true, \"last_download_time\": \"2026-05-06T07:36:14.447088\", \"last_updated\": \"2026-05-06T07:36:14.421853\", \"message\": \"Master contract download completed successfully\", \"status\": \"su"
+      "body": "{\"broker\": \"alpaca\", \"download_date\": \"2026-05-06\", \"download_duration_seconds\": 72, \"exchange_stats\": null, \"is_ready\": true, \"last_download_time\": \"2026-05-06T09:15:26.982914\", \"last_updated\": \"2026-05-06T09:15:26.962683\", \"message\": \"Master contract download completed successfully\", \"status\": \"su"
     },
     {
       "method": "GET",
       "path": "/api/master-contract/smart-status",
       "status": 200,
-      "ms": 29,
+      "ms": 31,
       "passed": true,
-      "body": "{\"broker\": \"alpaca\", \"download_date\": \"2026-05-06\", \"download_duration_seconds\": 75, \"exchange_stats\": null, \"is_ready\": true, \"last_download_time\": \"2026-05-06T07:36:14.447088\", \"last_updated\": \"2026-05-06T07:36:14.421853\", \"message\": \"Master contract download completed successfully\", \"smart_downlo"
+      "body": "{\"broker\": \"alpaca\", \"download_date\": \"2026-05-06\", \"download_duration_seconds\": 72, \"exchange_stats\": null, \"is_ready\": true, \"last_download_time\": \"2026-05-06T09:15:26.982914\", \"last_updated\": \"2026-05-06T09:15:26.962683\", \"message\": \"Master contract download completed successfully\", \"smart_downlo"
     },
     {
       "method": "GET",
       "path": "/api/cache/status",
       "status": 200,
-      "ms": 33,
+      "ms": 44,
       "passed": true,
       "body": "{\"active_broker\": null, \"cache_loaded\": false, \"cache_valid\": false, \"next_reset\": null, \"session_start\": null, \"stats\": {\"bulk_queries\": 0, \"cache_loads\": 0, \"db_queries\": 0, \"hit_rate\": \"0.00%\", \"hits\": 0, \"last_loaded\": null, \"memory_usage_mb\": \"0.00\", \"misses\": 0, \"total_symbols\": 0}, \"total_sym"
     },
@@ -134,7 +134,7 @@
       "method": "GET",
       "path": "/api/cache/health",
       "status": 200,
-      "ms": 46,
+      "ms": 23,
       "passed": true,
       "body": "{\"cache_loaded\": false, \"cache_valid\": false, \"db_queries\": 0, \"health_score\": 0, \"hit_rate\": \"0.00%\", \"memory_usage_mb\": \"0.00\", \"recommendations\": [\"Cache is not loaded. Run master contract download.\"], \"status\": \"unhealthy\", \"total_symbols\": 0}"
     }
