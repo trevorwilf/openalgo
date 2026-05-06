@@ -96,37 +96,60 @@ async function main() {
   console.log(`[login] navigating ${BASE}/login`);
   await page.goto("/login", { waitUntil: "domcontentloaded" });
 
-  // Login form selectors — username + password inputs are conventional.
-  const userField = await page.$("input[name='username'], input[id*='user' i], input[type='text']");
-  const passField = await page.$("input[name='password'], input[id*='pass' i], input[type='password']");
-  if (!userField || !passField) {
-    console.error("[login] could not locate login form fields");
+  // The React login page is rendered AFTER hydration — the form is not
+  // present in the static HTML emitted by Flask, so the script must
+  // wait for the inputs to mount before filling them. Use Playwright
+  // locators (auto-waiting) instead of `page.$()` (synchronous probe).
+  const FIELD_TIMEOUT = 15000;
+  const userLocator = page.locator(
+    "input[name='username'], input[id='username'], input[autocomplete='username']"
+  );
+  const passLocator = page.locator(
+    "input[name='password'], input[id='password'], input[type='password']"
+  );
+  try {
+    await userLocator.waitFor({ state: "visible", timeout: FIELD_TIMEOUT });
+    await passLocator.waitFor({ state: "visible", timeout: FIELD_TIMEOUT });
+  } catch (e) {
+    console.error("[login] login form did not render before timeout:", e.message);
     await page.screenshot({ path: path.join(ARTIFACTS, "login_missing_fields.png"), fullPage: true });
     process.exit(3);
   }
-  await userField.fill(USER);
-  await passField.fill(PASS);
+  await userLocator.fill(USER);
+  await passLocator.fill(PASS);
 
-  const submit = await page.$("button[type='submit'], input[type='submit'], button:has-text('Login'), button:has-text('Sign in')");
-  if (!submit) {
-    console.error("[login] could not locate submit button");
+  const submitLocator = page.locator(
+    "button[type='submit'], input[type='submit'], button:has-text('Sign in'), button:has-text('Login'), button:has-text('Log in')"
+  ).first();
+  try {
+    await submitLocator.waitFor({ state: "visible", timeout: FIELD_TIMEOUT });
+  } catch (e) {
+    console.error("[login] submit button not visible:", e.message);
     process.exit(4);
   }
-  await Promise.all([
-    page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {}),
-    submit.click(),
-  ]);
-
+  await submitLocator.click();
+  // The login flow is fully client-side: the React handler POSTs to
+  // /auth/login, gets a JSON response, then calls react-router's
+  // `navigate(...)`. Wait for the URL to leave /login (which proves
+  // the navigate ran) instead of waiting on networkidle (which can
+  // fire before the client-side navigation completes).
+  try {
+    await page.waitForURL(
+      (u) => !/\/login(\?|$|#)/.test(u.pathname + u.hash),
+      { timeout: 20000 },
+    );
+  } catch (e) {
+    const errBanner = await page.$(".alert, [role='alert']");
+    const msg = errBanner ? (await errBanner.innerText()).slice(0, 200) : "(no banner)";
+    console.error(`[login] URL did not leave /login within 20s. Banner: ${msg}`);
+    await page.screenshot({ path: path.join(ARTIFACTS, "login_stuck.png"), fullPage: true });
+    process.exit(5);
+  }
+  // Let the post-login destination settle.
+  await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
   const postLoginUrl = page.url();
   console.log(`[login] post-login URL: ${postLoginUrl}`);
   await page.screenshot({ path: path.join(ARTIFACTS, "post_login.png"), fullPage: true });
-
-  if (/\/login/.test(postLoginUrl)) {
-    const errBanner = await page.$(".alert, .toast, [role='alert']");
-    const msg = errBanner ? await errBanner.innerText() : "(no banner)";
-    console.error(`[login] still on /login — failed. Banner: ${msg}`);
-    process.exit(5);
-  }
 
   // Persist storage state for any subsequent Playwright runs.
   await ctx.storageState({ path: path.join(ARTIFACTS, "storage.json") });
