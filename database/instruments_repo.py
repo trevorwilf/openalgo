@@ -559,7 +559,18 @@ def instruments_search(
     offset: int = 0,
     session: Session | None = None,
 ) -> list[Instrument]:
-    """Lightweight search. Phase 3a resolver layer on top."""
+    """Lightweight search. Phase 3a resolver layer on top.
+
+    When ``query`` is given, results are ranked:
+        1. exact case-insensitive match on ``canonical_symbol``
+        2. canonical_symbol starts with the query
+        3. canonical_symbol contains the query (substring)
+    Within each rank, results are alphabetical.
+
+    Without ``query``, results are plain alphabetical.
+    """
+    from sqlalchemy import case as sa_case, func as sa_func
+
     with session_scope(session) as s:
         stmt = select(Instrument).where(Instrument.is_active.is_(True))
         if venue_code is not None:
@@ -568,10 +579,20 @@ def instruments_search(
             stmt = stmt.where(Instrument.asset_class == asset_class)
         if query:
             safe = query.replace("%", r"\%").replace("_", r"\_")
+            q_lower = query.lower()
             stmt = stmt.where(
                 Instrument.canonical_symbol.ilike(f"%{safe}%", escape="\\")
             )
-        stmt = stmt.order_by(Instrument.canonical_symbol).offset(offset).limit(limit)
+            sym_lower = sa_func.lower(Instrument.canonical_symbol)
+            rank = sa_case(
+                (sym_lower == q_lower, 0),
+                (sym_lower.like(f"{q_lower}%"), 1),
+                else_=2,
+            )
+            stmt = stmt.order_by(rank, Instrument.canonical_symbol)
+        else:
+            stmt = stmt.order_by(Instrument.canonical_symbol)
+        stmt = stmt.offset(offset).limit(limit)
         return list(s.scalars(stmt))
 
 
