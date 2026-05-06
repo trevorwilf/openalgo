@@ -16,6 +16,46 @@ Lane semantics:
 
 | route_path | method | lane | fail_closed_non_india | legacy_fallback_calls | capability_check | instrument_resolution | owning_phase_to_fix |
 |---|---|---|---|---|---|---|---|
+| `/api/v1/analyzer` | POST | legacy | n/a | analyzer_service | no | none | none |
+| `/api/v1/basketorder` | POST | legacy | n/a | basket_order_service | no | none | none |
+| `/api/v1/cancelallorder` | POST | legacy | n/a | cancel_all_order_service | no | none | none |
+| `/api/v1/cancelorder` | POST | legacy | n/a | cancel_order_service | no | none | none |
+| `/api/v1/chart` | GET,POST | legacy | n/a | chart_service | no | none | none |
+| `/api/v1/closeposition` | POST | legacy | n/a | close_position_service | no | none | none |
+| `/api/v1/depth` | POST | legacy | n/a | depth_service | no | none | none |
+| `/api/v1/expiry` | POST | legacy | n/a | expiry_service | no | none | none |
+| `/api/v1/funds` | POST | legacy | n/a | funds_service | no | none | none |
+| `/api/v1/history` | POST | legacy | n/a | history_service | no | none | none |
+| `/api/v1/holdings` | POST | legacy | n/a | holdings_service | no | none | none |
+| `/api/v1/instruments` | GET | legacy | n/a | instruments_service | no | none | none |
+| `/api/v1/intervals` | POST | legacy | n/a | intervals_service | no | none | none |
+| `/api/v1/margin` | POST | legacy | n/a | margin_service | no | none | none |
+| `/api/v1/market/holidays` | POST | legacy | n/a | market_calendar_service | no | none | none |
+| `/api/v1/market/timings` | POST | legacy | n/a | market_calendar_service | no | none | none |
+| `/api/v1/modifyorder` | POST | legacy | n/a | modify_order_service | no | none | none |
+| `/api/v1/multioptiongreeks` | POST | legacy | n/a | option_greeks_service | no | none | none |
+| `/api/v1/multiquotes` | POST | legacy | n/a | quotes_service | no | none | none |
+| `/api/v1/openposition` | POST | legacy | n/a | openposition_service | no | none | none |
+| `/api/v1/optionchain` | POST | legacy | n/a | — | no | none | none |
+| `/api/v1/optiongreeks` | POST | legacy | n/a | — | no | none | none |
+| `/api/v1/optionsmultiorder` | POST | legacy | n/a | — | no | none | none |
+| `/api/v1/optionsorder` | POST | legacy | n/a | place_options_order_service | no | none | none |
+| `/api/v1/optionsymbol` | POST | legacy | n/a | — | no | none | none |
+| `/api/v1/orderbook` | POST | legacy | n/a | orderbook_service | no | none | none |
+| `/api/v1/orderstatus` | POST | legacy | n/a | orderstatus_service | no | none | none |
+| `/api/v1/ping` | POST | legacy | n/a | ping_service | no | none | none |
+| `/api/v1/placeorder` | POST | legacy | n/a | place_order_service | no | none | none |
+| `/api/v1/placesmartorder` | POST | legacy | n/a | place_smart_order_service | no | none | none |
+| `/api/v1/pnl` | POST | legacy | n/a | sandbox_service | no | none | none |
+| `/api/v1/positionbook` | POST | legacy | n/a | positionbook_service | no | none | none |
+| `/api/v1/quotes` | POST | legacy | n/a | quotes_service | no | none | none |
+| `/api/v1/search` | POST | legacy | n/a | search_service | no | none | none |
+| `/api/v1/splitorder` | POST | legacy | n/a | split_order_service | no | none | none |
+| `/api/v1/symbol` | POST | legacy | n/a | symbol_service | no | none | none |
+| `/api/v1/syntheticfuture` | POST | legacy | n/a | synthetic_future_service | no | none | none |
+| `/api/v1/telegram` | GET,POST | legacy | n/a | telegram_alert_service | no | none | none |
+| `/api/v1/ticker` | GET | legacy | n/a | — | no | none | none |
+| `/api/v1/tradebook` | POST | legacy | n/a | tradebook_service | no | none | none |
 | `/api/v2/admin/broker_compliance` | GET | promoted | n/a | — | no | none | none |
 | `/api/v2/audit/chart-orders` | DELETE,GET | promoted | n/a | — | no | none | none |
 | `/api/v2/balances` | GET | dual | yes | funds_service, positionbook_service | no | none | none |
@@ -35,6 +75,46 @@ Lane semantics:
 
 ## Source modules
 
+- `/api/v1/analyzer` — `market_regions/india/legacy_v1/restx_api/analyzer.py` (Namespace: `analyzer`)
+- `/api/v1/basketorder` — `market_regions/india/legacy_v1/restx_api/basket_order.py` (Namespace: `basket_order`)
+- `/api/v1/cancelallorder` — `market_regions/india/legacy_v1/restx_api/cancel_all_order.py` (Namespace: `cancel_all_order`)
+- `/api/v1/cancelorder` — `market_regions/india/legacy_v1/restx_api/cancel_order.py` (Namespace: `cancel_order`)
+- `/api/v1/chart` — `market_regions/india/legacy_v1/restx_api/chart_api.py` (Namespace: `chart`)
+- `/api/v1/closeposition` — `market_regions/india/legacy_v1/restx_api/close_position.py` (Namespace: `close_position`)
+- `/api/v1/depth` — `market_regions/india/legacy_v1/restx_api/depth.py` (Namespace: `depth`)
+- `/api/v1/expiry` — `market_regions/india/legacy_v1/restx_api/expiry.py` (Namespace: `expiry`)
+- `/api/v1/funds` — `market_regions/india/legacy_v1/restx_api/funds.py` (Namespace: `funds`)
+- `/api/v1/history` — `market_regions/india/legacy_v1/restx_api/history.py` (Namespace: `history`)
+- `/api/v1/holdings` — `market_regions/india/legacy_v1/restx_api/holdings.py` (Namespace: `holdings`)
+- `/api/v1/instruments` — `market_regions/india/legacy_v1/restx_api/instruments.py` (Namespace: `instruments`)
+- `/api/v1/intervals` — `market_regions/india/legacy_v1/restx_api/intervals.py` (Namespace: `intervals`)
+- `/api/v1/margin` — `market_regions/india/legacy_v1/restx_api/margin.py` (Namespace: `margin`)
+- `/api/v1/market/holidays` — `market_regions/india/legacy_v1/restx_api/market_holidays.py` (Namespace: `market/holidays`)
+- `/api/v1/market/timings` — `market_regions/india/legacy_v1/restx_api/market_timings.py` (Namespace: `market/timings`)
+- `/api/v1/modifyorder` — `market_regions/india/legacy_v1/restx_api/modify_order.py` (Namespace: `modify_order`)
+- `/api/v1/multioptiongreeks` — `market_regions/india/legacy_v1/restx_api/multi_option_greeks.py` (Namespace: `multioptiongreeks`)
+- `/api/v1/multiquotes` — `market_regions/india/legacy_v1/restx_api/multiquotes.py` (Namespace: `multiquotes`)
+- `/api/v1/openposition` — `market_regions/india/legacy_v1/restx_api/openposition.py` (Namespace: `openposition`)
+- `/api/v1/optionchain` — `market_regions/india/legacy_v1/restx_api/option_chain.py` (Namespace: `optionchain`)
+- `/api/v1/optiongreeks` — `market_regions/india/legacy_v1/restx_api/option_greeks.py` (Namespace: `optiongreeks`)
+- `/api/v1/optionsymbol` — `market_regions/india/legacy_v1/restx_api/option_symbol.py` (Namespace: `optionsymbol`)
+- `/api/v1/optionsmultiorder` — `market_regions/india/legacy_v1/restx_api/options_multiorder.py` (Namespace: `optionsmultiorder`)
+- `/api/v1/optionsorder` — `market_regions/india/legacy_v1/restx_api/options_order.py` (Namespace: `optionsorder`)
+- `/api/v1/orderbook` — `market_regions/india/legacy_v1/restx_api/orderbook.py` (Namespace: `orderbook`)
+- `/api/v1/orderstatus` — `market_regions/india/legacy_v1/restx_api/orderstatus.py` (Namespace: `orderstatus`)
+- `/api/v1/ping` — `market_regions/india/legacy_v1/restx_api/ping.py` (Namespace: `ping`)
+- `/api/v1/placeorder` — `market_regions/india/legacy_v1/restx_api/place_order.py` (Namespace: `place_order`)
+- `/api/v1/placesmartorder` — `market_regions/india/legacy_v1/restx_api/place_smart_order.py` (Namespace: `place_smart_order`)
+- `/api/v1/pnl` — `market_regions/india/legacy_v1/restx_api/pnl_symbols.py` (Namespace: `pnl`)
+- `/api/v1/positionbook` — `market_regions/india/legacy_v1/restx_api/positionbook.py` (Namespace: `positionbook`)
+- `/api/v1/quotes` — `market_regions/india/legacy_v1/restx_api/quotes.py` (Namespace: `quotes`)
+- `/api/v1/search` — `market_regions/india/legacy_v1/restx_api/search.py` (Namespace: `search`)
+- `/api/v1/splitorder` — `market_regions/india/legacy_v1/restx_api/split_order.py` (Namespace: `split_order`)
+- `/api/v1/symbol` — `market_regions/india/legacy_v1/restx_api/symbol.py` (Namespace: `symbol`)
+- `/api/v1/syntheticfuture` — `market_regions/india/legacy_v1/restx_api/synthetic_future.py` (Namespace: `syntheticfuture`)
+- `/api/v1/telegram` — `market_regions/india/legacy_v1/restx_api/telegram_bot.py` (Namespace: `telegram`)
+- `/api/v1/ticker` — `market_regions/india/legacy_v1/restx_api/ticker.py` (Namespace: `ticker`)
+- `/api/v1/tradebook` — `market_regions/india/legacy_v1/restx_api/tradebook.py` (Namespace: `tradebook`)
 - `/api/v2/balances` — `restx_api/v2/accounts.py` (Namespace: ``)
 - `/api/v2/bars` — `restx_api/v2/bars.py` (Namespace: `bars`)
 - `/api/v2/admin/broker_compliance` — `restx_api/v2/broker_compliance.py` (Namespace: `broker_compliance`)
