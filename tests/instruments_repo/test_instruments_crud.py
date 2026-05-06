@@ -148,6 +148,41 @@ def test_search_filters(nse) -> None:
     assert len(all_nse) == 3
 
 
+def test_search_ranks_exact_then_starts_with_then_substring(nse) -> None:
+    """Ranking: exact match → starts-with → contains → alphabetical within tier.
+
+    Exposed by /api/v2/instruments/search where ``q=SPY`` was returning
+    DSPY/GSPY/KSPY before SPY because alphabetical-only sort buried the
+    exact match. Regression for that bug.
+    """
+    for sym in ("DSPY", "GSPY", "KSPY", "SPY", "SPYG", "ASPY"):
+        instruments_create(
+            venue_code="NSE", canonical_symbol=sym,
+            asset_class="EQUITY", instrument_kind="CASH",
+        )
+    out = [r.canonical_symbol for r in instruments_search(query="SPY", venue_code="NSE")]
+    # Exact match must be #1.
+    assert out[0] == "SPY"
+    # SPYG (starts-with) must come before any of the contains-only matches.
+    spyg_idx = out.index("SPYG")
+    for contains_only in ("ASPY", "DSPY", "GSPY", "KSPY"):
+        assert out.index(contains_only) > spyg_idx, (
+            f"contains-only {contains_only} ranked above starts-with SPYG: {out}"
+        )
+
+
+def test_search_case_insensitive_exact_match_wins(nse) -> None:
+    """Lower-case query against upper-case canonical_symbol still ranks
+    exact match first."""
+    for sym in ("AAPLX", "AAPL", "ZAAPL"):
+        instruments_create(
+            venue_code="NSE", canonical_symbol=sym,
+            asset_class="EQUITY", instrument_kind="CASH",
+        )
+    out = [r.canonical_symbol for r in instruments_search(query="aapl", venue_code="NSE")]
+    assert out[0] == "AAPL"
+
+
 def test_search_excludes_inactive(nse) -> None:
     a = instruments_create(
         venue_code="NSE",
