@@ -714,6 +714,61 @@ class AlpacaOrderTranslator:
             raise RuntimeError(f"alpaca modify HTTP {r.status_code}: {msg}")
         return r.json() if r.content else {}
 
+    def close_position_via_token(
+        self,
+        auth_token: str,
+        *,
+        instrument: Any | None = None,
+        qty: str | None = None,
+        percentage: str | None = None,
+    ) -> dict[str, Any]:
+        """Close one position (when ``instrument`` is given) or every
+        open position (when ``instrument`` is None). Maps to Alpaca's
+        ``DELETE /v2/positions/<symbol>`` and ``DELETE /v2/positions``
+        respectively. Returns the parsed Alpaca response (an order
+        record for single-symbol close, a list for close-all).
+
+        Optional ``qty`` / ``percentage`` are propagated as Alpaca query
+        params for partial close.
+        """
+        if instrument is not None:
+            symbol = (
+                instrument.canonical_symbol
+                if hasattr(instrument, "canonical_symbol")
+                else str(instrument)
+            )
+            url = f"/v2/positions/{symbol.upper()}"
+        else:
+            url = "/v2/positions"
+        params: dict[str, str] = {}
+        if qty is not None and str(qty).strip() not in ("", "0"):
+            params["qty"] = str(qty)
+        if percentage is not None and str(percentage).strip() not in ("", "0"):
+            params["percentage"] = str(percentage)
+
+        if self._client is not None:
+            r = self._client.delete(url, params=params or None)
+        else:
+            from broker.alpaca.api.auth_api import auth_handle_from_token
+
+            auth = auth_handle_from_token(auth_token)
+            with httpx.Client(**self._client_kwargs(auth)) as c:
+                r = c.delete(url, params=params or None)
+        if r.status_code == 204:
+            return {"status": "success", "data": []}
+        if r.status_code in (200, 207):
+            return {"status": "success", "data": r.json() if r.content else []}
+        msg = r.text[:500]
+        try:
+            body = r.json()
+            if isinstance(body, dict) and body.get("message"):
+                msg = body["message"]
+                if body.get("code"):
+                    msg = f"(alpaca code {body['code']}) {msg}"
+        except (ValueError, TypeError):
+            pass
+        raise RuntimeError(f"alpaca close_position HTTP {r.status_code}: {msg}")
+
     def cancel_all_orders_via_token(
         self,
         auth_token: str,

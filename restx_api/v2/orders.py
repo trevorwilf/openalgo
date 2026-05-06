@@ -360,6 +360,98 @@ class OrderById(Resource):
         return ok({"order_id": order_id, "status": "canceled"}), 200
 
 
+@api.route("/closeposition")
+class OrdersClosePosition(Resource):
+    """POST /api/v2/orders/closeposition — close a single position or all.
+
+    Documented v2 successor to ``POST /api/v1/closeposition``. Body:
+
+        {
+          "apikey": "...",
+          "instrument": {"venue_code": "...", "canonical_symbol": "..."}
+              optional — when present, closes only that one position.
+              when absent, closes every open position.
+          "qty": "5",          optional — partial close
+          "percentage": "50"   optional — partial close
+        }
+
+    Dispatches to ``promoted.close_position_via_token``. The translator
+    is responsible for resolving the instrument (when given) and
+    invoking the broker-native close. Alpaca implementation maps to
+    ``DELETE /v2/positions/<symbol>`` (single) or ``DELETE /v2/positions``
+    (all).
+    """
+
+    def post(self):
+        from flask import request as _req
+
+        auth_token, broker, auth_err = resolve_auth()
+        if auth_err is not None:
+            return error("unauthorized", auth_err), 401
+
+        promoted, err_payload, err_status = _ensure_promoted(broker)
+        if promoted is None:
+            return err_payload, err_status
+
+        fn = getattr(promoted, "close_position_via_token", None)
+        if not callable(fn):
+            return error(
+                "unimplemented",
+                f"broker {broker!r} translator does not implement "
+                "close_position_via_token",
+                details={"broker_code": broker},
+            ), 501
+
+        body = _req.get_json(silent=True) or {}
+        instrument_ref = body.get("instrument")
+        instrument_resolved = None
+        if instrument_ref:
+            from services.instrument_resolution import resolve_instrument
+            from domain.instrument_ref import InstrumentRef
+            from pydantic import ValidationError as PydValidationError
+
+            try:
+                ref = InstrumentRef(**instrument_ref)
+            except PydValidationError as e:
+                return error(
+                    "validation_error", "invalid instrument ref",
+                    details={"errors": e.errors()},
+                ), 422
+            instrument_resolved = resolve_instrument(ref, broker_code=broker)
+            if instrument_resolved is None:
+                return error(
+                    "instrument_not_resolvable",
+                    "instrument ref not found in instrument universe",
+                ), 404
+
+        kwargs: dict[str, Any] = {}
+        if instrument_resolved is not None:
+            kwargs["instrument"] = instrument_resolved
+        if "qty" in body and body["qty"] not in (None, ""):
+            kwargs["qty"] = body["qty"]
+        if "percentage" in body and body["percentage"] not in (None, ""):
+            kwargs["percentage"] = body["percentage"]
+
+        try:
+            result = fn(auth_token, **kwargs)
+        except RuntimeError as e:
+            # Translator-formatted alpaca / broker error.
+            return error("broker_error", str(e)), 502
+        except Exception as e:  # noqa: BLE001
+            logger.exception("close_position failed for %s: %s", broker, e)
+            return error("broker_error", str(e)), 502
+
+        out = {"status": "submitted"}
+        if instrument_resolved is not None:
+            out["instrument"] = {
+                "instrument_id": str(instrument_resolved.instrument_id),
+                "venue_code": instrument_resolved.venue_code,
+                "canonical_symbol": instrument_resolved.canonical_symbol,
+            }
+        out["broker_response"] = result
+        return ok(out), 200
+
+
 @api.route("/cancelall")
 class OrdersCancelAll(Resource):
     """POST /api/v2/orders/cancelall — alias for ``DELETE /api/v2/orders``.

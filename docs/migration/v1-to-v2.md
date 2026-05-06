@@ -24,7 +24,7 @@ is the high-traffic surface every client should learn:
 | `POST /api/v1/placeorder`       | `POST /api/v2/orders`            | both lanes live |
 | `POST /api/v1/modifyorder`      | `POST /api/v2/orders/<id>/modify`| **Shipped** — translator must implement `modify_order_via_token`. Alpaca implementation included. |
 | `POST /api/v1/cancelorder`      | `POST /api/v2/orders/<id>/cancel`| **Shipped** — alias of `DELETE /api/v2/orders/<id>` for clients that can't send DELETE. Same `cancel_order_via_token` hook. |
-| `POST /api/v1/closeposition`    | `POST /api/v2/orders/closeposition` | Phase 8-bis |
+| `POST /api/v1/closeposition`    | `POST /api/v2/orders/closeposition` | **Shipped** — translator must implement `close_position_via_token`. Alpaca implementation maps to `DELETE /v2/positions/<symbol>` (single) or `DELETE /v2/positions` (all). |
 | `POST /api/v1/cancelallorder`   | `POST /api/v2/orders/cancelall`  | **Shipped** — alias of `DELETE /api/v2/orders` for clients that can't send DELETE. Same `cancel_all_orders_via_token` hook. |
 | `POST /api/v1/quotes`           | `GET  /api/v2/quotes`            | both lanes live |
 | `POST /api/v1/multiquotes`      | `GET  /api/v2/quotes` (batch)    | both lanes live |
