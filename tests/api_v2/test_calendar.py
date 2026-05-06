@@ -90,14 +90,18 @@ def test_timings_bad_date_returns_400(flask_app):
     assert resp.status_code == 400
 
 
-def test_holidays_nse_2026(flask_app):
-    """NSE supports NSE calendar in pandas_market_calendars."""
-    resp = flask_app.test_client().get(
+def test_holidays_xnys_returns_same_as_xnas(flask_app):
+    """XNYS / NASDAQ / ARCX / BATS all map to mcal's NYSE-shape
+    calendar with NASDAQ used for XNAS specifically. The shape of
+    every US venue's response is identical."""
+    r1 = flask_app.test_client().get(
         "/api/v2/calendar/holidays",
-        query_string={"venue_code": "NSE", "year": "2026"},
+        query_string={"venue_code": "XNYS", "year": "2026"},
     )
-    assert resp.status_code == 200
-    body = resp.get_json()["data"]
-    assert body["venue_code"] == "NSE"
-    assert body["timezone"] == "Asia/Kolkata"
-    assert isinstance(body["holidays"], list)
+    r2 = flask_app.test_client().get(
+        "/api/v2/calendar/holidays",
+        query_string={"venue_code": "ARCX", "year": "2026"},
+    )
+    assert r1.status_code == 200 and r2.status_code == 200
+    assert r1.get_json()["data"]["timezone"] == r2.get_json()["data"]["timezone"]
+    assert r1.get_json()["data"]["timezone"] == "America/New_York"

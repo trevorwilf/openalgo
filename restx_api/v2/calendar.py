@@ -34,51 +34,30 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 # OpenAlgo canonical venue → pandas_market_calendars name.
-# Most US venues consolidate to "NYSE" (the calendar; mcal doesn't have
-# distinct calendars for ARCA/BATS — they trade the same hours).
+# This v2 route covers the US venues — India operators use the legacy
+# /api/v1/market/holidays which reads the India-region calendar
+# directly. ADR 0006 forbids hardcoded India venue literals in
+# PROMOTED_CORE; when the India region plugin registers its calendar
+# mappings (future region-plugin work), this map is extended via
+# capability lookup rather than literal entries here.
+#
+# Most US venues consolidate to "NYSE" (the calendar; mcal doesn't
+# have distinct calendars for ARCA/BATS — they trade the same hours).
 _VENUE_TO_MCAL: dict[str, str] = {
     "XNAS": "NASDAQ",
     "XNYS": "NYSE",
     "ARCX": "NYSE",
     "BATS": "NYSE",
-    "NSE": "NSE",
-    "BSE": "BSE",
-    "NFO": "NSE",
-    "NSE_INDEX": "NSE",
-    "BSE_INDEX": "BSE",
-    "MCX": "MCX",
-    "CDS": "NSE",
-    "BFO": "BSE",
-    "BCD": "BSE",
 }
-
-# US venues use ET; India uses IST. Falls back to UTC otherwise. The
-# venue row in the instruments_repo has the authoritative
-# ``timezone_name`` — we read that when available, otherwise use this
-# table.
-_VENUE_TO_TZ: dict[str, str] = {
-    "XNAS": "America/New_York", "XNYS": "America/New_York",
-    "ARCX": "America/New_York", "BATS": "America/New_York",
-    "NSE": "Asia/Kolkata", "BSE": "Asia/Kolkata",
-    "NFO": "Asia/Kolkata", "NSE_INDEX": "Asia/Kolkata",
-    "BSE_INDEX": "Asia/Kolkata", "MCX": "Asia/Kolkata",
-    "CDS": "Asia/Kolkata", "BFO": "Asia/Kolkata", "BCD": "Asia/Kolkata",
-}
-
-
-def _resolve_tz(venue_code: str) -> str:
-    """Prefer the instrument-repo venue row's timezone; fall back to map."""
-    try:
-        from database.instruments_repo import venues_get
-        v = venues_get(venue_code)
-        if v is not None and v.timezone_name:
-            return v.timezone_name
-    except Exception:
-        pass
-    return _VENUE_TO_TZ.get(venue_code, "UTC")
-
 
 def _get_calendar(venue_code: str):
+    """Look up the ``pandas_market_calendars`` calendar for a venue.
+
+    Returns the mcal calendar object (which carries its own ``.tz``
+    attribute) or ``None`` if the venue isn't mapped. Tz resolution
+    deliberately uses mcal's per-calendar tz so this module stays
+    region-agnostic — no hardcoded venue→tz table at this layer.
+    """
     import pandas_market_calendars as mcal
     cal_name = _VENUE_TO_MCAL.get(venue_code)
     if cal_name is None:
@@ -87,6 +66,16 @@ def _get_calendar(venue_code: str):
         return mcal.get_calendar(cal_name)
     except Exception:
         return None
+
+
+def _calendar_tz(cal) -> str:
+    """Return the calendar's IANA timezone name as a string."""
+    tz = getattr(cal, "tz", None)
+    if tz is None:
+        return "UTC"
+    # pandas_market_calendars uses zoneinfo / pytz objects depending
+    # on version — the str() form is the canonical IANA key in both.
+    return str(tz)
 
 
 api_holidays = Namespace("calendar_holidays",
@@ -141,7 +130,7 @@ class CalendarHolidays(Resource):
         return ok({
             "venue_code": venue_code,
             "year": year,
-            "timezone": _resolve_tz(venue_code),
+            "timezone": _calendar_tz(cal),
             "holidays": holidays,
             "trading_day_count": len(trading_days),
         }), 200
@@ -184,7 +173,7 @@ class CalendarTimings(Resource):
                 "venue_code": venue_code,
                 "date": date_str,
                 "is_open": False,
-                "timezone": _resolve_tz(venue_code),
+                "timezone": _calendar_tz(cal),
             }), 200
 
         row = sched.iloc[0]
@@ -194,5 +183,5 @@ class CalendarTimings(Resource):
             "is_open": True,
             "session_open": row["market_open"].isoformat(),
             "session_close": row["market_close"].isoformat(),
-            "timezone": _resolve_tz(venue_code),
+            "timezone": _calendar_tz(cal),
         }), 200
