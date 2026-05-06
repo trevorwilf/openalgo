@@ -15,30 +15,58 @@ logger = get_logger(__name__)
 api = Namespace("instruments", description="Instrument search and lookup")
 
 
+def _list_instruments_response():
+    """Shared handler for the bare and /search routes.
+
+    `instruments_search(query=None)` returns the unfiltered (paginated)
+    universe so the bare path lets clients walk the catalog with
+    venue_code / asset_class filters but no full-text query.
+    """
+    from database.instruments_repo import instruments_search
+
+    q = request.args.get("q")
+    venue_code = request.args.get("venue_code")
+    asset_class = request.args.get("asset_class")
+    try:
+        limit = int(request.args.get("limit", "50"))
+        offset = int(request.args.get("offset", "0"))
+    except ValueError:
+        return error("bad_request", "limit and offset must be integers"), 400
+    if limit > 500 or limit <= 0:
+        return error("bad_request", "limit must be 1..500"), 400
+
+    rows = instruments_search(
+        venue_code=venue_code,
+        query=q,
+        asset_class=asset_class,
+        limit=limit,
+        offset=offset,
+    )
+    return ok([_instrument_to_dict(r) for r in rows]), 200
+
+
+@api.route("")
+@api.route("/")
+class InstrumentList(Resource):
+    """GET /api/v2/instruments — paginated catalog walk.
+
+    Query params:
+        venue_code   — filter to a single venue (e.g. ``XNAS``)
+        asset_class  — filter to a single asset class (e.g. ``EQUITY``)
+        q            — substring match against canonical_symbol /
+                       display_name. When omitted, returns rows in
+                       canonical_symbol order.
+        limit        — 1..500 (default 50)
+        offset       — pagination cursor (default 0)
+    """
+    def get(self):
+        return _list_instruments_response()
+
+
 @api.route("/search")
 class InstrumentSearch(Resource):
     def get(self):
-        from database.instruments_repo import instruments_search
-
-        q = request.args.get("q")
-        venue_code = request.args.get("venue_code")
-        asset_class = request.args.get("asset_class")
-        try:
-            limit = int(request.args.get("limit", "50"))
-            offset = int(request.args.get("offset", "0"))
-        except ValueError:
-            return error("bad_request", "limit and offset must be integers"), 400
-        if limit > 500 or limit <= 0:
-            return error("bad_request", "limit must be 1..500"), 400
-
-        rows = instruments_search(
-            venue_code=venue_code,
-            query=q,
-            asset_class=asset_class,
-            limit=limit,
-            offset=offset,
-        )
-        return ok([_instrument_to_dict(r) for r in rows]), 200
+        return _list_instruments_response()
 
 
 @api.route("/<string:instrument_id>")
