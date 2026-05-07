@@ -157,6 +157,73 @@ def test_time_stop_triggers_at_max_hold_trading_days(
     assert sells[0]["time_in_force"] == "DAY"
 
 
+def test_trigger_time_stop_keeps_filled_when_sell_returns_4xx(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Item 7 regression: a 4xx from /api/v2/orders does NOT raise from
+    submit_market_sell — it returns the parsed body with
+    ``_http_status``. trigger_time_stop must inspect that status and
+    leave pos['status']='filled' so the next pass can retry. The bug
+    used to mark the position as 'exiting' regardless, locking out
+    every subsequent retry."""
+    state = strategy_module.blank_state()
+    pos = _filled_pos(strategy_module, entry_iso="2026-05-01T13:30:00+00:00")
+    state["open_positions"] = {"AAPL": pos}
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+
+    def handler(req):
+        if req.method == "DELETE":
+            return httpx.Response(200, json={})
+        if req.method == "POST" and req.url.path == "/api/v2/orders":
+            return httpx.Response(
+                422,
+                json={"error": {"code": "broker_error",
+                                 "message": "alpaca trade halted"}},
+            )
+        return httpx.Response(404)
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+    strategy_module.trigger_time_stop(
+        "AAPL", pos, cfg_with_paths, http, "k",
+        state=state, state_path=state_path,
+    )
+    # State invariant: still 'filled' so the next pass retries the
+    # exit. Without the Item 7 fix this would now read 'exiting' with
+    # an empty exit_order_id.
+    assert state["open_positions"]["AAPL"]["status"] == "filled"
+    assert "exit_reason" not in state["open_positions"]["AAPL"]
+    assert "exit_order_id" not in state["open_positions"]["AAPL"]
+
+
+def test_trigger_time_stop_keeps_filled_when_sell_accepted_but_no_order_id(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Edge case: 200 OK but the body has no order_id (broker / proxy
+    bug). Treat the same as a rejection — don't mutate state."""
+    state = strategy_module.blank_state()
+    pos = _filled_pos(strategy_module)
+    state["open_positions"] = {"AAPL": pos}
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+
+    def handler(req):
+        if req.method == "DELETE":
+            return httpx.Response(200, json={})
+        if req.method == "POST" and req.url.path == "/api/v2/orders":
+            return httpx.Response(200, json={"data": {}})
+        return httpx.Response(404)
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+    strategy_module.trigger_time_stop(
+        "AAPL", pos, cfg_with_paths, http, "k",
+        state=state, state_path=state_path,
+    )
+    assert state["open_positions"]["AAPL"]["status"] == "filled"
+
+
 def test_time_stop_skips_weekend_correctly(strategy_module, cfg_with_paths):
     """Friday entry, Monday at 09:30 → 1 trading day, NOT 3 calendar days; no exit."""
     state = strategy_module.blank_state()
