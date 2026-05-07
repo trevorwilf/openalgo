@@ -184,6 +184,167 @@ def test_reconcile_warns_on_untracked_broker_position(
     assert "MSFT" not in state["open_positions"]  # we don't auto-claim
 
 
+def test_reconcile_clears_expired_child_ids_for_rebracket(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """An actual_fill position whose OCO children expired at session
+    close (DAY TIF) used to sit naked because the next tick's
+    submit_pending_oco_children skipped it (children non-empty,
+    pointing at canceled IDs). reconcile must now clear those IDs so
+    the next tick re-attaches a fresh OCO bracket. Without this fix
+    overnight gap risk has no broker-side stop."""
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "BLDP": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "T-EXPIRED", "stop": "S-EXPIRED"},
+            "qty": 100, "entry_price": 5.00,
+            "entry_timestamp": "2026-05-07T13:30:00+00:00",
+            "status": "filled",
+            "venue_code": "XNAS",
+            "bracket_pricing_mode": "actual_fill",
+            "target_pct": 0.15, "stop_pct": 0.08,
+        }
+    }
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+
+    # Mock has to differentiate ?status=open (returns empty — the
+    # children are canceled so NOT in open list) from ?status=all
+    # (returns the canceled rows so reconcile can read the native
+    # status).
+    canceled_rows = [
+        {"id": "T-EXPIRED", "status": "canceled", "native_status": "canceled"},
+        {"id": "S-EXPIRED", "status": "canceled", "native_status": "canceled"},
+    ]
+
+    def orders_h(req):
+        is_open_query = b"status=open" in req.url.query
+        return httpx.Response(200, json={
+            "data": {"orders": [] if is_open_query else canceled_rows}
+        })
+
+    routes = {
+        ("GET", "/api/v2/positions"): lambda r: httpx.Response(200, json={
+            "data": {"positions": [
+                {"canonical_symbol": "BLDP", "quantity": "100"},
+            ]}
+        }),
+        ("GET", "/api/v2/orders"): orders_h,
+    }
+    http = strategy_module.make_http_client("http://x", transport=_make_handler(routes))
+    summary = strategy_module.reconcile_at_startup(
+        state, http, "k", state_path=state_path, summary_path=summary_path,
+    )
+    pos = state["open_positions"]["BLDP"]
+    # Child ID slots cleared so the next submit_pending_oco_children
+    # tick re-attaches.
+    assert pos["child_order_ids"]["target"] == ""
+    assert pos["child_order_ids"]["stop"] == ""
+    # Reconcile-side audit fields populated.
+    assert pos["child_status_at_recon"]["target"] == "canceled"
+    assert pos["child_status_at_recon"]["stop"] == "canceled"
+    assert "BLDP" in summary.get("rebracket_pending", [])
+
+
+def test_reconcile_does_not_clear_for_legacy_candidate_close_mode(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Legacy candidate_close positions had their bracket atomically
+    submitted with the parent; we don't try to re-bracket them. The
+    reconcile clear-and-rebracket only applies to actual_fill mode."""
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "BLDP": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "T-EXPIRED", "stop": "S-EXPIRED"},
+            "qty": 100, "entry_price": 5.00,
+            "entry_timestamp": "2026-05-07T13:30:00+00:00",
+            "status": "filled",
+            "venue_code": "XNAS",
+            "bracket_pricing_mode": "candidate_close",   # legacy mode
+        }
+    }
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+    canceled_rows = [
+        {"id": "T-EXPIRED", "status": "canceled", "native_status": "canceled"},
+        {"id": "S-EXPIRED", "status": "canceled", "native_status": "canceled"},
+    ]
+
+    def orders_h(req):
+        is_open_query = b"status=open" in req.url.query
+        return httpx.Response(200, json={
+            "data": {"orders": [] if is_open_query else canceled_rows}
+        })
+
+    routes = {
+        ("GET", "/api/v2/positions"): lambda r: httpx.Response(200, json={
+            "data": {"positions": [{"canonical_symbol": "BLDP", "quantity": "100"}]}
+        }),
+        ("GET", "/api/v2/orders"): orders_h,
+    }
+    http = strategy_module.make_http_client("http://x", transport=_make_handler(routes))
+    strategy_module.reconcile_at_startup(
+        state, http, "k", state_path=state_path, summary_path=summary_path,
+    )
+    pos = state["open_positions"]["BLDP"]
+    # Legacy mode: IDs preserved, no auto re-bracket.
+    assert pos["child_order_ids"]["target"] == "T-EXPIRED"
+    assert pos["child_order_ids"]["stop"] == "S-EXPIRED"
+
+
+def test_submit_oco_children_correctly_parses_alpaca_oco_response(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Alpaca OCO native response has ``id`` for the limit (the
+    parent / take-profit) and a single leg for the stop. The previous
+    parser stamped both target_id and stop_id to legs[0] (the stop),
+    so when the stop fired poll_fills double-counted it. Verify the
+    fix: target_id = native.id, stop_id = legs[0].id."""
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "BLDP": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "", "stop": ""},
+            "qty": 100,
+            "entry_price": 5.00,
+            "status": "filled",
+            "venue_code": "XNAS",
+            "bracket_pricing_mode": "actual_fill",
+            "target_pct": 0.15, "stop_pct": 0.08,
+            "link_id": "BOWAKA-BLDP-1",
+        }
+    }
+
+    def handler(req):
+        # Alpaca-style OCO response: parent IS the limit; legs[0] is the stop.
+        return httpx.Response(200, json={
+            "data": {"native_response": {
+                "id": "LIMIT-ID-PARENT",
+                "order_type": "limit",
+                "legs": [
+                    {"id": "STOP-ID-CHILD", "order_type": "stop"},
+                ],
+            }}
+        })
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    pos = state["open_positions"]["BLDP"]
+    strategy_module.submit_oco_children(
+        "BLDP", pos, cfg_with_paths, http, "k",
+        state=state, state_path=state_path,
+    )
+    cids = state["open_positions"]["BLDP"]["child_order_ids"]
+    assert cids["target"] == "LIMIT-ID-PARENT"
+    assert cids["stop"] == "STOP-ID-CHILD"
+    # The two MUST be different — that was the bug symptom.
+    assert cids["target"] != cids["stop"]
+
+
 def test_reconcile_walks_broker_when_state_is_empty(
     strategy_module, cfg_with_paths, tmp_path,
 ):

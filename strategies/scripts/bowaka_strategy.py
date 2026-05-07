@@ -1044,6 +1044,15 @@ def submit_oco_children(
     data = parsed.get("data") or {}
     native = data.get("native_response") or {}
     child_orders = native.get("legs") or []
+    parent_response_id = native.get("id") or native.get("order_id") or ""
+
+    # Alpaca's OCO response shape: ``id`` is the SELL LIMIT (the
+    # take-profit) and ``legs[0]`` is the SELL STOP. There's no
+    # separate "main" parent — the limit order plays both roles.
+    # First pass: scan legs for whichever side we can identify by
+    # order_type. Second pass: if target is still empty after the
+    # scan, use the response's top-level id (the limit) as target.
+    # Same fallback for stop, in case the legs come back empty.
     target_id = ""
     stop_id = ""
     for leg in child_orders:
@@ -1052,18 +1061,26 @@ def submit_oco_children(
             target_id = leg.get("id") or leg.get("order_id") or ""
         elif "stop" in otype and not stop_id:
             stop_id = leg.get("id") or leg.get("order_id") or ""
-    if not target_id and len(child_orders) >= 1:
-        target_id = child_orders[0].get("id") or ""
-    if not stop_id and len(child_orders) >= 2:
-        stop_id = child_orders[1].get("id") or ""
+    # OCO-specific: if no LIMIT leg was seen, the parent response IS
+    # the take-profit. Fall back to it before resorting to leg[0].
+    if not target_id and parent_response_id:
+        target_id = parent_response_id
+    if not stop_id and len(child_orders) >= 1:
+        # Last-resort fallback (legs[0] should already have been seen
+        # as 'stop' in the first pass for OCO). Only triggers when the
+        # broker surfaces leg types in a way the loop above missed.
+        stop_id = child_orders[0].get("id") or ""
 
     pos["child_order_ids"] = {"target": target_id, "stop": stop_id}
     pos["target_price"] = target_price
     pos["stop_price"] = stop_price
+    # Item-(post-rebracket): clear any prior reconcile flag so the
+    # next reconcile run doesn't re-flag these IDs as stale.
+    pos.pop("child_status_at_recon", None)
     save_state(state, state_path)
     LOG.info(
-        "OCO bracket attached: %s fill=%.4f target=%.2f stop=%.2f",
-        ticker, float(fill_price), target_price, stop_price,
+        "OCO bracket attached: %s fill=%.4f target=%.2f(id=%s) stop=%.2f(id=%s)",
+        ticker, float(fill_price), target_price, target_id, stop_price, stop_id,
     )
     return parsed
 
@@ -2397,15 +2414,45 @@ def reconcile_at_startup(
     all_orders_by_id = {
         (o.get("id") or o.get("order_id")): o for o in broker_all_orders
     }
+    # Statuses that mean the child is gone for good — DAY-TIF OCO
+    # children expire as ``canceled`` at session close; rejected /
+    # expired / replaced are also non-recoverable. When we see one
+    # of these we clear the role's ID from child_order_ids so
+    # :func:`submit_pending_oco_children` re-attaches a fresh OCO
+    # bracket on the next tick. The position would otherwise sit
+    # naked overnight.
+    _TERMINAL_CHILD = {
+        "canceled", "cancelled", "rejected", "expired", "replaced",
+        "done_for_day",
+    }
+    cleared_for_rebracket: set[str] = set()
     for ticker, pos in open_positions.items():
-        for role, oid in (pos.get("child_order_ids") or {}).items():
-            if oid and oid not in open_order_ids:
-                broker_view = all_orders_by_id.get(oid, {})
-                native = (broker_view.get("native_status")
-                          or broker_view.get("status") or "")
-                if native:
-                    pos.setdefault("child_status_at_recon", {})[role] = native
-                    summary["child_status_corrected"].append(f"{ticker}:{role}={native}")
+        children = pos.get("child_order_ids") or {}
+        for role, oid in dict(children).items():
+            if not oid or oid in open_order_ids:
+                continue
+            broker_view = all_orders_by_id.get(oid, {})
+            native = (broker_view.get("native_status")
+                      or broker_view.get("status") or "").lower()
+            if not native:
+                continue
+            pos.setdefault("child_status_at_recon", {})[role] = native
+            summary["child_status_corrected"].append(f"{ticker}:{role}={native}")
+            if native in _TERMINAL_CHILD:
+                # Clear the slot so submit_pending_oco_children sees
+                # an actual_fill position with empty children and
+                # re-brackets. Only fires for actual_fill-mode
+                # positions; legacy candidate_close positions are
+                # untouched (their bracket was atomic with the parent).
+                if pos.get("bracket_pricing_mode") == "actual_fill" and pos.get("status") == "filled":
+                    pos["child_order_ids"][role] = ""
+                    cleared_for_rebracket.add(ticker)
+    if cleared_for_rebracket:
+        LOG.info(
+            "reconcile cleared expired-child IDs for re-bracket: %s",
+            sorted(cleared_for_rebracket),
+        )
+        summary["rebracket_pending"] = sorted(cleared_for_rebracket)
 
     # Pending signal-fade exits.
     pending = dict(state.get("pending_signal_fade_exits") or {})
