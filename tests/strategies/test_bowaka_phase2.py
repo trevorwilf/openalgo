@@ -631,6 +631,260 @@ def test_submit_otoco_503_translator_not_registered_aborts_pass(
     assert "AAPL" not in state["open_positions"]
 
 
+# ---------------------------------------------------------------- Item 4 actual_fill mode
+
+
+def test_submit_entry_actual_fill_routes_to_parent_only(
+    strategy_module, cfg_dict, tmp_path,
+):
+    """Default mode: submit_entry posts a single MARKET BUY to /orders,
+    NOT an OTOCO bracket to /orders/combo. Children come later via
+    submit_pending_oco_children once the parent fills."""
+    sent_paths: list[tuple[str, str]] = []
+    sent_bodies: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        sent_paths.append((req.method, req.url.path))
+        sent_bodies.append(json.loads(req.content))
+        return httpx.Response(200, json={
+            "data": {"native_response": {"id": "P-FILL-1"}}
+        })
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+    state = strategy_module.blank_state()
+    entry = strategy_module.Entry(
+        ticker="AAPL", qty=10, close_price=150.0,
+        venue_code="XNAS",
+        candidate=strategy_module.Candidate("AAPL", 150.0, 9.0),
+    )
+    strategy_module.submit_entry(
+        entry, cfg_dict, http, "k",
+        state=state, state_path=tmp_path / "state.json",
+    )
+
+    # Single call, single MARKET leg, no children yet.
+    assert sent_paths == [("POST", "/api/v2/orders")]
+    body = sent_bodies[0]
+    assert body["order_type"] == "MARKET"
+    assert body["side"] == "BUY"
+    assert body["quantity_unit"] == "WHOLE"
+    assert body["instrument"]["venue_code"] == "XNAS"
+    # State records pending_fill with empty children + the cached pcts
+    # so the post-fill submitter can compute the bracket.
+    pos = state["open_positions"]["AAPL"]
+    assert pos["status"] == "pending_fill"
+    assert pos["bracket_pricing_mode"] == "actual_fill"
+    assert pos["target_pct"] == cfg_dict["exits"]["target_pct"]
+    assert pos["stop_pct"] == cfg_dict["exits"]["stop_pct"]
+    assert pos["child_order_ids"] == {"target": "", "stop": ""}
+
+
+def test_submit_entry_candidate_close_routes_to_otoco(
+    strategy_module, cfg_dict, tmp_path,
+):
+    """Legacy mode: submit_entry routes to submit_otoco when
+    cfg.entry.bracket_pricing_mode is "candidate_close"."""
+    cfg = dict(cfg_dict)
+    cfg["entry"] = {"bracket_pricing_mode": "candidate_close"}
+    sent_paths: list[tuple[str, str]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        sent_paths.append((req.method, req.url.path))
+        return httpx.Response(200, json={
+            "data": {"native_response": {"id": "P-1", "legs": [
+                {"id": "T-1", "order_type": "limit"},
+                {"id": "S-1", "order_type": "stop"},
+            ]}}
+        })
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+    state = strategy_module.blank_state()
+    entry = strategy_module.Entry(
+        ticker="AAPL", qty=10, close_price=150.0, venue_code="XNAS",
+        candidate=strategy_module.Candidate("AAPL", 150.0, 9.0),
+    )
+    strategy_module.submit_entry(
+        entry, cfg, http, "k",
+        state=state, state_path=tmp_path / "state.json",
+    )
+    assert sent_paths == [("POST", "/api/v2/orders/combo")]
+    pos = state["open_positions"]["AAPL"]
+    assert pos.get("bracket_pricing_mode") is None  # legacy mode doesn't stamp it
+
+
+def test_submit_entry_unknown_mode_raises(strategy_module, cfg_dict, tmp_path):
+    cfg = dict(cfg_dict)
+    cfg["entry"] = {"bracket_pricing_mode": "garbage"}
+    entry = strategy_module.Entry(
+        ticker="AAPL", qty=10, close_price=150.0, venue_code="XNAS",
+        candidate=strategy_module.Candidate("AAPL", 150.0, 9.0),
+    )
+    with pytest.raises(ValueError, match="bracket_pricing_mode"):
+        strategy_module.submit_entry(
+            entry, cfg, None, "k",
+            state=strategy_module.blank_state(),
+            state_path=tmp_path / "state.json",
+        )
+
+
+def test_submit_pending_oco_children_attaches_after_fill(
+    strategy_module, cfg_dict, tmp_path,
+):
+    """Once poll_fills records entry_price, the next pass attaches an
+    OCO bracket priced off the actual fill — not yesterday's close."""
+    sent_bodies: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        sent_bodies.append(json.loads(req.content))
+        return httpx.Response(200, json={
+            "data": {"native_response": {"legs": [
+                {"id": "T-OCO", "order_type": "limit"},
+                {"id": "S-OCO", "order_type": "stop"},
+            ]}}
+        })
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+    # Position state as if submit_parent_market_buy ran and poll_fills
+    # then recorded a fill at $13.00 (gap from $10.00 candidate close).
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "AAPL": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "", "stop": ""},
+            "qty": 10,
+            "entry_price": 13.00,            # actual fill, NOT 10.00
+            "status": "filled",
+            "venue_code": "XNAS",
+            "bracket_pricing_mode": "actual_fill",
+            "target_pct": 0.15,
+            "stop_pct": 0.08,
+            "candidate_close": 10.00,
+            "link_id": "BOWAKA-AAPL-100",
+        }
+    }
+    out = strategy_module.submit_pending_oco_children(
+        state, cfg_dict, http, "k",
+        state_path=tmp_path / "state.json",
+    )
+    assert out == ["AAPL"]
+    body = sent_bodies[0]
+    assert body["combo_type"] == "OCO"
+    assert len(body["legs"]) == 2
+    # Bracket levels off the ACTUAL fill ($13.00), not the candidate
+    # close ($10.00). Old code would have shipped target=$11.50 below
+    # the entry — broker rejection or instant-target risk.
+    assert float(body["legs"][0]["price"]) == round(13.00 * 1.15, 2)        # $14.95
+    assert float(body["legs"][1]["trigger_price"]) == round(13.00 * 0.92, 2)  # $11.96
+    pos = state["open_positions"]["AAPL"]
+    assert pos["child_order_ids"]["target"] == "T-OCO"
+    assert pos["child_order_ids"]["stop"] == "S-OCO"
+    assert pos["target_price"] == round(13.00 * 1.15, 2)
+    assert pos["stop_price"] == round(13.00 * 0.92, 2)
+
+
+def test_submit_pending_oco_children_idempotent(
+    strategy_module, cfg_dict, tmp_path,
+):
+    """Already-bracketed positions are skipped; a second tick doesn't
+    re-submit and doesn't drop already-filled positions from the
+    walk."""
+    n_calls = [0]
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        n_calls[0] += 1
+        return httpx.Response(200, json={
+            "data": {"native_response": {"legs": [
+                {"id": "T-OCO", "order_type": "limit"},
+                {"id": "S-OCO", "order_type": "stop"},
+            ]}}
+        })
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "AAPL": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "T-EXISTING", "stop": "S-EXISTING"},
+            "qty": 10, "entry_price": 13.00, "status": "filled",
+            "venue_code": "XNAS", "bracket_pricing_mode": "actual_fill",
+            "target_pct": 0.15, "stop_pct": 0.08,
+        }
+    }
+    strategy_module.submit_pending_oco_children(
+        state, cfg_dict, http, "k",
+        state_path=tmp_path / "state.json",
+    )
+    assert n_calls[0] == 0  # already bracketed → no /orders/combo call
+
+
+def test_submit_pending_oco_children_skips_pending_fill(
+    strategy_module, cfg_dict, tmp_path,
+):
+    """Status='pending_fill' means parent hasn't filled yet — don't
+    submit OCO."""
+    n_calls = [0]
+    http = strategy_module.make_http_client(
+        "http://x",
+        transport=httpx.MockTransport(
+            lambda r: (n_calls.__setitem__(0, n_calls[0] + 1)
+                      or httpx.Response(200, json={"data": {}}))
+        ),
+    )
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "AAPL": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "", "stop": ""},
+            "qty": 10, "entry_price": None, "status": "pending_fill",
+            "venue_code": "XNAS", "bracket_pricing_mode": "actual_fill",
+            "target_pct": 0.15, "stop_pct": 0.08,
+        }
+    }
+    strategy_module.submit_pending_oco_children(
+        state, cfg_dict, http, "k",
+        state_path=tmp_path / "state.json",
+    )
+    assert n_calls[0] == 0
+
+
+def test_submit_pending_oco_children_ignores_legacy_mode(
+    strategy_module, cfg_dict, tmp_path,
+):
+    """Legacy candidate_close positions already have their bracket
+    children — never re-bracket them."""
+    n_calls = [0]
+    http = strategy_module.make_http_client(
+        "http://x",
+        transport=httpx.MockTransport(
+            lambda r: (n_calls.__setitem__(0, n_calls[0] + 1)
+                      or httpx.Response(200, json={"data": {}}))
+        ),
+    )
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "AAPL": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "", "stop": ""},   # would qualify
+            "qty": 10, "entry_price": 13.00, "status": "filled",
+            "venue_code": "XNAS",
+            # No bracket_pricing_mode on legacy / candidate_close positions.
+        }
+    }
+    strategy_module.submit_pending_oco_children(
+        state, cfg_dict, http, "k",
+        state_path=tmp_path / "state.json",
+    )
+    assert n_calls[0] == 0
+
+
 # ---------------------------------------------------------------- poll fills
 
 
@@ -772,24 +1026,21 @@ def test_first_session_tick_runs_full_entry_pipeline(
         _row(f"T{i}", close=10.0, signal=10.0 - i) for i in range(10)
     ])))
 
-    sent_combos: list[dict] = []
+    sent_orders: list[dict] = []
 
-    def combo_h(req: httpx.Request) -> httpx.Response:
-        sent_combos.append(json.loads(req.content))
-        i = len(sent_combos)
+    def orders_h(req: httpx.Request) -> httpx.Response:
+        sent_orders.append(json.loads(req.content))
+        i = len(sent_orders)
         return httpx.Response(200, json={
-            "data": {"native_response": {
-                "id": f"P-{i}",
-                "legs": [
-                    {"id": f"T-{i}", "order_type": "limit"},
-                    {"id": f"S-{i}", "order_type": "stop"},
-                ],
-            }},
+            "data": {"native_response": {"id": f"P-{i}"}}
         })
 
+    # In the default actual_fill mode the entry pass posts a single
+    # MARKET BUY per ticker to /api/v2/orders. Children are attached
+    # later by submit_pending_oco_children.
     transport = _route({
         ("GET", "/api/v2/balances"): _balances_handler(equity=100_000.0),
-        ("POST", "/api/v2/orders/combo"): combo_h,
+        ("POST", "/api/v2/orders"): orders_h,
     })
     http = strategy_module.make_http_client("http://x", transport=transport)
 
@@ -807,7 +1058,7 @@ def test_first_session_tick_runs_full_entry_pipeline(
     )
     assert rc == 0
     # cfg.sizing.max_concurrent_positions = 5
-    assert len(sent_combos) == 5
+    assert len(sent_orders) == 5
 
 
 def test_subsequent_session_tick_polls_fills_only(
