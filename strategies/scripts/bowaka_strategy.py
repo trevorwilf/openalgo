@@ -1972,17 +1972,23 @@ def run_session_entry_pass(
     kill_state: KillLevel,
     dry_run: bool = False,
 ) -> None:
-    """First tick of a new session: equity → reset → load candidates →
-    select → submit OTOCO. Idempotent — caller dedupes by
-    ``state['session_date']``."""
+    """First tick of a new session: equity → load+validate candidates
+    → reset → select → submit. Idempotent — caller dedupes by
+    ``state['session_date']``.
+
+    Item 5 fix: candidate validation runs BEFORE
+    ``reset_for_new_session`` writes today's session_date. If the
+    candidates file is missing, stale, or hash-mismatched, we return
+    without advancing session_date — the next tick will retry. Under
+    the previous order an early-morning prefilter glitch (e.g.,
+    Alpaca data not yet available, NFS lag, network hiccup) would
+    permanently lock out the day's entry pass.
+    """
     try:
         equity = fetch_equity(http, api_key)
     except Exception as e:
         LOG.exception("could not fetch equity: %s", e)
         return
-
-    reset_for_new_session(state, today_et.isoformat(), equity)
-    save_state(state, state_path)
 
     candidates_path = _resolve_path(cfg, "candidates_path")
     handshake = cfg.get("prefilter_handshake", {}) or {}
@@ -1994,8 +2000,13 @@ def run_session_entry_pass(
             today_et=today_et,
         )
     except CandidatesError as e:
-        LOG.error("candidates load failed: %s", e)
+        LOG.error("candidates load failed (will retry next tick): %s", e)
         return
+
+    # Candidates loaded cleanly — now safe to mark today's session
+    # baseline. From here on the session_date is committed.
+    reset_for_new_session(state, today_et.isoformat(), equity)
+    save_state(state, state_path)
 
     LOG.info("Loaded %d candidates for %s (equity=%.2f)",
              len(cands), today_et, equity)

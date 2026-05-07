@@ -1061,6 +1061,70 @@ def test_first_session_tick_runs_full_entry_pipeline(
     assert len(sent_orders) == 5
 
 
+def test_run_session_entry_pass_does_not_lock_session_on_missing_candidates(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Item 5 regression: when load_candidates raises (missing file,
+    stale, hash mismatch) the function must return WITHOUT advancing
+    state['session_date']. The next tick is then free to retry. The
+    bug would permanently lock out today's entry pass."""
+    # Deliberately do NOT create a candidates file at the cfg-pointed
+    # path; load_candidates will raise CandidatesMissing.
+    state = strategy_module.blank_state()
+    assert state.get("session_date") is None
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+
+    def balances_h(req):
+        return httpx.Response(200, json={"data": {"balance": {"equity": "100000"}}})
+
+    http = strategy_module.make_http_client(
+        "http://x",
+        transport=_route({
+            ("GET", "/api/v2/balances"): balances_h,
+        }),
+    )
+    today = date(2026, 5, 5)
+    strategy_module.run_session_entry_pass(
+        cfg_with_paths, state, state_path, http, "k",
+        today_et=today,
+        kill_state=strategy_module.KillLevel.NONE,
+    )
+    # CRITICAL: session_date stays unset so the next tick re-enters
+    # the entry pass branch in run_loop.
+    assert state.get("session_date") is None
+    assert not state.get("open_positions")
+
+
+def test_run_session_entry_pass_advances_session_after_load_succeeds(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Symmetric healthy case: when candidates load OK,
+    session_date moves to today (so subsequent ticks switch to
+    poll-only mode)."""
+    candidates_path = Path(cfg_with_paths["paths"]["candidates_path"])
+    candidates_path.parent.mkdir(parents=True, exist_ok=True)
+    candidates_path.write_text(json.dumps(_candidates_payload(rows=[])))
+    state = strategy_module.blank_state()
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+
+    def balances_h(req):
+        return httpx.Response(200, json={"data": {"balance": {"equity": "100000"}}})
+
+    http = strategy_module.make_http_client(
+        "http://x",
+        transport=_route({
+            ("GET", "/api/v2/balances"): balances_h,
+        }),
+    )
+    strategy_module.run_session_entry_pass(
+        cfg_with_paths, state, state_path, http, "k",
+        today_et=date(2026, 5, 5),
+        kill_state=strategy_module.KillLevel.NONE,
+    )
+    assert state["session_date"] == "2026-05-05"
+    assert state["daily_pnl_baseline_equity"] == 100_000.0
+
+
 def test_subsequent_session_tick_polls_fills_only(
     strategy_module, cfg_with_paths, tmp_path,
 ):
