@@ -727,6 +727,275 @@ def test_process_fill_events_writes_opened_record_on_parent_fill(
     assert opened[0]["venue_code"] == "XNAS"
 
 
+# ---------------------------------------------------------------- analytic logging
+
+
+def test_opened_record_carries_analytic_enrichment(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """The opened record carries the enrichment fields the analyst
+    needs to tune signal_strength / target / stop / sizing — not just
+    ticker+qty+entry_price."""
+    state = strategy_module.blank_state()
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    # Mirror what submit_parent_market_buy stamps on pos.
+    state["open_positions"] = {
+        "BLDP": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "", "stop": ""},
+            "qty": 100,
+            "entry_price": 5.00,
+            "status": "filled",
+            "entry_timestamp": "2026-05-07T13:30:00+00:00",
+            "venue_code": "XNAS",
+            "exchange": "NASDAQ",
+            "candidate_close": 4.76,         # prior close
+            "signal_strength": 8.5,
+            "target_pct": 0.15,
+            "stop_pct": 0.08,
+            "target_price": 5.75,            # filled by submit_pending_oco_children
+            "stop_price": 4.60,
+            "bracket_pricing_mode": "actual_fill",
+            "equity_at_entry": 100_000.0,
+            "entry_features": {"rvol": 2.5, "atr_pct": 0.08},
+            "link_id": "BOWAKA-BLDP-100",
+            "peak_since_entry": 5.00,
+            "trough_since_entry": 5.00,
+        }
+    }
+    parent_ev = strategy_module.FillEvent(
+        ticker="BLDP", order_id="P-1", role="parent",
+        status="FILLED", filled_qty=100, filled_avg_price=5.00,
+        raw={},
+    )
+    strategy_module.process_fill_events_for_closures(
+        [parent_ev], state, cfg_with_paths,
+        state_path=state_path, summary_path=summary_path,
+    )
+    rec = next(
+        json.loads(line) for line in summary_path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and json.loads(line).get("record_type") == "opened"
+    )
+    # All the why-bought enrichment fields.
+    assert rec["signal_strength"] == 8.5
+    assert rec["candidate_close"] == 4.76
+    # Gap = (5.00 - 4.76) / 4.76 ≈ 0.0504
+    assert abs(rec["gap_at_open_pct"] - (5.00 - 4.76) / 4.76) < 1e-6
+    assert rec["target_pct"] == 0.15
+    assert rec["stop_pct"] == 0.08
+    assert rec["target_price"] == 5.75
+    assert rec["stop_price"] == 4.60
+    assert rec["bracket_pricing_mode"] == "actual_fill"
+    assert rec["equity_at_entry"] == 100_000.0
+    assert rec["notional"] == 500.0
+    assert abs(rec["notional_pct_of_equity"] - 0.005) < 1e-9
+    assert rec["exchange"] == "NASDAQ"
+    assert rec["entry_features"] == {"rvol": 2.5, "atr_pct": 0.08}
+
+
+def test_close_position_carries_mfe_mae_and_hold_duration(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """closure record must carry MFE/MAE/hold_days/percent fields so
+    the analyst can compute reward-to-risk per signal regime."""
+    state = strategy_module.blank_state()
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    # Position open since 2 trading days ago, peak/trough already
+    # recorded by daily_marks ticking through prior sessions.
+    today_iso = _to_eastern_today_iso()  # helper below
+    state["open_positions"] = {
+        "AAPL": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "T-1", "stop": "S-1"},
+            "qty": 10,
+            "entry_price": 100.0,
+            "entry_timestamp": "2026-05-04T13:30:00+00:00",
+            "status": "filled",
+            "venue_code": "XNAS", "exchange": "NASDAQ",
+            "candidate_close": 99.0,
+            "signal_strength": 9.0,
+            "target_pct": 0.15, "stop_pct": 0.08,
+            "target_price": 115.0, "stop_price": 92.0,
+            "bracket_pricing_mode": "actual_fill",
+            "peak_since_entry": 110.0,    # MFE peak
+            "trough_since_entry": 95.0,   # MAE trough
+            "entry_features": {"rvol": 2.5},
+            "link_id": "BOWAKA-AAPL-1",
+        }
+    }
+    rec = strategy_module.close_position(
+        "AAPL", state, cfg_with_paths,
+        state_path=state_path, summary_path=summary_path,
+        exit_price=115.0, reason="target_hit",
+    )
+    # Excursion math: 10 shares * (peak_or_trough - entry).
+    assert rec["mfe_dollar"] == 100.0          # (110 - 100) * 10
+    assert rec["mae_dollar"] == -50.0          # (95 - 100) * 10
+    assert abs(rec["mfe_pct"] - 0.10) < 1e-9
+    assert abs(rec["mae_pct"] + 0.05) < 1e-9
+    assert rec["peak_since_entry"] == 110.0
+    assert rec["trough_since_entry"] == 95.0
+    # entry_to_exit = (115 - 100) / 100 = 0.15
+    assert abs(rec["entry_to_exit_pct"] - 0.15) < 1e-9
+    # Hold-days >= 1 (entry was 5/4, "today" is later).
+    assert isinstance(rec["hold_trading_days"], int)
+    assert rec["hold_trading_days"] >= 1
+    # Plus the why-bought fields are carried through.
+    assert rec["signal_strength"] == 9.0
+    assert rec["candidate_close"] == 99.0
+    assert rec["target_pct"] == 0.15
+    assert rec["bracket_pricing_mode"] == "actual_fill"
+
+
+def _to_eastern_today_iso() -> str:
+    import pytz
+    from datetime import datetime as _dt
+    return _dt.now(pytz.timezone("America/New_York")).date().isoformat()
+
+
+def test_write_daily_marks_writes_one_record_per_filled_position(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """write_daily_marks fetches today's bar for each filled position
+    and appends a daily_mark record with OHLCV + unrealized P&L +
+    excursion + recomputed signals."""
+    import pandas as pd
+    from datetime import date, datetime, timezone
+
+    state = strategy_module.blank_state()
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    state["open_positions"] = {
+        "AAPL": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "T-1", "stop": "S-1"},
+            "qty": 10, "entry_price": 100.0,
+            "entry_timestamp": "2026-05-04T13:30:00+00:00",
+            "status": "filled",
+            "venue_code": "XNAS",
+            "candidate_close": 99.0,
+            "signal_strength": 9.0,
+            "target_pct": 0.15, "stop_pct": 0.08,
+            "target_price": 115.0, "stop_price": 92.0,
+            "bracket_pricing_mode": "actual_fill",
+            "peak_since_entry": 102.0,
+            "trough_since_entry": 98.0,
+            "link_id": "BOWAKA-AAPL-1",
+        }
+    }
+    # Synthesize a bars DF with enough history that compute_features_single
+    # produces real numbers (lookback_days=20 in the cfg).
+    today = date(2026, 5, 5)
+    rows = []
+    base = 95.0
+    for i in range(30):
+        d = pd.Timestamp("2026-04-01") + pd.Timedelta(days=i)
+        rows.append({
+            "ts": d.isoformat(),
+            "open": base + 0.1 * i, "high": base + 0.1 * i + 1.0,
+            "low": base + 0.1 * i - 1.0, "close": base + 0.1 * i + 0.5,
+            "volume": 1_000_000 + i * 5000,
+        })
+    # Make today's bar the LAST row with a clear high/low/close so we
+    # can assert exact mark values.
+    rows.append({
+        "ts": today.isoformat() + "T00:00:00",
+        "open": 99.5, "high": 105.0, "low": 97.5, "close": 103.0,
+        "volume": 5_000_000,
+    })
+    df = pd.DataFrame(rows)
+
+    # Patch the bars fetcher to avoid network.
+    import strategies.scripts.bowaka_strategy as mod  # noqa: F401
+    original_fetch = strategy_module.fetch_daily_bars_for_signal_fade
+
+    def _fake_fetch(ticker, venue_code, http, api_key, *, lookback_calendar_days, end):
+        out = df.copy()
+        out["timestamp"] = pd.to_datetime(out["ts"])
+        return out.drop(columns=["ts"]).sort_values("timestamp").reset_index(drop=True)
+
+    strategy_module.fetch_daily_bars_for_signal_fade = _fake_fetch
+    try:
+        marked = strategy_module.write_daily_marks(
+            cfg_with_paths, state, http=None, api_key="k",
+            today_et=today,
+            summary_path=summary_path, state_path=state_path,
+            now_utc=datetime.now(timezone.utc),
+        )
+    finally:
+        strategy_module.fetch_daily_bars_for_signal_fade = original_fetch
+
+    assert marked == ["AAPL"]
+    rec = next(
+        json.loads(line) for line in summary_path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and json.loads(line).get("record_type") == "daily_mark"
+    )
+    assert rec["ticker"] == "AAPL"
+    assert rec["session_date"] == today.isoformat()
+    assert rec["mark_price"] == 103.0
+    assert rec["high"] == 105.0
+    assert rec["low"] == 97.5
+    assert rec["volume"] == 5_000_000
+    # Unrealized = (103 - 100) * 10 = 30
+    assert rec["unrealized_pnl"] == 30.0
+    # Peak should expand to today's high (105 > 102), trough stays
+    # at the prior 98 (today's 97.5 is BELOW it).
+    assert rec["peak_since_entry"] == 105.0
+    assert rec["trough_since_entry"] == 97.5
+    assert rec["mfe_dollar"] == 50.0   # (105 - 100) * 10
+    assert rec["mae_dollar"] == -25.0  # (97.5 - 100) * 10
+    # State is updated for the next mark.
+    assert state["open_positions"]["AAPL"]["peak_since_entry"] == 105.0
+    assert state["open_positions"]["AAPL"]["trough_since_entry"] == 97.5
+    # Recomputed features present (we passed enough history).
+    assert isinstance(rec.get("current_features"), dict)
+    # Per-gate breakdown matches the configured signal_gates.
+    gates = rec["signal_fade_gates"]
+    for k in ("rvol", "atr_pct", "range_expansion",
+              "close_location", "ema_distance", "ema_slope"):
+        assert k in gates and "passed" in gates[k]
+
+
+def test_write_daily_marks_idempotent_per_day(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Second call on the same trading day is a no-op (dedupe via
+    state.daily_marks_written_for_date)."""
+    import pandas as pd
+    from datetime import date, datetime, timezone
+
+    state = strategy_module.blank_state()
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    state["daily_marks_written_for_date"] = "2026-05-05"
+
+    n_calls = [0]
+
+    def _fake_fetch(*a, **kw):
+        n_calls[0] += 1
+        return pd.DataFrame()
+
+    original = strategy_module.fetch_daily_bars_for_signal_fade
+    strategy_module.fetch_daily_bars_for_signal_fade = _fake_fetch
+    try:
+        out = strategy_module.write_daily_marks(
+            cfg_with_paths, state, http=None, api_key="k",
+            today_et=date(2026, 5, 5),
+            summary_path=summary_path, state_path=state_path,
+            now_utc=datetime.now(timezone.utc),
+        )
+    finally:
+        strategy_module.fetch_daily_bars_for_signal_fade = original
+    assert out == []
+    assert n_calls[0] == 0  # short-circuited on dedupe
+
+
 def test_daily_summary_written_only_once_per_day(
     strategy_module, cfg_with_paths, tmp_path,
 ):
