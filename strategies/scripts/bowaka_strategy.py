@@ -417,13 +417,31 @@ def compute_qty(
     close_price: float,
     per_trade_pct: float,
     max_per_trade_dollars: float | None = None,
+    *,
+    avg_dollar_volume: float | None = None,
+    max_position_as_adv_frac: float | None = None,
 ) -> int:
-    """floor(min(equity*pct, abs_cap) / close). Whole shares only —
-    bracket orders reject fractional at Alpaca. Returns 0 when the
-    target dollars don't cover one share (caller skips)."""
+    """floor(min(equity*pct, abs_cap, adv_cap) / close). Whole shares
+    only — bracket orders reject fractional at Alpaca. Returns 0 when
+    the target dollars don't cover one share (caller skips).
+
+    The ADV cap (Item 3 / expert review) is the strategy's stated
+    capacity edge. Without it a $1M account at 10% per-trade puts $100k
+    into a name with $250k ADV — a 40% participation rate that
+    contradicts the capacity-limited thesis. Pass both
+    ``avg_dollar_volume`` (from the candidate features) and
+    ``max_position_as_adv_frac`` (from ``cfg.risk``) to enable the cap.
+    """
     target = equity * per_trade_pct
     if max_per_trade_dollars is not None:
         target = min(target, max_per_trade_dollars)
+    if (
+        avg_dollar_volume is not None
+        and max_position_as_adv_frac is not None
+        and avg_dollar_volume > 0
+        and max_position_as_adv_frac > 0
+    ):
+        target = min(target, avg_dollar_volume * max_position_as_adv_frac)
     if close_price <= 0 or target <= 0:
         return 0
     return int(math.floor(target / close_price))
@@ -480,6 +498,9 @@ def select_entries(
     max_concurrent = int(sizing_cfg["max_concurrent_positions"])
     per_trade_pct = float(sizing_cfg["per_trade_pct"])
     max_per_trade_abs = risk_cfg.get("max_per_trade_dollars")
+    # Item 3: capacity / ADV-participation cap. Disabled when null.
+    max_pos_adv = risk_cfg.get("max_position_as_adv_frac")
+    max_pos_adv_f = float(max_pos_adv) if max_pos_adv is not None else None
 
     pct_cap = float(risk_cfg.get("max_gross_exposure_pct") or 0.0) * equity
     abs_cap = risk_cfg.get("max_gross_exposure_dollars")
@@ -499,11 +520,15 @@ def select_entries(
             continue
         if open_count + len(selected) >= max_concurrent:
             break
+        adv = cand.features.get("avg_dollar_volume") if cand.features else None
+        adv_f = float(adv) if adv is not None else None
         qty = compute_qty(
             equity=equity,
             close_price=cand.close,
             per_trade_pct=per_trade_pct,
             max_per_trade_dollars=max_per_trade_abs,
+            avg_dollar_volume=adv_f,
+            max_position_as_adv_frac=max_pos_adv_f,
         )
         if qty <= 0:
             continue

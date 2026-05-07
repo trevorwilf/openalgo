@@ -36,6 +36,13 @@ risk:
   max_gross_exposure_pct: 0.50
   max_per_trade_dollars: null         # nullable absolute floor
   max_gross_exposure_dollars: null    # nullable absolute floor
+  # Item 3 — capacity cap. Each position is bounded to this fraction
+  # of the candidate's avg_dollar_volume. Bowaka's stated edge is
+  # capacity-limited, so without this cap a $1M account at 10% per-
+  # trade puts $100k into a $250k-ADV name (40% participation, well
+  # past where market-impact dominates the trade). 3% is conservative
+  # for microcap names. Set to null to disable.
+  max_position_as_adv_frac: 0.03
 
 exits:
   stop_pct: 0.08

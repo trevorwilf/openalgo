@@ -289,6 +289,79 @@ def test_compute_qty_absolute_cap_caps_below_pct(strategy_module):
     ) == 100
 
 
+def test_compute_qty_adv_cap_binds_at_large_account(strategy_module):
+    """Item 3: $1M equity at 10% per-trade is $100k. With ADV $250k
+    and a 3% cap, sizing must clamp at $7,500 = 750 shares at $10."""
+    qty = strategy_module.compute_qty(
+        equity=1_000_000, close_price=10.0, per_trade_pct=0.10,
+        avg_dollar_volume=250_000.0, max_position_as_adv_frac=0.03,
+    )
+    assert qty == 750
+
+
+def test_compute_qty_adv_cap_does_not_bind_at_small_account(strategy_module):
+    """At $100k equity * 10% = $10k, a $250k-ADV name with 3% cap
+    ($7,500) still binds because $7,500 < $10,000. Confirm it picks the
+    smaller of the two when ADV cap is the tighter constraint."""
+    qty = strategy_module.compute_qty(
+        equity=100_000, close_price=10.0, per_trade_pct=0.10,
+        avg_dollar_volume=250_000.0, max_position_as_adv_frac=0.03,
+    )
+    assert qty == 750  # $7,500 / $10
+
+
+def test_compute_qty_adv_cap_inactive_at_large_adv(strategy_module):
+    """When the candidate's ADV is huge (e.g. $50M) the per-trade
+    pct dollars dominate. 100k * 10% = 10k, ADV cap = 50M*3% = 1.5M
+    — pct wins. 10000/10 = 1000 shares."""
+    qty = strategy_module.compute_qty(
+        equity=100_000, close_price=10.0, per_trade_pct=0.10,
+        avg_dollar_volume=50_000_000.0, max_position_as_adv_frac=0.03,
+    )
+    assert qty == 1000
+
+
+def test_compute_qty_adv_cap_disabled_when_frac_none(strategy_module):
+    """max_position_as_adv_frac=None disables the cap (back-compat)."""
+    qty = strategy_module.compute_qty(
+        equity=1_000_000, close_price=10.0, per_trade_pct=0.10,
+        avg_dollar_volume=250_000.0, max_position_as_adv_frac=None,
+    )
+    assert qty == 10000  # $100k / $10 — unbounded
+
+
+def test_compute_qty_adv_cap_disabled_when_adv_missing(strategy_module):
+    """avg_dollar_volume=None means we don't know capacity; fall back
+    to the equity*pct (and abs) caps only."""
+    qty = strategy_module.compute_qty(
+        equity=1_000_000, close_price=10.0, per_trade_pct=0.10,
+        avg_dollar_volume=None, max_position_as_adv_frac=0.03,
+    )
+    assert qty == 10000
+
+
+def test_select_entries_applies_adv_cap(strategy_module, cfg_dict):
+    """Wired end-to-end: cfg.risk.max_position_as_adv_frac flowing into
+    compute_qty via select_entries."""
+    cfg = dict(cfg_dict)
+    cfg["risk"] = dict(cfg["risk"])
+    cfg["risk"]["max_position_as_adv_frac"] = 0.03
+    state = strategy_module.blank_state()
+    cands = [
+        strategy_module.Candidate(
+            "TINYADV", 10.0, 9.0, venue_code="XNAS",
+            features={"avg_dollar_volume": 200_000.0},
+        ),
+    ]
+    selected = strategy_module.select_entries(
+        cands, state, equity=1_000_000.0, latest_prices={},
+        cfg=cfg, kill_state=strategy_module.KillLevel.NONE,
+    )
+    assert len(selected) == 1
+    # 200_000 * 0.03 = 6000. 6000 / 10 = 600 shares (vs 10000 unbounded).
+    assert selected[0].qty == 600
+
+
 # ---------------------------------------------------------------- entry select
 
 
