@@ -57,6 +57,35 @@ entry:
   #                       backtest parity / debugging only.
   bracket_pricing_mode: "actual_fill"
 
+  # Item 9 — intraday confirmation gate (Critical #4 in the review).
+  # Bowaka's strongest reconstruction is "daily candidate + live
+  # confirmation before entry". Default is OFF — enable after you've
+  # backtested the gates against your own data, since adding a delay
+  # changes fill prices and the gates can either help (skip names that
+  # already exhausted) or hurt (miss runners that opened higher).
+  intraday_confirmation:
+    enabled: false
+    # Wait this many minutes after the session start before the entry
+    # pass runs. Lets the opening-print noise settle and gives quotes
+    # time to be fresh. Common values: 5–15 minutes.
+    window_minutes: 5
+    # Reject a candidate when the live spread is wider than this
+    # fraction of the mid. Microcaps with double-digit-percent spreads
+    # are uneconomic regardless of the daily signal.
+    max_spread_pct: 0.02
+    # Reject a candidate whose live quote is older than this. Stale
+    # quotes mean the name is unlikely to fill cleanly.
+    max_quote_age_seconds: 60
+    # Live price must sit within this band relative to yesterday's
+    # close (the candidate.close):
+    #   * max_pct_above_close: cap chase risk — skip names already
+    #     up >X% (likely exhausted or about to halt).
+    #   * min_pct_below_close: floor on failure — skip names that
+    #     gapped down or sold off through the prior close.
+    price_band:
+      max_pct_above_close: 0.30
+      min_pct_below_close: -0.15
+
 exits:
   stop_pct: 0.08
   target_pct: 0.15

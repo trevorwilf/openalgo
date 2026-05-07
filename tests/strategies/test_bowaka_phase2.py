@@ -7,11 +7,12 @@ are keyed on ``(method, path)`` and stub the JSON response. See
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
 import pytest
+import pytz
 
 
 # ---------------------------------------------------------------- helpers
@@ -629,6 +630,234 @@ def test_submit_otoco_503_translator_not_registered_aborts_pass(
                                   state=state, state_path=state_path)
     assert "AAPL" not in state["halt_skip_today"]
     assert "AAPL" not in state["open_positions"]
+
+
+# ---------------------------------------------------------------- Item 9 intraday confirmation
+
+
+def _ic_enabled_cfg(base_cfg, **overrides):
+    cfg = dict(base_cfg)
+    cfg["entry"] = {
+        **(base_cfg.get("entry") or {}),
+        "intraday_confirmation": {
+            "enabled": True,
+            "window_minutes": 0,  # disable window wait by default in tests
+            "max_spread_pct": 0.02,
+            "max_quote_age_seconds": 60,
+            "price_band": {"max_pct_above_close": 0.30,
+                           "min_pct_below_close": -0.15},
+            **overrides,
+        },
+    }
+    return cfg
+
+
+def test_intraday_confirmation_passthrough_when_disabled(strategy_module, cfg_dict):
+    """Default config: gate disabled → entries returned unchanged
+    without any /api/v2/quotes traffic."""
+    n_calls = [0]
+
+    def handler(req):
+        n_calls[0] += 1
+        return httpx.Response(200, json={"data": []})
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+    entries = [strategy_module.Entry(
+        ticker="AAPL", qty=10, close_price=10.0, venue_code="XNAS",
+        candidate=strategy_module.Candidate("AAPL", 10.0, 9.0),
+    )]
+    out = strategy_module.filter_by_intraday_confirmation(
+        entries, cfg_dict, http, "k",
+    )
+    assert out == entries
+    assert n_calls[0] == 0
+
+
+def test_intraday_confirmation_passes_when_quote_in_band(
+    strategy_module, cfg_dict,
+):
+    quote = {
+        "bid": "10.10", "ask": "10.20", "last": "10.15",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    def handler(req):
+        return httpx.Response(200, json={"data": [{"quote": quote}]})
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+    cfg = _ic_enabled_cfg(cfg_dict)
+    entries = [strategy_module.Entry(
+        ticker="AAPL", qty=10, close_price=10.0, venue_code="XNAS",
+        candidate=strategy_module.Candidate("AAPL", 10.0, 9.0),
+    )]
+    out = strategy_module.filter_by_intraday_confirmation(
+        entries, cfg, http, "k",
+    )
+    assert out == entries
+
+
+def test_intraday_confirmation_rejects_chase_above_band(
+    strategy_module, cfg_dict,
+):
+    """Live mid is 35% above candidate close → exceeds the 30%
+    chase guard. Skipped."""
+    quote = {
+        "bid": "13.50", "ask": "13.50", "last": "13.50",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    http = strategy_module.make_http_client(
+        "http://x",
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json={"data": [{"quote": quote}]})
+        ),
+    )
+    cfg = _ic_enabled_cfg(cfg_dict)
+    entries = [strategy_module.Entry(
+        ticker="AAPL", qty=10, close_price=10.0, venue_code="XNAS",
+        candidate=strategy_module.Candidate("AAPL", 10.0, 9.0),
+    )]
+    out = strategy_module.filter_by_intraday_confirmation(
+        entries, cfg, http, "k",
+    )
+    assert out == []
+
+
+def test_intraday_confirmation_rejects_failure_below_band(
+    strategy_module, cfg_dict,
+):
+    """Live mid 20% below candidate close → exceeds the 15% failure
+    guard. Skipped."""
+    quote = {
+        "bid": "8.00", "ask": "8.00", "last": "8.00",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    http = strategy_module.make_http_client(
+        "http://x",
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json={"data": [{"quote": quote}]})
+        ),
+    )
+    cfg = _ic_enabled_cfg(cfg_dict)
+    entries = [strategy_module.Entry(
+        ticker="AAPL", qty=10, close_price=10.0, venue_code="XNAS",
+        candidate=strategy_module.Candidate("AAPL", 10.0, 9.0),
+    )]
+    out = strategy_module.filter_by_intraday_confirmation(
+        entries, cfg, http, "k",
+    )
+    assert out == []
+
+
+def test_intraday_confirmation_rejects_wide_spread(
+    strategy_module, cfg_dict,
+):
+    """3% spread vs the 2% cap → skip."""
+    quote = {
+        "bid": "10.00", "ask": "10.30", "last": "10.10",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    http = strategy_module.make_http_client(
+        "http://x",
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json={"data": [{"quote": quote}]})
+        ),
+    )
+    cfg = _ic_enabled_cfg(cfg_dict)
+    entries = [strategy_module.Entry(
+        ticker="AAPL", qty=10, close_price=10.0, venue_code="XNAS",
+        candidate=strategy_module.Candidate("AAPL", 10.0, 9.0),
+    )]
+    out = strategy_module.filter_by_intraday_confirmation(
+        entries, cfg, http, "k",
+    )
+    assert out == []
+
+
+def test_intraday_confirmation_rejects_stale_quote(
+    strategy_module, cfg_dict,
+):
+    """Quote older than max_quote_age_seconds → skip."""
+    old_ts = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    quote = {
+        "bid": "10.10", "ask": "10.20", "last": "10.15", "timestamp": old_ts,
+    }
+    http = strategy_module.make_http_client(
+        "http://x",
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json={"data": [{"quote": quote}]})
+        ),
+    )
+    cfg = _ic_enabled_cfg(cfg_dict)  # max_quote_age_seconds=60
+    entries = [strategy_module.Entry(
+        ticker="AAPL", qty=10, close_price=10.0, venue_code="XNAS",
+        candidate=strategy_module.Candidate("AAPL", 10.0, 9.0),
+    )]
+    out = strategy_module.filter_by_intraday_confirmation(
+        entries, cfg, http, "k",
+    )
+    assert out == []
+
+
+def test_intraday_confirmation_skips_when_quote_endpoint_errors(
+    strategy_module, cfg_dict,
+):
+    """A 500 from /api/v2/quotes → can't confirm → skip the ticker
+    rather than waving it through unconfirmed."""
+    http = strategy_module.make_http_client(
+        "http://x",
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(500, json={"error": "down"})
+        ),
+    )
+    cfg = _ic_enabled_cfg(cfg_dict)
+    entries = [strategy_module.Entry(
+        ticker="AAPL", qty=10, close_price=10.0, venue_code="XNAS",
+        candidate=strategy_module.Candidate("AAPL", 10.0, 9.0),
+    )]
+    out = strategy_module.filter_by_intraday_confirmation(
+        entries, cfg, http, "k",
+    )
+    assert out == []
+
+
+def test_intraday_window_elapsed_returns_false_before_window(
+    strategy_module, cfg_dict,
+):
+    """At session_start + 2min with window_minutes=5, the window
+    has NOT elapsed; entry pass should defer."""
+    cfg = _ic_enabled_cfg(cfg_dict, window_minutes=5)
+    today = date(2026, 5, 5)
+    # session start 09:30 ET; 2 min after = 09:32 ET = 13:32 UTC.
+    et = pytz.timezone("America/New_York")
+    now = et.localize(datetime(2026, 5, 5, 9, 32)).astimezone(timezone.utc)
+    assert strategy_module._intraday_window_elapsed(cfg, now, today) is False
+
+
+def test_intraday_window_elapsed_returns_true_after_window(
+    strategy_module, cfg_dict,
+):
+    cfg = _ic_enabled_cfg(cfg_dict, window_minutes=5)
+    today = date(2026, 5, 5)
+    et = pytz.timezone("America/New_York")
+    now = et.localize(datetime(2026, 5, 5, 9, 38)).astimezone(timezone.utc)
+    assert strategy_module._intraday_window_elapsed(cfg, now, today) is True
+
+
+def test_intraday_window_zero_minutes_always_elapsed(
+    strategy_module, cfg_dict,
+):
+    """window_minutes=0 = disabled gate. _intraday_window_elapsed
+    should always return True."""
+    cfg = _ic_enabled_cfg(cfg_dict, window_minutes=0)
+    et = pytz.timezone("America/New_York")
+    pre_open = et.localize(datetime(2026, 5, 5, 7, 0)).astimezone(timezone.utc)
+    assert strategy_module._intraday_window_elapsed(
+        cfg, pre_open, date(2026, 5, 5),
+    ) is True
 
 
 # ---------------------------------------------------------------- Item 4 actual_fill mode

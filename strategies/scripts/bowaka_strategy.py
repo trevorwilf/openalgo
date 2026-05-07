@@ -31,7 +31,7 @@ import signal
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time as _dtime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, TypedDict
@@ -662,6 +662,160 @@ def _bracket_pricing_mode(cfg: dict) -> str:
             f"{sorted(BRACKET_PRICING_MODES)}; got {mode!r}"
         )
     return mode
+
+
+# ---------------------------------------------------------------- Item 9 intraday confirmation
+
+
+def _intraday_confirmation_cfg(cfg: dict) -> dict:
+    return ((cfg.get("entry") or {}).get("intraday_confirmation") or {})
+
+
+def _intraday_window_elapsed(cfg: dict, now_utc: datetime, today_et: date) -> bool:
+    """Return True if at least ``window_minutes`` have elapsed since
+    today's session start. ``window_minutes <= 0`` always returns True
+    (gate disabled)."""
+    import pytz  # already a strategy dependency; keep lazy to match the rest of the file
+
+    ic = _intraday_confirmation_cfg(cfg)
+    window_min = float(ic.get("window_minutes") or 0)
+    if window_min <= 0:
+        return True
+    session = cfg.get("session") or {}
+    start_str = session.get("start") or "09:30"
+    tz_name = session.get("timezone") or "America/New_York"
+    try:
+        h, m = (int(p) for p in start_str.split(":")[:2])
+    except Exception:
+        h, m = 9, 30
+    tz = pytz.timezone(tz_name)
+    session_start = tz.localize(datetime.combine(today_et, _dtime(h, m)))
+    now_local = now_utc.astimezone(tz)
+    return (now_local - session_start) >= timedelta(minutes=window_min)
+
+
+def _fetch_quote(
+    entry: Entry,
+    http: httpx.Client,
+    api_key: str,
+) -> dict[str, Any] | None:
+    """POST /api/v2/quotes for a single instrument. Returns the quote
+    dict on success or None on any failure — callers treat None as
+    "can't confirm, skip the entry"."""
+    body = {
+        "apikey": api_key,
+        "instruments": [{
+            "venue_code": entry.venue_code,
+            "canonical_symbol": entry.ticker,
+        }],
+    }
+    try:
+        r = http.post("/api/v2/quotes", json=body, headers=_api_headers(api_key))
+    except httpx.HTTPError as e:
+        LOG.warning("intraday quote fetch failed for %s: %s", entry.ticker, e)
+        return None
+    if r.status_code != 200:
+        LOG.warning(
+            "intraday quote fetch returned %d for %s: %s",
+            r.status_code, entry.ticker, (r.text or "")[:200],
+        )
+        return None
+    try:
+        rows = r.json().get("data") or []
+    except ValueError:
+        return None
+    if not rows:
+        return None
+    return (rows[0] or {}).get("quote") or {}
+
+
+def _confirm_entry(
+    entry: Entry,
+    cfg_ic: dict,
+    quote: dict[str, Any],
+    *,
+    now_utc: datetime,
+) -> tuple[bool, str | None]:
+    """Apply the intraday gates against ``quote``. Returns
+    ``(passed, fail_reason)``. fail_reason is None on pass and a
+    short label on fail (used in logs and tests)."""
+    try:
+        bid = float(quote.get("bid") or 0)
+        ask = float(quote.get("ask") or 0)
+    except (TypeError, ValueError):
+        return False, "bad_bid_ask"
+    if bid <= 0 or ask <= 0 or ask <= bid:
+        return False, "no_quote"
+    mid = (bid + ask) / 2.0
+
+    max_spread = float(cfg_ic.get("max_spread_pct") or 0)
+    if max_spread > 0 and (ask - bid) / mid > max_spread:
+        return False, f"spread>{max_spread:.4f}"
+
+    max_age_s = float(cfg_ic.get("max_quote_age_seconds") or 0)
+    if max_age_s > 0:
+        ts = quote.get("timestamp")
+        if isinstance(ts, str):
+            try:
+                quote_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                if quote_dt.tzinfo is None:
+                    quote_dt = quote_dt.replace(tzinfo=timezone.utc)
+                age_s = (now_utc - quote_dt).total_seconds()
+                if age_s > max_age_s:
+                    return False, f"quote_age>{max_age_s:.0f}s"
+            except ValueError:
+                # Unparseable timestamp — be conservative and skip.
+                return False, "bad_quote_timestamp"
+
+    band = cfg_ic.get("price_band") or {}
+    max_above = band.get("max_pct_above_close")
+    min_below = band.get("min_pct_below_close")
+    if max_above is not None and entry.close_price > 0:
+        if mid > entry.close_price * (1.0 + float(max_above)):
+            return False, f"chase>{max_above}"
+    if min_below is not None and entry.close_price > 0:
+        if mid < entry.close_price * (1.0 + float(min_below)):
+            return False, f"failure<{min_below}"
+
+    return True, None
+
+
+def filter_by_intraday_confirmation(
+    entries: list[Entry],
+    cfg: dict,
+    http: httpx.Client,
+    api_key: str,
+    *,
+    now_utc: datetime | None = None,
+) -> list[Entry]:
+    """Item 9: gate each entry on a fresh quote. Skips a name when
+    spread is too wide, the quote is stale, or the live price is
+    outside the configured band relative to candidate.close. Returns
+    the filtered list. When the gate is disabled (``enabled: false``
+    or empty config) returns the input unchanged."""
+    ic = _intraday_confirmation_cfg(cfg)
+    if not ic.get("enabled"):
+        return entries
+    now_utc = now_utc or datetime.now(timezone.utc)
+    out: list[Entry] = []
+    for entry in entries:
+        quote = _fetch_quote(entry, http, api_key)
+        if quote is None:
+            LOG.info(
+                "intraday_confirmation: %s — no quote available, skipping",
+                entry.ticker,
+            )
+            continue
+        passed, reason = _confirm_entry(entry, ic, quote, now_utc=now_utc)
+        if passed:
+            out.append(entry)
+        else:
+            LOG.info(
+                "intraday_confirmation: %s rejected (%s) bid=%s ask=%s",
+                entry.ticker, reason,
+                quote.get("bid"), quote.get("ask"),
+            )
+    return out
 
 
 def submit_entry(
@@ -2194,6 +2348,22 @@ def run_session_entry_pass(
         LOG.exception("could not fetch equity: %s", e)
         return
 
+    # Item 9: intraday confirmation gate. When enabled, the entry pass
+    # waits until ``window_minutes`` after session start so opening-
+    # print noise can settle. We use the same Item-5 mechanism (return
+    # without advancing session_date) so the next tick retries.
+    if _intraday_confirmation_cfg(cfg).get("enabled"):
+        if not _intraday_window_elapsed(
+            cfg, datetime.now(timezone.utc), today_et,
+        ):
+            ic = _intraday_confirmation_cfg(cfg)
+            LOG.info(
+                "intraday_confirmation: window_minutes=%s not yet elapsed; "
+                "deferring entry pass to next tick",
+                ic.get("window_minutes"),
+            )
+            return
+
     candidates_path = _resolve_path(cfg, "candidates_path")
     handshake = cfg.get("prefilter_handshake", {}) or {}
     try:
@@ -2224,6 +2394,11 @@ def run_session_entry_pass(
     )
     LOG.info("Selected %d entries: %s", len(entries),
              [e.ticker for e in entries])
+
+    # Item 9: live-quote gate per ticker. When disabled this is a
+    # pass-through.
+    entries = filter_by_intraday_confirmation(entries, cfg, http, api_key)
+    LOG.info("After intraday confirmation: %d entries", len(entries))
 
     if dry_run:
         LOG.info("dry-run: not submitting entry orders")
