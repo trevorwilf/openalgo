@@ -1668,15 +1668,22 @@ def reconcile_at_startup(
     summary_path: Path,
 ) -> dict[str, Any]:
     """Bring state in line with broker reality. Runs once before the
-    main loop. Returns a summary dict for logging."""
+    main loop. Returns a summary dict for logging.
+
+    Item 6 fix: even when local state is empty we still fetch broker
+    positions so an untracked broker position (e.g., user moved
+    state.json aside, deployed a fresh checkout, or the strategy
+    crashed mid-entry) surfaces as an ``untracked`` warning. Previously
+    the function returned early on empty state and silently never
+    looked at the broker — directly contradicting the runbook claim
+    that fresh state surfaces untracked broker positions.
+    """
     summary = {
         "qty_corrected": [], "closed_externally": [], "untracked": [],
         "child_status_corrected": [], "pending_signal_fade_resolved": [],
     }
     open_positions = state.get("open_positions") or {}
-    if not open_positions and not state.get("pending_signal_fade_exits"):
-        LOG.info("reconciliation: empty state, fresh start")
-        return summary
+    pending_signal_fade = state.get("pending_signal_fade_exits") or {}
 
     try:
         broker_positions = fetch_positions(http, api_key)
@@ -1688,6 +1695,12 @@ def reconcile_at_startup(
         broker_all_orders = fetch_open_orders(http, api_key, status="all")
     except Exception as e:
         LOG.exception("reconcile: orders fetch failed: %s", e)
+        return summary
+
+    # Empty local state but no broker positions either → genuine
+    # fresh start. Log and return after the broker check completed.
+    if not open_positions and not pending_signal_fade and not broker_positions:
+        LOG.info("reconciliation: empty state + no broker positions; fresh start")
         return summary
 
     # Position keys vary by adapter — try canonical_symbol first.

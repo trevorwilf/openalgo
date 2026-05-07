@@ -184,6 +184,57 @@ def test_reconcile_warns_on_untracked_broker_position(
     assert "MSFT" not in state["open_positions"]  # we don't auto-claim
 
 
+def test_reconcile_walks_broker_when_state_is_empty(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Item 6 regression: an EMPTY local state must still fetch broker
+    positions so an untracked broker position (e.g., user moved
+    state.json aside) surfaces as a warning. The runbook documents
+    this exact behavior — and the function used to early-return on
+    empty state, contradicting it."""
+    state = strategy_module.blank_state()
+    assert not state.get("open_positions")
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+
+    routes = {
+        ("GET", "/api/v2/positions"): lambda r: httpx.Response(200, json={"data": {"positions": [
+            {"canonical_symbol": "GHOST", "quantity": "10"},
+        ]}}),
+        ("GET", "/api/v2/orders"): lambda r: httpx.Response(200, json={"data": {"orders": []}}),
+    }
+    http = strategy_module.make_http_client("http://x", transport=_make_handler(routes))
+    summary = strategy_module.reconcile_at_startup(
+        state, http, "k", state_path=state_path, summary_path=summary_path,
+    )
+    assert "GHOST" in summary["untracked"], (
+        "fresh state must surface broker positions as untracked "
+        "warnings; runbook documents this and Item 6 fix removes "
+        "the early-return that masked it"
+    )
+    assert "GHOST" not in state["open_positions"]
+
+
+def test_reconcile_empty_state_no_broker_positions_is_clean_fresh_start(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Empty state + no broker positions → genuine fresh start (no
+    warnings)."""
+    state = strategy_module.blank_state()
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+    routes = {
+        ("GET", "/api/v2/positions"): lambda r: httpx.Response(200, json={"data": {"positions": []}}),
+        ("GET", "/api/v2/orders"): lambda r: httpx.Response(200, json={"data": {"orders": []}}),
+    }
+    http = strategy_module.make_http_client("http://x", transport=_make_handler(routes))
+    summary = strategy_module.reconcile_at_startup(
+        state, http, "k", state_path=state_path, summary_path=summary_path,
+    )
+    assert summary["untracked"] == []
+    assert summary["closed_externally"] == []
+
+
 def test_reconcile_child_order_filled_externally(
     strategy_module, cfg_with_paths, tmp_path,
 ):
