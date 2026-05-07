@@ -942,7 +942,10 @@ def test_submit_entry_candidate_close_routes_to_otoco(
     )
     assert sent_paths == [("POST", "/api/v2/orders/combo")]
     pos = state["open_positions"]["AAPL"]
-    assert pos.get("bracket_pricing_mode") is None  # legacy mode doesn't stamp it
+    # The analytic-logging fields are now stamped in BOTH modes so the
+    # opened/closure jsonl records carry comparable shape across the
+    # two bracket pricing modes.
+    assert pos.get("bracket_pricing_mode") == "candidate_close"
 
 
 def test_submit_entry_unknown_mode_raises(strategy_module, cfg_dict, tmp_path):

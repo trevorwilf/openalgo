@@ -279,6 +279,7 @@ def reset_for_new_session(
     # Phase 3: dedupe flags are per-day.
     state.pop("signal_fade_evaluated_for_date", None)
     state.pop("summary_written_for_date", None)
+    state.pop("daily_marks_written_for_date", None)
 
 
 # ---------------------------------------------------------------- session
@@ -560,6 +561,11 @@ class Entry:
     close_price: float
     venue_code: str
     candidate: Candidate
+    # Captured for the ``opened`` jsonl record so the analyst can see
+    # the sizing rationale at the moment of submission. None when the
+    # entry was constructed by older callers / tests that didn't supply
+    # it; the opened-record writer falls back gracefully.
+    equity_at_entry: float | None = None
 
 
 def select_entries(
@@ -633,6 +639,7 @@ def select_entries(
             close_price=cand.close,
             venue_code=venue_code,
             candidate=cand,
+            equity_at_entry=equity,
         ))
     return selected
 
@@ -900,10 +907,18 @@ def submit_parent_market_buy(
             "status": "pending_fill",
             "link_id": link_id,
             "venue_code": venue_code,
+            "exchange": entry.candidate.exchange,
             "bracket_pricing_mode": "actual_fill",
             "target_pct": float(cfg["exits"]["target_pct"]),
             "stop_pct": float(cfg["exits"]["stop_pct"]),
             "candidate_close": entry.close_price,
+            "signal_strength": entry.candidate.signal_strength,
+            "equity_at_entry": entry.equity_at_entry,
+            # Tracks worst/best fill-relative excursion across the
+            # position's life. Initialized to entry_price on parent
+            # fill; updated by write_daily_marks each session end.
+            "peak_since_entry": None,
+            "trough_since_entry": None,
         }
         save_state(state, state_path)
         LOG.info("Parent MARKET BUY submitted (actual_fill mode): %s qty=%d parent=%s",
@@ -1194,8 +1209,20 @@ def submit_otoco(
             "status": "pending_fill",
             "link_id": link_id,
             "venue_code": venue_code,
+            "exchange": entry.candidate.exchange,
             "target_price": target,
             "stop_price": stop,
+            # Same analytic-logging fields as submit_parent_market_buy
+            # so the candidate_close mode produces comparable opened
+            # records.
+            "bracket_pricing_mode": "candidate_close",
+            "target_pct": float(cfg["exits"]["target_pct"]),
+            "stop_pct": float(cfg["exits"]["stop_pct"]),
+            "candidate_close": entry.close_price,
+            "signal_strength": entry.candidate.signal_strength,
+            "equity_at_entry": entry.equity_at_entry,
+            "peak_since_entry": None,
+            "trough_since_entry": None,
         }
         save_state(state, state_path)
         LOG.info("OTOCO submitted: %s qty=%d parent=%s",
@@ -1402,6 +1429,12 @@ def poll_fills(
                     pos["entry_price"] = filled_avg_f or pos.get("entry_price")
                     if filled_qty > 0:
                         pos["qty"] = filled_qty
+                    # Initialize MFE/MAE excursion tracking at the
+                    # actual fill price. write_daily_marks updates these
+                    # at each session end with the day's high/low.
+                    if pos.get("entry_price") is not None:
+                        pos["peak_since_entry"] = float(pos["entry_price"])
+                        pos["trough_since_entry"] = float(pos["entry_price"])
                     dirty = True
                     events.append(ev)
             elif status in _DEAD or canonical in {s.upper() for s in _DEAD}:
@@ -1411,6 +1444,9 @@ def poll_fills(
                     pos["status"] = "filled"
                     pos["qty"] = filled_qty
                     pos["entry_price"] = filled_avg_f or pos.get("entry_price")
+                    if pos.get("entry_price") is not None:
+                        pos["peak_since_entry"] = float(pos["entry_price"])
+                        pos["trough_since_entry"] = float(pos["entry_price"])
                     LOG.warning(
                         "parent %s ended in %s with partial fill %d shares",
                         ticker, canonical, filled_qty,
@@ -1766,6 +1802,221 @@ def run_signal_fade_pass(
     return faded
 
 
+# -------------------------------------------------------- daily marks (analytics)
+
+
+def write_daily_marks(
+    cfg: dict,
+    state: State,
+    http: httpx.Client,
+    api_key: str,
+    *,
+    today_et: date,
+    summary_path: Path,
+    state_path: Path,
+    now_utc: datetime,
+) -> list[str]:
+    """End-of-session analytic snapshot. For every filled position
+    fetch today's daily bar, append a ``daily_mark`` record to the
+    daily-summary jsonl, and update the position's
+    ``peak_since_entry`` / ``trough_since_entry`` for MFE/MAE
+    tracking.
+
+    The record is purpose-built for offline tuning: it carries the
+    day's OHLCV, the unrealized P&L at close, the running excursion,
+    today's recomputed signal features, and which signal-fade gates
+    passed/failed. Combined with the ``opened`` and ``closure``
+    records, an analyst can reconstruct the full lifecycle of every
+    trade and slice by signal regime, hold duration, gap-at-open,
+    etc.
+
+    Idempotent — once-per-day, deduped via
+    ``state.daily_marks_written_for_date``. Returns the list of
+    tickers that received a mark this call (empty when already
+    written today or no filled positions exist).
+    """
+    today_iso = today_et.isoformat()
+    if state.get("daily_marks_written_for_date") == today_iso:
+        return []
+    open_positions = dict(state.get("open_positions") or {})
+    if not open_positions:
+        # Nothing to mark, but still set the dedupe so a no-position
+        # day doesn't re-attempt every tick.
+        state["daily_marks_written_for_date"] = today_iso
+        save_state(state, state_path)
+        return []
+
+    marked: list[str] = []
+    for ticker, pos in open_positions.items():
+        if pos.get("status") != "filled":
+            continue
+        venue_code = pos.get("venue_code") or cfg["sizing"]["default_venue_code"]
+        try:
+            bars = fetch_daily_bars_for_signal_fade(
+                ticker, venue_code, http, api_key,
+                lookback_calendar_days=45, end=now_utc,
+            )
+        except Exception as e:
+            LOG.warning(
+                "daily_mark bars fetch failed for %s: %s — skipping today",
+                ticker, e,
+            )
+            continue
+        if bars.empty:
+            LOG.warning("daily_mark: no bars for %s — skipping today", ticker)
+            continue
+
+        last = bars.iloc[-1]
+        try:
+            day_open = float(last.get("open"))
+            day_high = float(last.get("high"))
+            day_low = float(last.get("low"))
+            day_close = float(last.get("close"))
+            day_volume = float(last.get("volume"))
+        except (TypeError, ValueError):
+            LOG.warning(
+                "daily_mark: bad bar shape for %s; skipping today", ticker,
+            )
+            continue
+
+        # Update running peak/trough for MFE/MAE.
+        entry_price_v = pos.get("entry_price")
+        try:
+            entry_price = float(entry_price_v) if entry_price_v is not None else None
+        except (TypeError, ValueError):
+            entry_price = None
+        if entry_price is None or entry_price <= 0:
+            LOG.warning(
+                "daily_mark: %s has no entry_price yet (status=%s); "
+                "writing mark without unrealized pnl",
+                ticker, pos.get("status"),
+            )
+        prev_peak = pos.get("peak_since_entry")
+        prev_trough = pos.get("trough_since_entry")
+        try:
+            prev_peak_f = float(prev_peak) if prev_peak is not None else None
+            prev_trough_f = float(prev_trough) if prev_trough is not None else None
+        except (TypeError, ValueError):
+            prev_peak_f = prev_trough_f = None
+        # Default both anchors to entry_price when missing (pre-this-
+        # commit positions don't have them); subsequent passes update.
+        if prev_peak_f is None and entry_price is not None:
+            prev_peak_f = entry_price
+        if prev_trough_f is None and entry_price is not None:
+            prev_trough_f = entry_price
+        new_peak = max(prev_peak_f, day_high) if prev_peak_f is not None else day_high
+        new_trough = min(prev_trough_f, day_low) if prev_trough_f is not None else day_low
+        pos["peak_since_entry"] = new_peak
+        pos["trough_since_entry"] = new_trough
+
+        qty = int(pos.get("qty") or 0)
+        unrealized_pnl = (
+            (day_close - entry_price) * qty
+            if entry_price is not None else None
+        )
+        unrealized_pnl_pct = (
+            (day_close - entry_price) / entry_price
+            if entry_price is not None and entry_price > 0 else None
+        )
+        mfe_dollar = (
+            (new_peak - entry_price) * qty
+            if entry_price is not None and new_peak is not None else None
+        )
+        mae_dollar = (
+            (new_trough - entry_price) * qty
+            if entry_price is not None and new_trough is not None else None
+        )
+
+        # Days held since entry (NYSE trading days).
+        entry_iso = pos.get("entry_timestamp") or ""
+        try:
+            days_held = trading_days_since(entry_iso, today_et) if entry_iso else None
+        except Exception:
+            days_held = None
+
+        # Recompute today's signal features on the fresh bar window
+        # so the analyst can see how the signal evolved relative to
+        # entry. Skip when not enough history for the prefilter math.
+        current_features: dict[str, float] | None = None
+        signal_fade_gates: dict[str, dict[str, Any]] | None = None
+        if len(bars) >= int(cfg["indicators"]["lookback_days"]):
+            try:
+                current_features = compute_features_single(bars, cfg)
+                # Per-gate breakdown (matches signal_passes_gates).
+                gates_cfg = cfg.get("signal_gates", {}) or {}
+                spec = [
+                    ("rvol_min", "rvol"),
+                    ("atr_pct_min", "atr_pct"),
+                    ("range_expansion_min", "range_expansion"),
+                    ("close_location_min", "close_location"),
+                    ("ema_distance_min", "ema_distance"),
+                    ("ema_slope_min", "ema_slope"),
+                ]
+                signal_fade_gates = {}
+                for cfg_key, feat_key in spec:
+                    thr = gates_cfg.get(cfg_key)
+                    val = current_features.get(feat_key)
+                    if thr is None:
+                        signal_fade_gates[feat_key] = {
+                            "value": val, "threshold": None, "passed": True,
+                        }
+                    else:
+                        signal_fade_gates[feat_key] = {
+                            "value": val,
+                            "threshold": thr,
+                            "passed": val is not None and val >= thr,
+                        }
+            except Exception as e:
+                LOG.warning(
+                    "daily_mark: feature recompute failed for %s: %s", ticker, e,
+                )
+
+        record = {
+            "record_type": "daily_mark",
+            "ticker": ticker,
+            "session_date": today_iso,
+            "days_held": days_held,
+            "open": day_open,
+            "high": day_high,
+            "low": day_low,
+            "mark_price": day_close,
+            "volume": day_volume,
+            "qty": qty,
+            "entry_price": entry_price,
+            "unrealized_pnl": unrealized_pnl,
+            "unrealized_pnl_pct": unrealized_pnl_pct,
+            "peak_since_entry": new_peak,
+            "trough_since_entry": new_trough,
+            "mfe_dollar": mfe_dollar,
+            "mae_dollar": mae_dollar,
+            "target_price": pos.get("target_price"),
+            "stop_price": pos.get("stop_price"),
+            "current_features": current_features,
+            "signal_fade_gates": signal_fade_gates,
+            "venue_code": pos.get("venue_code"),
+            "exchange": pos.get("exchange"),
+            "link_id": pos.get("link_id"),
+        }
+        try:
+            append_closure_record(summary_path, record)
+        except Exception as e:
+            LOG.exception(
+                "could not append daily_mark for %s: %s", ticker, e,
+            )
+            continue
+        marked.append(ticker)
+        LOG.info(
+            "daily_mark %s d=%s close=%.4f unrealized=%s peak=%.4f trough=%.4f",
+            ticker, days_held, day_close,
+            f"{unrealized_pnl:.2f}" if unrealized_pnl is not None else "?",
+            new_peak, new_trough,
+        )
+
+    state["daily_marks_written_for_date"] = today_iso
+    save_state(state, state_path)
+    return marked
+
+
 # ---------------------------------------------------------------- closures
 
 
@@ -1787,30 +2038,82 @@ def close_position(
     exit_price: float,
     reason: str,
 ) -> dict[str, Any]:
-    """Compute realized PnL, append jsonl, drop from state."""
+    """Compute realized PnL, append jsonl, drop from state.
+
+    The closure record carries the analytic-enrichment fields the
+    operator uses to tune target_pct / stop_pct / max_hold_days /
+    signal_gates: hold duration, max-favorable / max-adverse
+    excursion, peak / trough since entry, plus the entry features.
+    """
     pos = (state.get("open_positions") or {}).get(ticker)
     if pos is None:
         return {}
     entry_price = float(pos.get("entry_price") or 0.0)
     qty = int(pos.get("qty") or 0)
     realized = (exit_price - entry_price) * qty
+    entry_iso = pos.get("entry_timestamp")
+    exit_iso = datetime.now(timezone.utc).isoformat()
+    # Hold duration in NYSE trading days. Falls back to None when
+    # entry_timestamp is missing (very old states).
+    hold_trading_days: int | None = None
+    if entry_iso:
+        try:
+            today_et = _to_eastern(datetime.now(timezone.utc)).date()
+            hold_trading_days = trading_days_since(entry_iso, today_et)
+        except Exception:
+            hold_trading_days = None
+    entry_to_exit_pct = (
+        (exit_price - entry_price) / entry_price
+        if entry_price > 0 else None
+    )
+    peak = pos.get("peak_since_entry")
+    trough = pos.get("trough_since_entry")
+    try:
+        peak_f = float(peak) if peak is not None else None
+        trough_f = float(trough) if trough is not None else None
+    except (TypeError, ValueError):
+        peak_f = trough_f = None
+    mfe_dollar = (peak_f - entry_price) * qty if (peak_f is not None and entry_price > 0) else None
+    mae_dollar = (trough_f - entry_price) * qty if (trough_f is not None and entry_price > 0) else None
+    mfe_pct = (peak_f - entry_price) / entry_price if (peak_f is not None and entry_price > 0) else None
+    mae_pct = (trough_f - entry_price) / entry_price if (trough_f is not None and entry_price > 0) else None
+
     record = {
         "record_type": "closure",
         "ticker": ticker,
         "qty": qty,
         "entry_price": entry_price,
         "exit_price": exit_price,
-        "entry_timestamp": pos.get("entry_timestamp"),
-        "exit_timestamp": datetime.now(timezone.utc).isoformat(),
+        "entry_timestamp": entry_iso,
+        "exit_timestamp": exit_iso,
         "realized_pnl": realized,
         "reason": reason,
         "entry_features": pos.get("entry_features", {}),
+        "venue_code": pos.get("venue_code"),
+        "exchange": pos.get("exchange"),
+        "signal_strength": pos.get("signal_strength"),
+        "candidate_close": pos.get("candidate_close"),
+        "target_pct": pos.get("target_pct"),
+        "stop_pct": pos.get("stop_pct"),
+        "target_price": pos.get("target_price"),
+        "stop_price": pos.get("stop_price"),
+        "bracket_pricing_mode": pos.get("bracket_pricing_mode"),
+        "hold_trading_days": hold_trading_days,
+        "entry_to_exit_pct": entry_to_exit_pct,
+        "peak_since_entry": peak_f,
+        "trough_since_entry": trough_f,
+        "mfe_dollar": mfe_dollar,
+        "mae_dollar": mae_dollar,
+        "mfe_pct": mfe_pct,
+        "mae_pct": mae_pct,
+        "link_id": pos.get("link_id"),
     }
     append_closure_record(summary_path, record)
     state["open_positions"].pop(ticker, None)
     state.get("pending_signal_fade_exits", {}).pop(ticker, None)
     save_state(state, state_path)
-    LOG.info("closed %s: %s pnl=%.2f", ticker, reason, realized)
+    LOG.info("closed %s: %s pnl=%.2f hold=%s mfe=%s mae=%s",
+             ticker, reason, realized, hold_trading_days, mfe_dollar, mae_dollar)
     return record
 
 
@@ -1848,16 +2151,54 @@ def process_fill_events_for_closures(
                 pos.get("entry_timestamp")
                 or datetime.now(timezone.utc).isoformat()
             )
+            entry_price = float(ev.filled_avg_price or 0.0)
+            qty = int(pos.get("qty") or ev.filled_qty or 0)
+            notional = entry_price * qty if entry_price > 0 else None
+            equity_at_entry = pos.get("equity_at_entry")
+            try:
+                equity_at_entry = float(equity_at_entry) if equity_at_entry is not None else None
+            except (TypeError, ValueError):
+                equity_at_entry = None
+            notional_pct_of_equity = (
+                (notional / equity_at_entry)
+                if (notional is not None and equity_at_entry and equity_at_entry > 0)
+                else None
+            )
+            candidate_close = pos.get("candidate_close")
+            try:
+                candidate_close = float(candidate_close) if candidate_close is not None else None
+            except (TypeError, ValueError):
+                candidate_close = None
+            gap_at_open_pct = (
+                ((entry_price - candidate_close) / candidate_close)
+                if (candidate_close and candidate_close > 0 and entry_price > 0)
+                else None
+            )
+            ic_cfg = _intraday_confirmation_cfg(cfg) if "_intraday_confirmation_cfg" in globals() else {}
             try:
                 append_closure_record(summary_path, {
                     "record_type": "opened",
                     "ticker": ev.ticker,
-                    "qty": int(pos.get("qty") or ev.filled_qty or 0),
-                    "entry_price": float(ev.filled_avg_price or 0.0),
+                    "qty": qty,
+                    "entry_price": entry_price,
                     "entry_timestamp": entry_iso,
                     "venue_code": pos.get("venue_code"),
+                    "exchange": pos.get("exchange"),
                     "entry_features": pos.get("entry_features", {}),
                     "link_id": pos.get("link_id"),
+                    # --- Item-(post-9) analytic enrichment ---
+                    "signal_strength": pos.get("signal_strength"),
+                    "candidate_close": candidate_close,
+                    "gap_at_open_pct": gap_at_open_pct,
+                    "target_pct": pos.get("target_pct"),
+                    "stop_pct": pos.get("stop_pct"),
+                    "target_price": pos.get("target_price"),
+                    "stop_price": pos.get("stop_price"),
+                    "bracket_pricing_mode": pos.get("bracket_pricing_mode"),
+                    "equity_at_entry": equity_at_entry,
+                    "notional": notional,
+                    "notional_pct_of_equity": notional_pct_of_equity,
+                    "intraday_confirmation_enabled": bool(ic_cfg.get("enabled")) if ic_cfg else False,
                 })
             except Exception as e:
                 LOG.exception(
@@ -2576,6 +2917,22 @@ def run_loop(
             sf_eval = cfg["session"].get("signal_fade_eval_time", "16:05")
             if kill not in (KillLevel.L2_SOFT,) and is_signal_fade_window(now, sf_eval):
                 today_et = _to_eastern(now).date()
+                # Analytic logging: write today's mark for every
+                # filled position BEFORE the signal-fade exit pass.
+                # Doing this first means a position that signal-fades
+                # this tick still gets a closing mark recorded with
+                # today's high/low/close + fresh feature values, which
+                # the analyst needs to study why the gates failed.
+                try:
+                    write_daily_marks(
+                        cfg, state, http_client, api_key,
+                        today_et=today_et,
+                        summary_path=summary_path,
+                        state_path=state_path,
+                        now_utc=now,
+                    )
+                except Exception as e:
+                    LOG.exception("daily_mark pass error: %s", e)
                 try:
                     run_signal_fade_pass(
                         cfg, state, http_client, api_key,
