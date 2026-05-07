@@ -156,6 +156,93 @@ def setup_logging(cfg: dict) -> None:
     )
 
 
+# Item 8 — gate-drift handshake. The reviewer's exact ask:
+#
+#   "either pin the expected prefilter hash or load the prefilter
+#    config at strategy startup and compare the signal gates and
+#    indicators."
+#
+# Auto-pinning is brittle (drifts silently); we go with the second
+# option. At startup we open the prefilter yaml and assert that every
+# signal_gates / indicators key has the same value on both sides.
+# Any mismatch raises HandshakeMismatch so the operator notices on
+# the very first tick.
+class HandshakeMismatch(RuntimeError):
+    """Raised when the strategy yaml's signal_gates / indicators
+    don't match the prefilter yaml's. Means the EOD signal-fade
+    re-evaluation would use thresholds the prefilter never applied
+    when picking candidates."""
+
+
+def verify_prefilter_handshake(
+    cfg: dict,
+    *,
+    prefilter_yaml_path: str | Path | None = None,
+) -> None:
+    """Cross-check that the strategy and prefilter agree on signal
+    thresholds and indicator windows. Item 8 (handshake): even with
+    ``prefilter_handshake.expected_config_hash=null`` the operator
+    gets a loud failure when the two yamls drift.
+
+    The path is resolved as:
+      1. ``cfg.prefilter_handshake.prefilter_yaml_path`` if set
+      2. ``prefilter_yaml_path`` keyword (test override)
+      3. a sibling file at ``strategies/scripts/bowaka_prefilter.yaml``
+    Missing prefilter yaml → log a warning and return (don't fail
+    just because someone moved files around).
+    """
+    handshake_cfg = cfg.get("prefilter_handshake") or {}
+    path = (
+        handshake_cfg.get("prefilter_yaml_path")
+        or prefilter_yaml_path
+        or (Path(__file__).resolve().parent / "bowaka_prefilter.yaml")
+    )
+    p = Path(path)
+    if not p.exists():
+        LOG.warning(
+            "verify_prefilter_handshake: %s not found — skipping gate cross-check. "
+            "Set cfg.prefilter_handshake.prefilter_yaml_path to enable.", p,
+        )
+        return
+
+    with open(p) as f:
+        prefilter_cfg = yaml.safe_load(f) or {}
+
+    pf_signals = (prefilter_cfg.get("signals") or {})
+    st_gates = (cfg.get("signal_gates") or {})
+    pf_inds = (prefilter_cfg.get("indicators") or {})
+    st_inds = (cfg.get("indicators") or {})
+
+    drift: list[str] = []
+    # Compare every key the strategy declares to the matching prefilter
+    # value. Missing prefilter keys are also drift — the prefilter
+    # wasn't gating on something the signal_fade exit re-checks.
+    for k, st_v in st_gates.items():
+        pf_v = pf_signals.get(k)
+        if pf_v != st_v:
+            drift.append(
+                f"signal_gates.{k}: strategy={st_v!r} prefilter={pf_v!r}"
+            )
+    for k, st_v in st_inds.items():
+        pf_v = pf_inds.get(k)
+        if pf_v != st_v:
+            drift.append(
+                f"indicators.{k}: strategy={st_v!r} prefilter={pf_v!r}"
+            )
+
+    if drift:
+        raise HandshakeMismatch(
+            "strategy and prefilter configs disagree — signal-fade "
+            "exits would use different thresholds than the entry "
+            "prefilter:\n  " + "\n  ".join(drift)
+            + "\nFix the drift in either yaml and restart."
+        )
+    LOG.info(
+        "prefilter handshake verified: %d gates + %d indicator settings match",
+        len(st_gates), len(st_inds),
+    )
+
+
 # ---------------------------------------------------------------- state I/O
 
 
@@ -1181,7 +1268,11 @@ def poll_fills(
                 events.append(ev)
 
         elif role in ("target", "stop") and pos is not None:
-            if status in _FILLED:
+            # Item 8 (#6): use the same canonical-or-native filled
+            # check as the parent branch. Translators that only
+            # populate ``canonical_status`` would otherwise miss
+            # child fills entirely.
+            if status in _FILLED or canonical == "FILLED":
                 pos.setdefault("filled_children", {})[role] = {
                     "filled_qty": filled_qty,
                     "filled_avg_price": filled_avg_f,
@@ -1190,7 +1281,7 @@ def poll_fills(
                 events.append(ev)
 
         elif role == "exit" and pos is not None:
-            if status in _FILLED:
+            if status in _FILLED or canonical == "FILLED":
                 pos["exit_fill_price"] = filled_avg_f
                 pos["exit_filled_qty"] = filled_qty
                 # Phase 3 will close the position on this signal.
@@ -1579,9 +1670,13 @@ def process_fill_events_for_closures(
 ) -> list[dict[str, Any]]:
     """Map fill events to closures based on which child filled.
 
-    - target child filled → ``target_hit``
-    - stop child filled   → ``stop_hit``
-    - exit_order_id filled → use the recorded exit reason (time_stop / signal_fade)
+    - parent filled        → ``opened`` jsonl record (Item 8 #8) so
+                              write_session_summary's count_opened
+                              reflects today's actual entries
+    - target child filled  → ``target_hit``
+    - stop child filled    → ``stop_hit``
+    - exit_order_id filled → use the recorded exit reason
+                              (time_stop / signal_fade)
     """
     out: list[dict[str, Any]] = []
     open_positions = state.get("open_positions") or {}
@@ -1589,6 +1684,35 @@ def process_fill_events_for_closures(
         pos = open_positions.get(ev.ticker)
         if pos is None:
             continue
+        if ev.role == "parent" and ev.status == "FILLED":
+            # Append an opened record so the daily summary's
+            # count_opened counts trades that *opened today*, not
+            # "positions still open at session end". A round-trip
+            # (open + close intraday) writes one opened + one closure
+            # → count_opened=1, count_closed=1, both correct.
+            entry_iso = (
+                pos.get("entry_timestamp")
+                or datetime.now(timezone.utc).isoformat()
+            )
+            try:
+                append_closure_record(summary_path, {
+                    "record_type": "opened",
+                    "ticker": ev.ticker,
+                    "qty": int(pos.get("qty") or ev.filled_qty or 0),
+                    "entry_price": float(ev.filled_avg_price or 0.0),
+                    "entry_timestamp": entry_iso,
+                    "venue_code": pos.get("venue_code"),
+                    "entry_features": pos.get("entry_features", {}),
+                    "link_id": pos.get("link_id"),
+                })
+            except Exception as e:
+                LOG.exception(
+                    "could not append opened record for %s: %s", ev.ticker, e,
+                )
+            # Don't `continue` — fall through so a parent fill that
+            # also coincides with a close (rare) still gets handled
+            # below. Currently no other branch matches role="parent"
+            # so this is a no-op, but the structure is forgiving.
         if ev.role == "target" and ev.status in {"FILLED"}:
             price = ev.filled_avg_price or pos.get("target_price") or 0.0
             out.append(close_position(
@@ -1896,7 +2020,14 @@ def execute_kill_l3(
     state_path: Path,
 ) -> list[str]:
     """L3: cancel + market-out every position best-effort, persist, exit 99.
-    Caller is responsible for the actual sys.exit / return 99."""
+    Caller is responsible for the actual sys.exit / return 99.
+
+    Item 8 (#4) fix: also cancels pending parent / child orders for
+    positions that haven't filled yet. Previously L3 only iterated
+    ``status == 'filled'`` and silently left pending orders live —
+    asymmetric with L2 and dangerous in a hard-kill where the operator
+    expects everything torn down.
+    """
     state["kill_switch_state"] = "L3"
     save_state(state, state_path)
     out: list[str] = []
@@ -1910,6 +2041,29 @@ def execute_kill_l3(
                 )
             except Exception:
                 LOG.exception("L3 exit failed for %s — best effort", ticker)
+        elif pos.get("status") != "exiting":
+            # Pending — best-effort cancel of children + parent. Mirrors
+            # L2's cancel logic. Unlike L2 we don't keep the position
+            # with cancel_failed markers; L3's contract is "best
+            # effort, then exit", so we record the attempt and move on.
+            for role in ("target", "stop"):
+                oid = (pos.get("child_order_ids") or {}).get(role)
+                if oid:
+                    try:
+                        cancel_order(oid, http, api_key)
+                    except Exception:
+                        LOG.exception(
+                            "L3 cancel %s child %s failed (best effort)",
+                            ticker, role,
+                        )
+            parent = pos.get("parent_order_id")
+            if parent:
+                try:
+                    cancel_order(parent, http, api_key)
+                except Exception:
+                    LOG.exception(
+                        "L3 cancel parent %s failed (best effort)", ticker,
+                    )
         out.append(ticker)
     save_state(state, state_path)
     return out
@@ -1937,7 +2091,7 @@ def write_session_summary(
         record = {
             "record_type": "session_summary",
             "session_date": today_iso,
-            "count_opened": len(state.get("open_positions") or {}),
+            "count_opened": 0,
             "count_closed": 0,
             "total_realized_pnl": 0.0,
             "by_reason": {},
@@ -1950,6 +2104,12 @@ def write_session_summary(
     by_reason: dict[str, int] = {}
     total_pnl = 0.0
     count_closed = 0
+    # Item 8 (#8): count entries that opened TODAY by walking the
+    # ``opened`` records process_fill_events_for_closures wrote when
+    # parents transitioned to "filled". This counts intraday round-
+    # trips (which the old len(open_positions) missed) and excludes
+    # carryover positions (which the old count over-counted).
+    count_opened = 0
     with open(summary_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -1959,7 +2119,13 @@ def write_session_summary(
                 rec = json.loads(line)
             except ValueError:
                 continue
-            if rec.get("record_type") != "closure":
+            rt = rec.get("record_type")
+            if rt == "opened":
+                ts = rec.get("entry_timestamp") or ""
+                if today_iso in ts:
+                    count_opened += 1
+                continue
+            if rt != "closure":
                 continue
             ts = rec.get("exit_timestamp") or rec.get("entry_timestamp") or ""
             if today_iso not in ts:
@@ -1972,7 +2138,7 @@ def write_session_summary(
     record = {
         "record_type": "session_summary",
         "session_date": today_iso,
-        "count_opened": len(state.get("open_positions") or {}),
+        "count_opened": count_opened,
         "count_closed": count_closed,
         "total_realized_pnl": total_pnl,
         "by_reason": by_reason,
@@ -1980,8 +2146,8 @@ def write_session_summary(
     append_closure_record(summary_path, record)
     state["summary_written_for_date"] = today_iso
     save_state(state, state_path)
-    LOG.info("session summary: closed=%d pnl=%.2f reasons=%s",
-             count_closed, total_pnl, by_reason)
+    LOG.info("session summary: opened=%d closed=%d pnl=%.2f reasons=%s",
+             count_opened, count_closed, total_pnl, by_reason)
     return record
 
 
@@ -2285,6 +2451,16 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(cfg)
     cfg_hash = config_hash(cfg)
     LOG.info("Starting bowaka strategy (config_hash=%s)", cfg_hash)
+
+    # Item 8 (handshake): cross-check signal_gates + indicators against
+    # the prefilter yaml so the EOD signal-fade exits never use
+    # thresholds the prefilter never applied. Failure raises
+    # HandshakeMismatch — operator must reconcile and restart.
+    try:
+        verify_prefilter_handshake(cfg)
+    except HandshakeMismatch as e:
+        LOG.error("prefilter handshake failed: %s", e)
+        return 5
 
     if not os.environ.get("OPENALGO_API_KEY"):
         LOG.error("OPENALGO_API_KEY must be set in env")

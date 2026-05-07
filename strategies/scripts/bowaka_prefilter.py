@@ -338,6 +338,7 @@ def write_output(
     cfg_hash: str,
     *,
     exchanges: dict[str, str] | None = None,
+    as_of_date_override: str | None = None,
 ) -> None:
     out_path = Path(cfg["output"]["candidates_path"])
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -367,8 +368,14 @@ def write_output(
         rows.append(d)
 
     now_utc = datetime.now(timezone.utc)
+    # Item 8 (Critical #5): prefer the explicit as_of_date_override
+    # passed from main() (derived from the latest bar timestamp the
+    # filter actually ran on) over the run date. Holiday / weekend /
+    # data-lag runs would otherwise stamp today as as_of even though
+    # the bars are from yesterday or older — load_candidates would
+    # then accept stale data as if it were fresh.
     payload = {
-        "as_of_date": now_utc.date().isoformat(),
+        "as_of_date": as_of_date_override or now_utc.date().isoformat(),
         "generated_at": now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "config_hash": cfg_hash,
         **counts,
@@ -433,6 +440,31 @@ def main() -> int:
         LOG.error("No bars returned; aborting (not overwriting prior output)")
         return 4
 
+    # Item 8 (Critical #5): derive as_of_date from the latest bar
+    # timestamp (in NYSE-Eastern time) rather than the wall-clock run
+    # date. Holiday / weekend / data-lag runs would otherwise stamp
+    # today as as_of even though the bars are from an earlier session
+    # — load_candidates would then accept stale data.
+    try:
+        ts_index = bars.index.get_level_values("timestamp")
+        latest_bar_ts = ts_index.max()
+        as_of_date_override = (
+            pd.Timestamp(latest_bar_ts)
+              .tz_convert("America/New_York")
+              .date()
+              .isoformat()
+        )
+        LOG.info(
+            "as_of_date derived from latest bar timestamp: %s",
+            as_of_date_override,
+        )
+    except Exception as e:
+        LOG.warning(
+            "could not derive as_of_date from bars (%s); falling back to run date",
+            e,
+        )
+        as_of_date_override = None
+
     features = compute_features(bars, cfg)
     candidates, counts = apply_filters(features, cfg)
 
@@ -441,7 +473,11 @@ def main() -> int:
                  candidates.head(10)[["close", "rvol", "atr_pct", "signal_strength"]])
         return 0
 
-    write_output(candidates, counts, cfg, cfg_hash, exchanges=exchanges)
+    write_output(
+        candidates, counts, cfg, cfg_hash,
+        exchanges=exchanges,
+        as_of_date_override=as_of_date_override,
+    )
     return 0
 
 

@@ -451,6 +451,83 @@ def test_kill_switch_l2_market_outs_all_positions(
     assert len(sells) == 2
 
 
+def test_kill_switch_l3_cancels_pending_parents(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Item 8 (#4) regression: L3 used to ignore pending positions
+    entirely and just exit code 99 with broker orders still live.
+    L3 must mirror L2's pending-cancel logic before exiting."""
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "GHOST": {
+            "parent_order_id": "P-LIVE",
+            "child_order_ids": {"target": "T-1", "stop": "S-1"},
+            "qty": 10, "entry_price": None, "status": "pending_fill",
+            "venue_code": "XNAS",
+        }
+    }
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    cancel_calls: list[str] = []
+
+    def cancel_h(req):
+        cancel_calls.append(req.url.path)
+        return httpx.Response(200, json={})
+
+    http = strategy_module.make_http_client(
+        "http://x",
+        transport=_make_handler({
+            ("DELETE", "/api/v2/orders/"): cancel_h,
+        }),
+    )
+    out = strategy_module.execute_kill_l3(
+        state, cfg_with_paths, http, "k", state_path=state_path,
+    )
+    assert "GHOST" in out
+    # Children + parent all canceled (3 calls: target, stop, parent).
+    assert len(cancel_calls) == 3
+    assert any("/T-1" in p for p in cancel_calls)
+    assert any("/S-1" in p for p in cancel_calls)
+    assert any("/P-LIVE" in p for p in cancel_calls)
+
+
+def test_poll_fills_canonical_status_for_target_child(
+    strategy_module, tmp_path,
+):
+    """Item 8 (#6) regression: a child fill that arrives with
+    ``canonical_status=FILLED`` but ``status`` set to a translator-
+    specific raw value (e.g. ``done``) used to be missed because the
+    target/stop branches only checked the raw status. The canonical
+    check now applies to children + exits too."""
+    transport = httpx.MockTransport(
+        lambda r: httpx.Response(200, json={
+            "data": {"orders": [
+                {"id": "T-1", "status": "done", "canonical_status": "FILLED",
+                 "filled_avg_price": "115.00", "filled_qty": "10"},
+            ], "count": 1},
+        })
+    )
+    http = strategy_module.make_http_client("http://x", transport=transport)
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "AAPL": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "T-1", "stop": "S-1"},
+            "qty": 10, "entry_price": 100.0, "status": "filled",
+            "venue_code": "XNAS",
+        }
+    }
+    events = strategy_module.poll_fills(
+        state, http, "k", state_path=tmp_path / "state.json",
+    )
+    # Target child is recorded as filled even though native status
+    # was "done" rather than the canonical "filled".
+    assert events
+    target_ev = next(e for e in events if e.role == "target")
+    assert target_ev.status == "FILLED"
+    pos = state["open_positions"]["AAPL"]
+    assert "target" in (pos.get("filled_children") or {})
+
+
 def test_kill_switch_l3_immediate_exit(strategy_module, cfg_with_paths, tmp_path):
     state = strategy_module.blank_state()
     state["open_positions"] = {"AAPL": _filled_pos()}
@@ -556,6 +633,100 @@ def test_daily_summary_written_at_session_end(
     assert state["summary_written_for_date"] == today_iso
 
 
+def test_daily_summary_count_opened_walks_jsonl_entries(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Item 8 (#8) regression: count_opened must reflect actual
+    entries opened during the session — including intraday round-
+    trips — not the current open_positions length."""
+    state = strategy_module.blank_state()
+    # Carryover position from yesterday (must NOT be counted as opened today).
+    state["open_positions"] = {
+        "OLD": {"parent_order_id": "P-OLD", "qty": 10, "entry_price": 50.0,
+                "status": "filled",
+                "entry_timestamp": "2026-05-04T13:30:00+00:00"}
+    }
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    today_iso = "2026-05-05"
+    # Three opens today: AAPL (still open), MSFT (round-tripped — also has a
+    # closure record), GOOG (still open).
+    for rec in [
+        {"record_type": "opened", "ticker": "AAPL", "qty": 10,
+         "entry_price": 100.0,
+         "entry_timestamp": today_iso + "T13:30:00+00:00"},
+        {"record_type": "opened", "ticker": "MSFT", "qty": 5,
+         "entry_price": 200.0,
+         "entry_timestamp": today_iso + "T13:31:00+00:00"},
+        {"record_type": "opened", "ticker": "GOOG", "qty": 1,
+         "entry_price": 1000.0,
+         "entry_timestamp": today_iso + "T13:32:00+00:00"},
+        # Intraday round-trip: MSFT closes target_hit.
+        {"record_type": "closure", "ticker": "MSFT", "qty": 5,
+         "entry_price": 200.0, "exit_price": 230.0,
+         "entry_timestamp": today_iso + "T13:31:00+00:00",
+         "exit_timestamp": today_iso + "T15:00:00+00:00",
+         "realized_pnl": 150.0, "reason": "target_hit"},
+        # Yesterday's open (not counted as opened today).
+        {"record_type": "opened", "ticker": "OLD", "qty": 10,
+         "entry_price": 50.0,
+         "entry_timestamp": "2026-05-04T13:30:00+00:00"},
+    ]:
+        with open(summary_path, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+
+    rec = strategy_module.write_session_summary(
+        state, cfg_with_paths,
+        summary_path=summary_path, state_path=state_path,
+        today_iso=today_iso,
+    )
+    # Three opens today (AAPL, MSFT, GOOG); MSFT round-tripped so it
+    # appears in BOTH counts. OLD's open record is yesterday-dated and
+    # not counted.
+    assert rec["count_opened"] == 3
+    assert rec["count_closed"] == 1
+
+
+def test_process_fill_events_writes_opened_record_on_parent_fill(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Item 8 (#8): when poll_fills emits a parent FILLED event,
+    process_fill_events_for_closures appends an ``opened`` jsonl
+    record so the daily summary can count today's actual entries."""
+    state = strategy_module.blank_state()
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    state["open_positions"] = {
+        "AAPL": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "", "stop": ""},
+            "qty": 10, "entry_price": 13.00, "status": "filled",
+            "entry_timestamp": "2026-05-05T13:30:00+00:00",
+            "venue_code": "XNAS", "link_id": "BOWAKA-AAPL-100",
+            "entry_features": {"rvol": 2.0},
+        }
+    }
+    parent_filled = strategy_module.FillEvent(
+        ticker="AAPL", order_id="P-1", role="parent",
+        status="FILLED", filled_qty=10, filled_avg_price=13.00,
+        raw={"id": "P-1", "status": "filled", "filled_avg_price": "13.00"},
+    )
+    strategy_module.process_fill_events_for_closures(
+        [parent_filled], state, cfg_with_paths,
+        state_path=state_path, summary_path=summary_path,
+    )
+    lines = summary_path.read_text(encoding="utf-8").splitlines()
+    opened = [json.loads(line) for line in lines if line.strip()
+              and json.loads(line).get("record_type") == "opened"]
+    assert len(opened) == 1
+    assert opened[0]["ticker"] == "AAPL"
+    assert opened[0]["qty"] == 10
+    assert opened[0]["entry_price"] == 13.00
+    assert opened[0]["venue_code"] == "XNAS"
+
+
 def test_daily_summary_written_only_once_per_day(
     strategy_module, cfg_with_paths, tmp_path,
 ):
@@ -570,6 +741,103 @@ def test_daily_summary_written_only_once_per_day(
         today_iso="2026-05-05",
     )
     assert rec is None
+
+
+# ---------------------------------------------------------------- prefilter handshake
+
+
+def test_handshake_passes_when_gates_match(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Item 8 (handshake): identical gates + indicators → no error."""
+    pf = tmp_path / "bowaka_prefilter.yaml"
+    pf.write_text(
+        "signals:\n"
+        "  rvol_min: 1.5\n"
+        "  atr_pct_min: 0.06\n"
+        "  range_expansion_min: 1.25\n"
+        "  close_location_min: 0.60\n"
+        "  ema_distance_min: 0.0\n"
+        "  ema_slope_min: 0.0\n"
+        "indicators:\n"
+        "  lookback_days: 20\n"
+        "  atr_days: 14\n"
+        "  ema_days: 10\n"
+        "  ema_slope_lookback: 3\n"
+    )
+    cfg = dict(cfg_with_paths)
+    cfg["prefilter_handshake"] = {
+        **(cfg.get("prefilter_handshake") or {}),
+        "prefilter_yaml_path": str(pf),
+    }
+    strategy_module.verify_prefilter_handshake(cfg)
+
+
+def test_handshake_raises_on_signal_gate_drift(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    pf = tmp_path / "bowaka_prefilter.yaml"
+    pf.write_text(
+        "signals:\n"
+        "  rvol_min: 2.0\n"  # strategy expects 1.5
+        "  atr_pct_min: 0.06\n"
+        "  range_expansion_min: 1.25\n"
+        "  close_location_min: 0.60\n"
+        "  ema_distance_min: 0.0\n"
+        "  ema_slope_min: 0.0\n"
+        "indicators:\n"
+        "  lookback_days: 20\n"
+        "  atr_days: 14\n"
+        "  ema_days: 10\n"
+        "  ema_slope_lookback: 3\n"
+    )
+    cfg = dict(cfg_with_paths)
+    cfg["prefilter_handshake"] = {
+        **(cfg.get("prefilter_handshake") or {}),
+        "prefilter_yaml_path": str(pf),
+    }
+    with pytest.raises(strategy_module.HandshakeMismatch, match="rvol_min"):
+        strategy_module.verify_prefilter_handshake(cfg)
+
+
+def test_handshake_raises_on_indicator_window_drift(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    pf = tmp_path / "bowaka_prefilter.yaml"
+    pf.write_text(
+        "signals:\n"
+        "  rvol_min: 1.5\n"
+        "  atr_pct_min: 0.06\n"
+        "  range_expansion_min: 1.25\n"
+        "  close_location_min: 0.60\n"
+        "  ema_distance_min: 0.0\n"
+        "  ema_slope_min: 0.0\n"
+        "indicators:\n"
+        "  lookback_days: 30\n"  # strategy expects 20
+        "  atr_days: 14\n"
+        "  ema_days: 10\n"
+        "  ema_slope_lookback: 3\n"
+    )
+    cfg = dict(cfg_with_paths)
+    cfg["prefilter_handshake"] = {
+        **(cfg.get("prefilter_handshake") or {}),
+        "prefilter_yaml_path": str(pf),
+    }
+    with pytest.raises(strategy_module.HandshakeMismatch, match="lookback_days"):
+        strategy_module.verify_prefilter_handshake(cfg)
+
+
+def test_handshake_skips_when_prefilter_yaml_missing(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Missing prefilter yaml → log warning, don't fail (don't break
+    operators who relocated files)."""
+    cfg = dict(cfg_with_paths)
+    cfg["prefilter_handshake"] = {
+        **(cfg.get("prefilter_handshake") or {}),
+        "prefilter_yaml_path": str(tmp_path / "nonexistent.yaml"),
+    }
+    strategy_module.verify_prefilter_handshake(cfg)  # no raise
 
 
 # ---------------------------------------------------------------- halt
