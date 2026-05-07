@@ -112,12 +112,15 @@ frontend/private/**
 reports/*
 
 # strategies — block user-uploaded scripts but track the canonical
-# bowaka deployment artifacts (the bat files / xml task definitions /
-# canonical .py and .yaml configs operators rely on).
+# bowaka deployment artifacts (the bat / cmd files / xml task
+# definitions / canonical .py and .yaml configs operators rely on).
 strategies/scripts/*
+!strategies/scripts/_watchdog_bowaka_strategy.cmd
+!strategies/scripts/_watchdog_openalgo.cmd
 strategies/scripts/data/state.json
 strategies/scripts/data/state.json.tmp
 strategies/scripts/logs/*.log
 strategies/scripts/KILL_*.flag
 strategies/scripts/data/daily_summary.jsonl
 tests/e2e_smoke/_artifacts/*
+
