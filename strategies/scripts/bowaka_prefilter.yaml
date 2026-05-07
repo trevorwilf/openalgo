@@ -7,14 +7,17 @@
 
 alpaca:
   paper: true                 # paper-trading account is fine for data-only
-  # Item 9 (Critical #6): IEX is partial-tape coverage and materially
-  # distorts RVOL / ADV / range-expansion for microcaps (the strategy's
-  # core volume-sensitive signals). SIP is the full consolidated tape;
-  # Alpaca grants free SIP for paper accounts and a small subscription
-  # for live. Flip back to "iex" only if your account loses SIP access
-  # (the prefilter will surface the API error loudly rather than
-  # silently degrade).
-  feed: "sip"
+  # IEX is partial-tape coverage and the expert review flagged it as
+  # distorting RVOL / ADV / range-expansion in microcaps. SIP is the
+  # full consolidated tape but Alpaca's free paper subscription
+  # rejects bulk-bars SIP queries with
+  # ``"subscription does not permit querying recent SIP data"`` —
+  # confirmed live against this account on 2026-05-06. SIP requires
+  # a paid Algo Trader / Unlimited subscription on Alpaca's market-
+  # data plans. Flip to "sip" once that's in place; calibrate the
+  # signal thresholds against the new tape since IEX→SIP volume
+  # ratios shift the universe boundary too.
+  feed: "iex"
 
 universe:
   cache_path: "data/universe_us_equity.json"
