@@ -77,25 +77,60 @@ def setup_logging(cfg: dict) -> None:
 
 # -------------------------------------------------------------- universe
 
+# Alpaca's listing-exchange code -> ISO 10383 MIC (the venue code the
+# OpenAlgo /api/v2 instrument resolution expects). Listed here once so
+# the strategy can route NYSE / AMEX / ARCA / BATS candidates to the
+# right venue instead of the previous XNAS hardcode.
+#
+# AMEX folds to XNYS to match OpenAlgo's Alpaca plugin
+# (``broker/alpaca/mapping/transform_data.py``) — NYSE American is an
+# NYSE subsidiary and Alpaca's quote/bar/order adapters only accept
+# {XNAS, XNYS, ARCX, BATS} as canonical venues.
+ALPACA_EXCHANGE_TO_MIC: dict[str, str] = {
+    "NASDAQ": "XNAS",
+    "NYSE":   "XNYS",
+    "AMEX":   "XNYS",
+    "ARCA":   "ARCX",
+    "BATS":   "BATS",
+}
+
+
 def load_or_refresh_universe(
     trading_client: TradingClient,
     cache_path: Path,
     refresh_days: int,
     allowed_exchanges: set[str],
-) -> list[str]:
-    """Active, tradable US-equity symbols. Cached to disk, refreshed
-    after `refresh_days` to keep API load reasonable."""
+) -> tuple[list[str], dict[str, str]]:
+    """Active, tradable US-equity symbols + their listing exchange.
+
+    Returns ``(symbols, exchanges)`` where ``exchanges[symbol]`` is the
+    Alpaca exchange code (``"NASDAQ"``, ``"NYSE"``, ...). The exchange
+    map is required so the prefilter can stamp a per-candidate
+    ``venue_code`` (MIC) into the output, letting the strategy route
+    non-NASDAQ tickers to the right venue.
+
+    Cached to disk, refreshed after ``refresh_days``. Old caches that
+    only carry ``symbols`` (pre-venue-routing format) are invalidated
+    on read so the next run rebuilds with exchange info.
+    """
     if cache_path.exists():
         age_days = (time.time() - cache_path.stat().st_mtime) / 86400.0
         if age_days < refresh_days:
             with open(cache_path) as f:
                 cached = json.load(f)
+            cached_symbols = cached.get("symbols") or []
+            cached_exchanges = cached.get("exchanges") or {}
+            if cached_symbols and cached_exchanges:
+                LOG.info(
+                    "Universe loaded from cache: %d symbols (age %.1f days)",
+                    len(cached_symbols), age_days,
+                )
+                return cached_symbols, cached_exchanges
             LOG.info(
-                "Universe loaded from cache: %d symbols (age %.1f days)",
-                len(cached["symbols"]),
+                "Universe cache missing 'exchanges' map (age %.1f days); "
+                "rebuilding so per-candidate venue_code can be emitted",
                 age_days,
             )
-            return cached["symbols"]
 
     LOG.info("Refreshing universe from Alpaca assets endpoint")
     req = GetAssetsRequest(
@@ -104,6 +139,7 @@ def load_or_refresh_universe(
     )
     assets = trading_client.get_all_assets(req)
     symbols: list[str] = []
+    exchanges: dict[str, str] = {}
     for a in assets:
         if not a.tradable:
             continue
@@ -117,16 +153,18 @@ def load_or_refresh_universe(
         if any(tag in nm for tag in (" WARRANT", " UNIT", " RIGHT", " PREFERRED")):
             continue
         symbols.append(a.symbol)
+        exchanges[a.symbol] = exch
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     with open(cache_path, "w") as f:
         json.dump(
             {"symbols": symbols,
+             "exchanges": exchanges,
              "refreshed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")},
             f,
         )
     LOG.info("Universe: %d symbols cached to %s", len(symbols), cache_path)
-    return symbols
+    return symbols, exchanges
 
 
 # ------------------------------------------------------------------ bars
@@ -294,10 +332,17 @@ def apply_filters(features_df: pd.DataFrame, cfg: dict) -> tuple[pd.DataFrame, d
 # ---------------------------------------------------------------- output
 
 def write_output(
-    candidates: pd.DataFrame, counts: dict, cfg: dict, cfg_hash: str
+    candidates: pd.DataFrame,
+    counts: dict,
+    cfg: dict,
+    cfg_hash: str,
+    *,
+    exchanges: dict[str, str] | None = None,
 ) -> None:
     out_path = Path(cfg["output"]["candidates_path"])
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    exchanges = exchanges or {}
 
     feature_cols = [
         "close", "rvol", "atr_pct", "range_expansion", "gap_pct",
@@ -306,7 +351,16 @@ def write_output(
     ]
     rows: list[dict] = []
     for sym, row in candidates.iterrows():
-        d = {"ticker": sym}
+        # Stamp the listing exchange + ISO 10383 MIC the strategy will
+        # use for /api/v2 instrument resolution. None when the universe
+        # cache predates the venue-routing format — strategy falls back
+        # to its default_venue_code for those rows.
+        exch = exchanges.get(sym)
+        d = {
+            "ticker": sym,
+            "exchange": exch,
+            "venue_code": ALPACA_EXCHANGE_TO_MIC.get(exch) if exch else None,
+        }
         for c in feature_cols:
             v = row.get(c)
             d[c] = None if v is None or pd.isna(v) else float(v)
@@ -358,7 +412,7 @@ def main() -> int:
     trading_client = TradingClient(api_key, secret, paper=cfg["alpaca"]["paper"])
     data_client = StockHistoricalDataClient(api_key, secret)
 
-    universe = load_or_refresh_universe(
+    universe, exchanges = load_or_refresh_universe(
         trading_client,
         cache_path=Path(cfg["universe"]["cache_path"]),
         refresh_days=int(cfg["universe"]["refresh_days"]),
@@ -387,7 +441,7 @@ def main() -> int:
                  candidates.head(10)[["close", "rvol", "atr_pct", "signal_strength"]])
         return 0
 
-    write_output(candidates, counts, cfg, cfg_hash)
+    write_output(candidates, counts, cfg, cfg_hash, exchanges=exchanges)
     return 0
 
 

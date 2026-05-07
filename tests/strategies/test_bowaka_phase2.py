@@ -152,6 +152,103 @@ def test_load_candidates_hash_null_accepts_any(strategy_module, tmp_path):
     assert out == []
 
 
+def test_load_candidates_carries_per_row_venue_code(strategy_module, tmp_path):
+    """Item 2: prefilter stamps a per-candidate venue_code/exchange.
+    The strategy must read those rather than fall back to a single
+    default for every ticker."""
+    p = tmp_path / "in_play.json"
+    p.write_text(json.dumps(_candidates_payload(rows=[
+        _row("AAPL", 150.0, 5.0, exchange="NASDAQ", venue_code="XNAS"),
+        _row("CAT",  80.0,  6.0, exchange="NYSE",   venue_code="XNYS"),
+        _row("ABC",  10.0,  4.0, exchange="AMEX",   venue_code="XASE"),
+    ])))
+    out = strategy_module.load_candidates(
+        p, max_age_trading_days=1,
+        expected_config_hash=None, today_et=date(2026, 5, 5),
+    )
+    by_ticker = {c.ticker: c for c in out}
+    assert by_ticker["AAPL"].venue_code == "XNAS"
+    assert by_ticker["CAT"].venue_code == "XNYS"
+    assert by_ticker["ABC"].venue_code == "XASE"
+    assert by_ticker["AAPL"].exchange == "NASDAQ"
+
+
+def test_load_candidates_legacy_format_keeps_venue_none(strategy_module, tmp_path):
+    """Backward-compat: candidate files written before Item 2 had no
+    venue_code field. load_candidates must accept those rows and leave
+    venue_code=None so callers fall back to default_venue_code."""
+    p = tmp_path / "in_play.json"
+    p.write_text(json.dumps(_candidates_payload(rows=[
+        _row("AAPL", 150.0, 5.0),  # no venue_code/exchange keys
+    ])))
+    out = strategy_module.load_candidates(
+        p, max_age_trading_days=1,
+        expected_config_hash=None, today_et=date(2026, 5, 5),
+    )
+    assert out[0].venue_code is None
+    assert out[0].exchange is None
+
+
+def test_select_entries_resolves_per_candidate_venue(strategy_module, cfg_dict):
+    """Entry.venue_code reflects the candidate's venue, falling back to
+    cfg.sizing.default_venue_code only when the candidate has none."""
+    state = strategy_module.blank_state()
+    cands = [
+        strategy_module.Candidate("AAPL", 150.0, 5.0, venue_code="XNAS"),
+        strategy_module.Candidate("CAT", 80.0, 6.0, venue_code="XNYS"),
+        strategy_module.Candidate("LEGACY", 10.0, 4.0),  # no venue
+    ]
+    cands.sort(key=lambda c: c.signal_strength, reverse=True)
+    selected = strategy_module.select_entries(
+        cands, state, equity=1_000_000.0, latest_prices={},
+        cfg=cfg_dict, kill_state=strategy_module.KillLevel.NONE,
+    )
+    by_ticker = {e.ticker: e for e in selected}
+    assert by_ticker["CAT"].venue_code == "XNYS"
+    assert by_ticker["AAPL"].venue_code == "XNAS"
+    assert by_ticker["LEGACY"].venue_code == cfg_dict["sizing"]["default_venue_code"]
+
+
+def test_submit_otoco_uses_entry_venue_code(strategy_module, cfg_dict, tmp_path):
+    """Item 2 regression: every leg in the OTOCO body must carry the
+    Entry's venue_code, not a hardcoded XNAS. Drives /api/v2 instrument
+    resolution to the right MIC for non-NASDAQ candidates."""
+    sent_bodies: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        sent_bodies.append(json.loads(req.content))
+        return httpx.Response(200, json={
+            "data": {
+                "native_response": {"id": "P-1", "legs": [
+                    {"id": "T-1", "order_type": "LIMIT"},
+                    {"id": "S-1", "order_type": "STOP"},
+                ]},
+            }
+        })
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+    state = strategy_module.blank_state()
+    state_path = tmp_path / "state.json"
+    entry = strategy_module.Entry(
+        ticker="CAT", qty=5, close_price=80.0,
+        venue_code="XNYS",
+        candidate=strategy_module.Candidate("CAT", 80.0, 6.0, venue_code="XNYS"),
+    )
+    strategy_module.submit_otoco(
+        entry, cfg_dict, http, "k",
+        state=state, state_path=state_path,
+    )
+    body = sent_bodies[0]
+    venues = {leg["instrument_ref"]["venue_code"] for leg in body["legs"]}
+    assert venues == {"XNYS"}, (
+        "every OTOCO leg must inherit entry.venue_code; got %r" % venues
+    )
+    # State records the same venue so subsequent exits/sells route correctly.
+    assert state["open_positions"]["CAT"]["venue_code"] == "XNYS"
+
+
 def test_load_candidates_missing_file(strategy_module, tmp_path):
     with pytest.raises(strategy_module.CandidatesMissing):
         strategy_module.load_candidates(
@@ -321,6 +418,7 @@ def test_submit_otoco_body_shape(strategy_module, cfg_dict, tmp_path):
     state_path = tmp_path / "state.json"
     entry = strategy_module.Entry(
         ticker="AAPL", qty=10, close_price=150.0,
+        venue_code="XNAS",
         candidate=strategy_module.Candidate("AAPL", 150.0, 9.0),
     )
     strategy_module.submit_otoco(entry, cfg_dict, http, "k",
@@ -351,6 +449,7 @@ def test_submit_otoco_target_stop_pricing(strategy_module, cfg_dict, tmp_path):
     http = strategy_module.make_http_client("http://x", transport=transport)
     entry = strategy_module.Entry(
         ticker="AAPL", qty=10, close_price=10.0,
+        venue_code="XNAS",
         candidate=strategy_module.Candidate("AAPL", 10.0, 9.0),
     )
     state = strategy_module.blank_state()
@@ -372,6 +471,7 @@ def test_submit_otoco_records_state_on_success(strategy_module, cfg_dict, tmp_pa
     http = strategy_module.make_http_client("http://x", transport=transport)
     entry = strategy_module.Entry(
         ticker="AAPL", qty=10, close_price=150.0,
+        venue_code="XNAS",
         candidate=strategy_module.Candidate("AAPL", 150.0, 9.0),
     )
     state = strategy_module.blank_state()
@@ -398,6 +498,7 @@ def test_submit_otoco_422_bracket_marks_skip(strategy_module, cfg_dict, tmp_path
     http = strategy_module.make_http_client("http://x", transport=transport)
     entry = strategy_module.Entry(
         ticker="AAPL", qty=10, close_price=150.0,
+        venue_code="XNAS",
         candidate=strategy_module.Candidate("AAPL", 150.0, 9.0),
     )
     state = strategy_module.blank_state()
@@ -423,6 +524,7 @@ def test_submit_otoco_422_instrument_not_mapped_marks_skip(
     http = strategy_module.make_http_client("http://x", transport=transport)
     entry = strategy_module.Entry(
         ticker="ZZZ", qty=10, close_price=10.0,
+        venue_code="XNAS",
         candidate=strategy_module.Candidate("ZZZ", 10.0, 9.0),
     )
     state = strategy_module.blank_state()
@@ -445,6 +547,7 @@ def test_submit_otoco_503_translator_not_registered_aborts_pass(
     http = strategy_module.make_http_client("http://x", transport=transport)
     entry = strategy_module.Entry(
         ticker="AAPL", qty=10, close_price=150.0,
+        venue_code="XNAS",
         candidate=strategy_module.Candidate("AAPL", 150.0, 9.0),
     )
     state = strategy_module.blank_state()

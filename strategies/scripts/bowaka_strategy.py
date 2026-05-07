@@ -284,6 +284,12 @@ class Candidate:
     ticker: str
     close: float
     signal_strength: float
+    # ISO 10383 MIC for /api/v2 instrument resolution. None when the
+    # candidate file predates the venue-routing format (pre-Item-2);
+    # callers fall back to ``cfg.sizing.default_venue_code`` in that
+    # case so legacy candidate files keep working.
+    venue_code: str | None = None
+    exchange: str | None = None
     features: dict[str, Any] = field(default_factory=dict)
 
 
@@ -345,6 +351,8 @@ def load_candidates(
             ticker=row["ticker"],
             close=float(row["close"]),
             signal_strength=float(row.get("signal_strength") or 0.0),
+            venue_code=row.get("venue_code") or None,
+            exchange=row.get("exchange") or None,
             features={k: row.get(k) for k in (
                 "rvol", "atr_pct", "range_expansion", "gap_pct",
                 "close_location", "ema_distance", "ema_slope",
@@ -445,6 +453,7 @@ class Entry:
     ticker: str
     qty: int
     close_price: float
+    venue_code: str
     candidate: Candidate
 
 
@@ -502,10 +511,15 @@ def select_entries(
         if gross_cap > 0 and (running_gross + notional) > gross_cap:
             continue
         running_gross += notional
+        # Per-candidate venue routing. Falls back to the strategy's
+        # default_venue_code when the candidate file predates the
+        # venue-routing format (pre-Item-2 universe cache).
+        venue_code = cand.venue_code or sizing_cfg["default_venue_code"]
         selected.append(Entry(
             ticker=cand.ticker,
             qty=qty,
             close_price=cand.close,
+            venue_code=venue_code,
             candidate=cand,
         ))
     return selected
@@ -532,7 +546,10 @@ def submit_otoco(
     """
     target = round(entry.close_price * (1.0 + float(cfg["exits"]["target_pct"])), 2)
     stop = round(entry.close_price * (1.0 - float(cfg["exits"]["stop_pct"])), 2)
-    venue_code = cfg["sizing"]["default_venue_code"]
+    # Item 2: route per-candidate. The prefilter's universe spans
+    # NASDAQ/NYSE/AMEX/ARCA/BATS, and a hardcoded XNAS used to make
+    # /api/v2 instrument resolution fail for every non-NASDAQ ticker.
+    venue_code = entry.venue_code or cfg["sizing"]["default_venue_code"]
     link_id = f"BOWAKA-{entry.ticker}-{int(time.time())}"
 
     body = {
