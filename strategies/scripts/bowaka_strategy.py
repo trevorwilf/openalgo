@@ -1264,8 +1264,33 @@ def trigger_time_stop(
     except Exception as e:
         LOG.exception("market-sell submission failed for %s: %s", ticker, e)
         return
+
+    # Item 7 fix: a 4xx/5xx from /api/v2/orders does NOT raise from
+    # submit_market_sell — it returns a parsed body with
+    # ``_http_status`` set. We must validate before mutating state.
+    # The previous code blindly set status="exiting" with whatever
+    # exit_id it could parse (often ""), stranding the position so
+    # the next time-stop / signal-fade pass would skip it on
+    # ``status != "filled"``.
+    http_status = (resp or {}).get("_http_status") if isinstance(resp, dict) else None
+    if http_status not in (200, 201):
+        LOG.error(
+            "market-sell rejected for %s (status=%s); leaving status='filled' "
+            "so the next pass can retry: %s",
+            ticker, http_status, resp,
+        )
+        return
+
     data = (resp.get("data") or {}) if isinstance(resp, dict) else {}
     exit_id = data.get("order_id") or data.get("id") or ""
+    if not exit_id:
+        LOG.error(
+            "market-sell accepted for %s but no order_id surfaced; "
+            "leaving status='filled' so the next pass can retry: %s",
+            ticker, resp,
+        )
+        return
+
     pos["status"] = "exiting"
     pos["exit_reason"] = reason
     pos["exit_order_id"] = exit_id
