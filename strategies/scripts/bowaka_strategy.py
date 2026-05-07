@@ -1457,22 +1457,46 @@ def execute_kill_l2(
         if pos.get("status") == "exiting":
             continue
         if pos.get("status") != "filled":
-            # Pending parent — best effort cancel.
+            # Pending parent — best effort cancel. We CANNOT drop the
+            # position from state until every cancel call returns
+            # success (or a recognized terminal state via
+            # cancel_order's idempotent-success branch). A failure here
+            # means the broker order may still be live; dropping state
+            # in that case strands a real position with no tracking.
+            cancel_failures: list[str] = []
             for role in ("target", "stop"):
                 oid = (pos.get("child_order_ids") or {}).get(role)
                 if oid:
                     try:
                         cancel_order(oid, http, api_key)
-                    except Exception:
-                        LOG.exception("L2 cancel %s child %s failed", ticker, role)
+                    except Exception as e:
+                        LOG.exception("L2 cancel %s child %s failed: %s",
+                                      ticker, role, e)
+                        cancel_failures.append(f"child:{role}")
             parent = pos.get("parent_order_id")
             if parent:
                 try:
                     cancel_order(parent, http, api_key)
-                except Exception:
-                    LOG.exception("L2 cancel parent %s failed", ticker)
-            state["open_positions"].pop(ticker, None)
-            save_state(state, state_path)
+                except Exception as e:
+                    LOG.exception("L2 cancel parent %s failed: %s", ticker, e)
+                    cancel_failures.append("parent")
+            if cancel_failures:
+                # Keep the position; flag it for operator/reconciliation
+                # follow-up. The next reconcile run will compare our
+                # tracked order IDs against broker reality and surface
+                # the live remnant, instead of it silently floating.
+                pos["status"] = "cancel_failed"
+                pos["cancel_failures"] = cancel_failures
+                pos["cancel_failed_at"] = datetime.now(timezone.utc).isoformat()
+                save_state(state, state_path)
+                LOG.error(
+                    "L2 leaving %s in state with cancel_failed marker "
+                    "(failures=%s) — broker may still hold the order",
+                    ticker, cancel_failures,
+                )
+            else:
+                state["open_positions"].pop(ticker, None)
+                save_state(state, state_path)
             out.append(ticker)
             continue
         trigger_time_stop(

@@ -278,6 +278,93 @@ def test_kill_switch_l1_blocks_entries_only(strategy_module, cfg_with_paths):
     assert sel == []
 
 
+def test_kill_switch_l2_pending_keeps_state_when_cancel_fails(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Regression: L2 used to drop pending positions from state even
+    when the parent cancel raised — leaving the broker order live with
+    no tracking. The fix retains the position with a cancel_failed
+    marker so the next reconcile run can surface it."""
+    state = strategy_module.blank_state()
+    pending_pos = {
+        "parent_order_id": "P-LIVE",
+        "child_order_ids": {"target": "T-1", "stop": "S-1"},
+        "qty": 10,
+        "entry_price": None,
+        "status": "pending_fill",
+        "venue_code": "XNAS",
+    }
+    state["open_positions"] = {"GHOST": pending_pos}
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+
+    def cancel_h(req):
+        # Simulate a broker that surfaces a real failure for the parent
+        # — a 500 with no recognizable terminal-state body, which
+        # cancel_order treats as a hard error (raise).
+        return httpx.Response(500, json={"error": {"code": "broker_down", "message": "boom"}})
+
+    def sell_h(req):
+        return httpx.Response(200, json={"data": {"order_id": "EX-1"}})
+
+    http = strategy_module.make_http_client(
+        "http://x",
+        transport=_make_handler({
+            ("DELETE", "/api/v2/orders/"): cancel_h,
+            ("POST", "/api/v2/orders"): sell_h,
+        }),
+    )
+    out = strategy_module.execute_kill_l2(
+        state, cfg_with_paths, http, "k", state_path=state_path,
+    )
+    # GHOST is still in state — NOT silently dropped — with a
+    # cancel_failed marker the operator and reconciliation can act on.
+    assert "GHOST" in out
+    assert "GHOST" in state["open_positions"], (
+        "L2 must not pop pending positions when cancel raises — "
+        "broker order may still be live"
+    )
+    pos = state["open_positions"]["GHOST"]
+    assert pos["status"] == "cancel_failed"
+    assert "parent" in pos.get("cancel_failures", [])
+    assert pos.get("cancel_failed_at")
+
+
+def test_kill_switch_l2_pending_drops_state_when_all_cancels_succeed(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Symmetric case: when every cancel succeeds the pending position
+    is removed from state (current healthy behavior preserved)."""
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "GHOST": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "T-1", "stop": "S-1"},
+            "qty": 10,
+            "status": "pending_fill",
+            "venue_code": "XNAS",
+        }
+    }
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+
+    def cancel_h(req):
+        return httpx.Response(200, json={})
+
+    def sell_h(req):
+        return httpx.Response(200, json={"data": {"order_id": "EX-1"}})
+
+    http = strategy_module.make_http_client(
+        "http://x",
+        transport=_make_handler({
+            ("DELETE", "/api/v2/orders/"): cancel_h,
+            ("POST", "/api/v2/orders"): sell_h,
+        }),
+    )
+    strategy_module.execute_kill_l2(
+        state, cfg_with_paths, http, "k", state_path=state_path,
+    )
+    assert "GHOST" not in state["open_positions"]
+
+
 def test_kill_switch_l2_market_outs_all_positions(
     strategy_module, cfg_with_paths, tmp_path,
 ):
