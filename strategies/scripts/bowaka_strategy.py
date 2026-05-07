@@ -553,6 +553,304 @@ def select_entries(
 # ---------------------------------------------------------------- OTOCO
 
 
+# Bracket-pricing modes. Configured via ``cfg.entry.bracket_pricing_mode``.
+#
+# * ``"actual_fill"`` (default) — Item 4 fix. Submit the parent MARKET
+#   BUY alone, wait for the fill, then submit the OCO take_profit /
+#   stop_loss bracket using ``filled_avg_price`` as the reference. This
+#   removes the gap-risk regression where a microcap that opens 30%
+#   above yesterday's close could ship with a take-profit BELOW the
+#   actual fill price (broker-side rejection or instant-target risk).
+# * ``"candidate_close"`` — legacy single-shot OTOCO with target / stop
+#   priced off the prefilter's prior close. Preserved for backtest
+#   parity / debugging.
+BRACKET_PRICING_MODES = {"actual_fill", "candidate_close"}
+
+
+def _bracket_pricing_mode(cfg: dict) -> str:
+    mode = (cfg.get("entry") or {}).get("bracket_pricing_mode") or "actual_fill"
+    if mode not in BRACKET_PRICING_MODES:
+        raise ValueError(
+            f"cfg.entry.bracket_pricing_mode must be one of "
+            f"{sorted(BRACKET_PRICING_MODES)}; got {mode!r}"
+        )
+    return mode
+
+
+def submit_entry(
+    entry: Entry,
+    cfg: dict,
+    http: httpx.Client,
+    api_key: str,
+    *,
+    state: State,
+    state_path: Path,
+) -> dict[str, Any]:
+    """Dispatch to the configured bracket-pricing mode. The legacy
+    ``submit_otoco`` is kept as the ``candidate_close`` implementation
+    (Phase 2 contract). ``actual_fill`` uses ``submit_parent_market_buy``
+    and defers child submission to ``submit_pending_oco_children``
+    after the parent fill arrives in poll_fills."""
+    mode = _bracket_pricing_mode(cfg)
+    if mode == "actual_fill":
+        return submit_parent_market_buy(
+            entry, cfg, http, api_key,
+            state=state, state_path=state_path,
+        )
+    return submit_otoco(
+        entry, cfg, http, api_key,
+        state=state, state_path=state_path,
+    )
+
+
+def submit_parent_market_buy(
+    entry: Entry,
+    cfg: dict,
+    http: httpx.Client,
+    api_key: str,
+    *,
+    state: State,
+    state_path: Path,
+) -> dict[str, Any]:
+    """Item 4 (actual_fill mode): submit a stand-alone parent MARKET
+    BUY via /api/v2/orders. The OCO take_profit / stop_loss children
+    are submitted later by :func:`submit_pending_oco_children` once
+    the parent's filled_avg_price is known.
+
+    Records the same state shape as :func:`submit_otoco` but with empty
+    child_order_ids and ``bracket_pricing_mode="actual_fill"`` plus
+    cached ``target_pct`` / ``stop_pct`` so the post-fill submitter can
+    derive the bracket levels without a second cfg dependency."""
+    venue_code = entry.venue_code or cfg["sizing"]["default_venue_code"]
+    link_id = f"BOWAKA-{entry.ticker}-{int(time.time())}"
+
+    body = {
+        "apikey": api_key,
+        "instrument": {
+            "venue_code": venue_code,
+            "canonical_symbol": entry.ticker,
+        },
+        "side": "BUY",
+        "order_type": "MARKET",
+        "quantity": str(entry.qty),
+        "quantity_unit": "WHOLE",
+        "time_in_force": "DAY",
+        "session": "REGULAR",
+    }
+    r = http.post("/api/v2/orders", json=body, headers=_api_headers(api_key))
+    parsed = r.json() if r.content else {}
+
+    if r.status_code == 200:
+        data = parsed.get("data", {})
+        native = data.get("native_response") or {}
+        parent_id = (
+            native.get("id")
+            or native.get("order_id")
+            or data.get("order_id")
+            or ""
+        )
+        state.setdefault("open_positions", {})[entry.ticker] = {
+            "parent_order_id": parent_id,
+            "child_order_ids": {"target": "", "stop": ""},
+            "qty": entry.qty,
+            "entry_price": None,
+            "entry_timestamp": datetime.now(timezone.utc).isoformat(),
+            "entry_features": entry.candidate.features,
+            "status": "pending_fill",
+            "link_id": link_id,
+            "venue_code": venue_code,
+            "bracket_pricing_mode": "actual_fill",
+            "target_pct": float(cfg["exits"]["target_pct"]),
+            "stop_pct": float(cfg["exits"]["stop_pct"]),
+            "candidate_close": entry.close_price,
+        }
+        save_state(state, state_path)
+        LOG.info("Parent MARKET BUY submitted (actual_fill mode): %s qty=%d parent=%s",
+                 entry.ticker, entry.qty, parent_id)
+        return parsed
+
+    err = (parsed.get("error") or {}) if isinstance(parsed, dict) else {}
+    code = (err.get("code") or "").lower()
+    msg = err.get("message") or ""
+
+    if r.status_code == 422 and (
+        "instrument" in code
+        or "broker_map" in msg.lower()
+        or "not mapped" in msg.lower()
+    ):
+        LOG.error("Instrument not mapped for %s: %s", entry.ticker, err)
+        state.setdefault("halt_skip_today", []).append(entry.ticker)
+        save_state(state, state_path)
+        return {"error": err, "status": r.status_code}
+
+    if r.status_code == 503:
+        LOG.error(
+            "Promoted lane unavailable (%s); operator action required: %s",
+            code, err,
+        )
+        return {"error": err, "status": r.status_code}
+
+    LOG.error("Parent MARKET BUY failed for %s: HTTP %d %s",
+              entry.ticker, r.status_code, parsed)
+    return {"error": err, "status": r.status_code}
+
+
+def submit_oco_children(
+    ticker: str,
+    pos: dict[str, Any],
+    cfg: dict,
+    http: httpx.Client,
+    api_key: str,
+    *,
+    state: State,
+    state_path: Path,
+) -> dict[str, Any] | None:
+    """Submit an OCO take_profit / stop_loss bracket against an
+    already-filled parent position. Used by the actual_fill bracket
+    mode after :func:`poll_fills` records the parent's fill price.
+
+    Idempotent — if ``pos["child_order_ids"]["target"]`` already has a
+    value the call short-circuits with ``None``. On submission failure
+    the position is left in ``status="filled"`` with empty child IDs;
+    the next tick will retry.
+    """
+    children = pos.get("child_order_ids") or {}
+    if children.get("target") and children.get("stop"):
+        return None
+
+    fill_price = pos.get("entry_price")
+    qty = int(pos.get("qty") or 0)
+    venue_code = pos.get("venue_code") or cfg["sizing"]["default_venue_code"]
+    target_pct = float(pos.get("target_pct") or cfg["exits"]["target_pct"])
+    stop_pct = float(pos.get("stop_pct") or cfg["exits"]["stop_pct"])
+
+    if fill_price is None or fill_price <= 0:
+        LOG.warning(
+            "submit_oco_children: %s has no fill_price yet; skipping",
+            ticker,
+        )
+        return None
+    if qty <= 0:
+        LOG.warning(
+            "submit_oco_children: %s has qty=%d; skipping",
+            ticker, qty,
+        )
+        return None
+
+    target_price = round(float(fill_price) * (1.0 + target_pct), 2)
+    stop_price = round(float(fill_price) * (1.0 - stop_pct), 2)
+    link_id = f"{pos.get('link_id') or 'BOWAKA-' + ticker}-OCO"
+
+    body = {
+        "apikey": api_key,
+        "combo_type": "OCO",
+        "time_in_force": "DAY",
+        "session": "REGULAR",
+        "link_id": link_id,
+        "legs": [
+            {
+                "instrument_ref": {
+                    "venue_code": venue_code,
+                    "canonical_symbol": ticker,
+                },
+                "side": "SELL",
+                "quantity": str(qty),
+                "quantity_unit": "WHOLE",
+                "order_type": "LIMIT",
+                "price": str(target_price),
+            },
+            {
+                "instrument_ref": {
+                    "venue_code": venue_code,
+                    "canonical_symbol": ticker,
+                },
+                "side": "SELL",
+                "quantity": str(qty),
+                "quantity_unit": "WHOLE",
+                "order_type": "STOP",
+                "trigger_price": str(stop_price),
+            },
+        ],
+    }
+    r = http.post("/api/v2/orders/combo",
+                  json=body,
+                  headers=_api_headers(api_key))
+    parsed = r.json() if r.content else {}
+
+    if r.status_code != 200:
+        err = (parsed.get("error") or {}) if isinstance(parsed, dict) else {}
+        LOG.error(
+            "OCO bracket submission failed for %s (fill=%.4f): HTTP %d %s",
+            ticker, float(fill_price), r.status_code, err,
+        )
+        return {"error": err, "status": r.status_code}
+
+    data = parsed.get("data") or {}
+    native = data.get("native_response") or {}
+    child_orders = native.get("legs") or []
+    target_id = ""
+    stop_id = ""
+    for leg in child_orders:
+        otype = (leg.get("order_type") or leg.get("type") or "").lower()
+        if "limit" in otype and not target_id:
+            target_id = leg.get("id") or leg.get("order_id") or ""
+        elif "stop" in otype and not stop_id:
+            stop_id = leg.get("id") or leg.get("order_id") or ""
+    if not target_id and len(child_orders) >= 1:
+        target_id = child_orders[0].get("id") or ""
+    if not stop_id and len(child_orders) >= 2:
+        stop_id = child_orders[1].get("id") or ""
+
+    pos["child_order_ids"] = {"target": target_id, "stop": stop_id}
+    pos["target_price"] = target_price
+    pos["stop_price"] = stop_price
+    save_state(state, state_path)
+    LOG.info(
+        "OCO bracket attached: %s fill=%.4f target=%.2f stop=%.2f",
+        ticker, float(fill_price), target_price, stop_price,
+    )
+    return parsed
+
+
+def submit_pending_oco_children(
+    state: State,
+    cfg: dict,
+    http: httpx.Client,
+    api_key: str,
+    *,
+    state_path: Path,
+) -> list[str]:
+    """Idempotent post-fill bracket sweep. Walks open positions whose
+    bracket_pricing_mode is "actual_fill", whose status is "filled",
+    and whose child_order_ids are still empty — and submits an OCO
+    take_profit / stop_loss bracket priced off the recorded
+    entry_price. Called once per main-loop tick after poll_fills.
+
+    Returns the tickers that received a fresh OCO bracket this call.
+    """
+    out: list[str] = []
+    open_positions = state.get("open_positions") or {}
+    for ticker, pos in list(open_positions.items()):
+        if pos.get("bracket_pricing_mode") != "actual_fill":
+            continue
+        if pos.get("status") != "filled":
+            continue
+        children = pos.get("child_order_ids") or {}
+        if children.get("target") and children.get("stop"):
+            continue
+        try:
+            res = submit_oco_children(
+                ticker, pos, cfg, http, api_key,
+                state=state, state_path=state_path,
+            )
+        except httpx.HTTPError as e:
+            LOG.exception("submit_oco_children network error for %s: %s", ticker, e)
+            continue
+        if res and "error" not in res:
+            out.append(ticker)
+    return out
+
+
 def submit_otoco(
     entry: Entry,
     cfg: dict,
@@ -562,12 +860,13 @@ def submit_otoco(
     state: State,
     state_path: Path,
 ) -> dict[str, Any]:
-    """POST /api/v2/orders/combo with an OTOCO bracket. Records state
-    on success. Marks halt_skip_today on bracket / instrument-mapping
-    422s. Surfaces 503 translator/lane errors loudly.
+    """Legacy ``candidate_close`` mode: POST /api/v2/orders/combo with
+    an OTOCO bracket priced off the prefilter's prior close. Records
+    state on success. Marks halt_skip_today on bracket / instrument-
+    mapping 422s. Surfaces 503 translator/lane errors loudly.
 
-    Returns the parsed JSON response, or a dict with ``error`` when the
-    server returned a structured error.
+    Kept for backtest parity / debugging. Production runs default to
+    the ``actual_fill`` mode (see :func:`submit_entry`).
     """
     target = round(entry.close_price * (1.0 + float(cfg["exits"]["target_pct"])), 2)
     stop = round(entry.close_price * (1.0 - float(cfg["exits"]["stop_pct"])), 2)
@@ -1712,15 +2011,15 @@ def run_session_entry_pass(
              [e.ticker for e in entries])
 
     if dry_run:
-        LOG.info("dry-run: not submitting OTOCO orders")
+        LOG.info("dry-run: not submitting entry orders")
         return
 
     for entry in entries:
         try:
-            submit_otoco(entry, cfg, http, api_key,
+            submit_entry(entry, cfg, http, api_key,
                          state=state, state_path=state_path)
         except httpx.HTTPError as e:
-            LOG.exception("OTOCO submit network error for %s: %s",
+            LOG.exception("entry submit network error for %s: %s",
                           entry.ticker, e)
 
 
@@ -1838,6 +2137,19 @@ def run_loop(
                             state_path=state_path,
                             summary_path=summary_path,
                         )
+                    # Item 4 (actual_fill mode): once parents fill we
+                    # need to attach the OCO bracket using the real
+                    # fill price. Idempotent — only fires for filled
+                    # positions still missing child IDs.
+                    try:
+                        attached = submit_pending_oco_children(
+                            state, cfg, http_client, api_key,
+                            state_path=state_path,
+                        )
+                        if attached:
+                            LOG.info("OCO brackets attached post-fill: %s", attached)
+                    except Exception as e:
+                        LOG.exception("submit_pending_oco_children failed: %s", e)
                     # Phase 4: daily P&L tracking.
                     try:
                         eq = fetch_equity(http_client, api_key)

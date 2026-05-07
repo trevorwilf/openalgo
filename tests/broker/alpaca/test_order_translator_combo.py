@@ -274,7 +274,11 @@ def test_otoco_emits_bracket_order_class_and_legs():
     assert body["time_in_force"] == "day"
 
 
-def test_oco_emits_oco_order_class_with_stop_loss():
+def test_oco_emits_oco_order_class_with_take_profit_and_stop_loss():
+    """Alpaca's OCO REST contract requires BOTH ``take_profit.limit_price``
+    and ``stop_loss.stop_price``. The parent body's ``limit_price``
+    duplicates the take_profit by design. Without ``take_profit``
+    Alpaca rejects with 422 ``oco orders require take_profit.limit_price``."""
     combo = NormalizedComboOrderRequest(
         combo_type=ComboType.OCO,
         time_in_force=TimeInForce.DAY,
@@ -290,8 +294,8 @@ def test_oco_emits_oco_order_class_with_stop_loss():
         combo, [_Resolved(), _Resolved()], _ctx()
     )
     assert body["order_class"] == "oco"
+    assert body["take_profit"] == {"limit_price": "200.00"}
     assert body["stop_loss"] == {"stop_price": "175.00"}
-    assert "take_profit" not in body
 
 
 def test_oto_with_limit_child_emits_take_profit():

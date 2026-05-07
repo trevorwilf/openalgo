@@ -75,6 +75,9 @@ def cfg_dict() -> dict:
             "max_per_trade_dollars": None,
             "max_gross_exposure_dollars": None,
         },
+        "entry": {
+            "bracket_pricing_mode": "actual_fill",
+        },
         "exits": {
             "stop_pct": 0.08,
             "target_pct": 0.15,

@@ -447,9 +447,16 @@ class AlpacaOrderTranslator:
             else:
                 body["stop_loss"] = _build_stop_loss(child)
         elif combo.combo_type == ComboType.OCO:
-            # OCO pairs the parent's limit (take_profit) with a
-            # separate stop_loss leg.
+            # Alpaca's OCO needs BOTH ``take_profit.limit_price`` AND
+            # ``stop_loss.stop_price``. The parent body (built from
+            # leg[0], a SELL LIMIT) carries the same limit price as
+            # the take_profit, but Alpaca rejects OCO without the
+            # take_profit block (REST 422 ``oco orders require
+            # take_profit.limit_price``). Mirror leg[0] into
+            # ``take_profit`` so the OCO bracket is well-formed.
+            tp_leg = combo.legs[0]
             sl_leg = combo.legs[1]
+            body["take_profit"] = _build_take_profit(tp_leg)
             body["stop_loss"] = _build_stop_loss(sl_leg)
 
         return body

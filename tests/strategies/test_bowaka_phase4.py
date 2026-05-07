@@ -555,7 +555,8 @@ def test_full_lifecycle_session_smoke(
 
     n_combo = [0]
     n_balances = [0]
-    n_orders = [0]
+    n_get_orders = [0]
+    n_post_orders = [0]
 
     def handler(req):
         path = req.url.path
@@ -568,19 +569,20 @@ def test_full_lifecycle_session_smoke(
         if method == "POST" and path == "/api/v2/orders/combo":
             n_combo[0] += 1
             return httpx.Response(200, json={"data": {"native_response": {
-                "id": "P-1",
+                "id": "P-OCO",
                 "legs": [
-                    {"id": "T-1", "order_type": "limit"},
-                    {"id": "S-1", "order_type": "stop"},
+                    {"id": "T-OCO", "order_type": "limit"},
+                    {"id": "S-OCO", "order_type": "stop"},
                 ],
             }}})
         if method == "GET" and path == "/api/v2/orders":
-            n_orders[0] += 1
+            n_get_orders[0] += 1
             return httpx.Response(200, json={"data": {"orders": [], "count": 0}})
         if method == "DELETE":
             return httpx.Response(200, json={})
         if method == "POST" and path == "/api/v2/orders":
-            return httpx.Response(200, json={"data": {"order_id": "X"}})
+            n_post_orders[0] += 1
+            return httpx.Response(200, json={"data": {"native_response": {"id": "P-1"}}})
         return httpx.Response(404, json={"error": {"path": path}})
 
     http = strategy_module.make_http_client(
@@ -597,8 +599,14 @@ def test_full_lifecycle_session_smoke(
         http_client=http, api_key="k",
     )
     assert rc == 0
-    assert n_combo[0] == 1
+    # Item 4 (actual_fill default): the first session tick posts a
+    # MARKET BUY parent to /api/v2/orders. The /api/v2/orders/combo
+    # OCO bracket only fires on a later tick once poll_fills records
+    # the fill — which doesn't happen in this single-tick smoke test.
+    assert n_post_orders[0] == 1
+    assert n_combo[0] == 0
     state = strategy_module.load_state(Path(cfg_with_paths["paths"]["state_path"]))
     assert "AAPL" in state["open_positions"]
+    assert state["open_positions"]["AAPL"]["bracket_pricing_mode"] == "actual_fill"
     assert state["session_date"] == "2026-05-05"
     assert state["daily_pnl_baseline_equity"] == 100_000.0
