@@ -833,21 +833,30 @@ def submit_entry(
     *,
     state: State,
     state_path: Path,
+    link_id_override: str | None = None,
 ) -> dict[str, Any]:
     """Dispatch to the configured bracket-pricing mode. The legacy
     ``submit_otoco`` is kept as the ``candidate_close`` implementation
     (Phase 2 contract). ``actual_fill`` uses ``submit_parent_market_buy``
     and defers child submission to ``submit_pending_oco_children``
-    after the parent fill arrives in poll_fills."""
+    after the parent fill arrives in poll_fills.
+
+    ``link_id_override`` is plumbed in by ``run_session_entry_pass``
+    so the entry_decision record (written before this call) shares the
+    link_id with the submitted order — that's the join key for per-
+    trade jsonl files.
+    """
     mode = _bracket_pricing_mode(cfg)
     if mode == "actual_fill":
         return submit_parent_market_buy(
             entry, cfg, http, api_key,
             state=state, state_path=state_path,
+            link_id_override=link_id_override,
         )
     return submit_otoco(
         entry, cfg, http, api_key,
         state=state, state_path=state_path,
+        link_id_override=link_id_override,
     )
 
 
@@ -859,6 +868,7 @@ def submit_parent_market_buy(
     *,
     state: State,
     state_path: Path,
+    link_id_override: str | None = None,
 ) -> dict[str, Any]:
     """Item 4 (actual_fill mode): submit a stand-alone parent MARKET
     BUY via /api/v2/orders. The OCO take_profit / stop_loss children
@@ -870,7 +880,7 @@ def submit_parent_market_buy(
     cached ``target_pct`` / ``stop_pct`` so the post-fill submitter can
     derive the bracket levels without a second cfg dependency."""
     venue_code = entry.venue_code or cfg["sizing"]["default_venue_code"]
-    link_id = f"BOWAKA-{entry.ticker}-{int(time.time())}"
+    link_id = link_id_override or f"BOWAKA-{entry.ticker}-{int(time.time())}"
 
     body = {
         "apikey": api_key,
@@ -923,6 +933,11 @@ def submit_parent_market_buy(
         save_state(state, state_path)
         LOG.info("Parent MARKET BUY submitted (actual_fill mode): %s qty=%d parent=%s",
                  entry.ticker, entry.qty, parent_id)
+        emit_parent_submitted(
+            cfg, link_id=link_id, ticker=entry.ticker,
+            parent_id=parent_id, qty=entry.qty, venue_code=venue_code,
+            http_status=r.status_code,
+        )
         return parsed
 
     err = (parsed.get("error") or {}) if isinstance(parsed, dict) else {}
@@ -1082,6 +1097,11 @@ def submit_oco_children(
         "OCO bracket attached: %s fill=%.4f target=%.2f(id=%s) stop=%.2f(id=%s)",
         ticker, float(fill_price), target_price, target_id, stop_price, stop_id,
     )
+    emit_bracket_attached(
+        cfg, pos=pos,
+        target_id=target_id, stop_id=stop_id,
+        target_price=target_price, stop_price=stop_price,
+    )
     return parsed
 
 
@@ -1132,6 +1152,7 @@ def submit_otoco(
     *,
     state: State,
     state_path: Path,
+    link_id_override: str | None = None,
 ) -> dict[str, Any]:
     """Legacy ``candidate_close`` mode: POST /api/v2/orders/combo with
     an OTOCO bracket priced off the prefilter's prior close. Records
@@ -1147,7 +1168,7 @@ def submit_otoco(
     # NASDAQ/NYSE/AMEX/ARCA/BATS, and a hardcoded XNAS used to make
     # /api/v2 instrument resolution fail for every non-NASDAQ ticker.
     venue_code = entry.venue_code or cfg["sizing"]["default_venue_code"]
-    link_id = f"BOWAKA-{entry.ticker}-{int(time.time())}"
+    link_id = link_id_override or f"BOWAKA-{entry.ticker}-{int(time.time())}"
 
     body = {
         "apikey": api_key,
@@ -1244,6 +1265,20 @@ def submit_otoco(
         save_state(state, state_path)
         LOG.info("OTOCO submitted: %s qty=%d parent=%s",
                  entry.ticker, entry.qty, parent_id)
+        emit_parent_submitted(
+            cfg, link_id=link_id, ticker=entry.ticker,
+            parent_id=parent_id, qty=entry.qty, venue_code=venue_code,
+            http_status=r.status_code,
+        )
+        # In legacy candidate_close mode the bracket children come
+        # back atomically with the parent, so we record the
+        # bracket-attached event right here using the IDs already
+        # parsed above.
+        emit_bracket_attached(
+            cfg, pos=state["open_positions"][entry.ticker],
+            target_id=target_id, stop_id=stop_id,
+            target_price=target, stop_price=stop,
+        )
         return parsed
 
     err = (parsed.get("error") or {}) if isinstance(parsed, dict) else {}
@@ -1392,6 +1427,7 @@ def poll_fills(
     api_key: str,
     *,
     state_path: Path,
+    cfg: dict | None = None,
 ) -> list[FillEvent]:
     """GET /api/v2/orders?status=all and reconcile fills against state.
 
@@ -1454,6 +1490,9 @@ def poll_fills(
                         pos["trough_since_entry"] = float(pos["entry_price"])
                     dirty = True
                     events.append(ev)
+                    # Per-trade rich log: parent fill is a state
+                    # transition we want a record for.
+                    emit_entry_fill(cfg, pos=pos, ev=ev)
             elif status in _DEAD or canonical in {s.upper() for s in _DEAD}:
                 if filled_qty > 0:
                     # Partial fill before cancel/reject — keep the
@@ -1468,9 +1507,11 @@ def poll_fills(
                         "parent %s ended in %s with partial fill %d shares",
                         ticker, canonical, filled_qty,
                     )
+                    emit_entry_fill(cfg, pos=pos, ev=ev)
                 else:
                     open_positions.pop(ticker, None)
                     LOG.info("parent %s ended in %s — position dropped", ticker, canonical)
+                    emit_order_event(cfg, pos=pos, role="parent_terminal", ev=ev)
                 dirty = True
                 events.append(ev)
 
@@ -1486,6 +1527,7 @@ def poll_fills(
                 }
                 dirty = True
                 events.append(ev)
+                emit_order_event(cfg, pos=pos, role=role, ev=ev)
 
         elif role == "exit" and pos is not None:
             if status in _FILLED or canonical == "FILLED":
@@ -1494,6 +1536,7 @@ def poll_fills(
                 # Phase 3 will close the position on this signal.
                 dirty = True
                 events.append(ev)
+                emit_order_event(cfg, pos=pos, role="exit", ev=ev)
 
     if dirty:
         save_state(state, state_path)
@@ -2045,6 +2088,563 @@ def append_closure_record(path: Path, record: dict[str, Any]) -> None:
         f.flush()
 
 
+# -------------------------------------------------------- per-trade rich logging
+#
+# One file per buy, named by link_id. Lives at
+#   <daily_summary_path.parent>/trades/<link_id>.jsonl
+# Each file is JSONL append-only and carries the full lifecycle of one
+# position: entry_decision -> parent_submitted -> entry_fill ->
+# bracket_attached -> intraday_tick (many) -> order_event* ->
+# exit. Cross-trade analysis stays in daily_summary.jsonl.
+
+
+def _trade_log_path(cfg: dict, link_id: str) -> Path | None:
+    """Per-trade jsonl path. Sibling ``trades/`` dir under the daily-
+    summary path's parent. Returns None when link_id is missing
+    (defensive — old states without link_id just skip the rich log)."""
+    if not link_id:
+        return None
+    summary_path = _resolve_path(cfg, "daily_summary_path")
+    return summary_path.parent / "trades" / f"{link_id}.jsonl"
+
+
+def _append_trade_log(cfg: dict | None, link_id: str | None, record: dict[str, Any]) -> None:
+    """Append a single record to the per-trade jsonl. Best-effort —
+    a write failure does NOT propagate; logging is observability,
+    not an order-flow blocker. ``cfg=None`` is a no-op so call sites
+    without cfg threading (older tests, ad-hoc utilities) can invoke
+    emit_* without scaffolding."""
+    if cfg is None:
+        return
+    path = _trade_log_path(cfg, link_id or "")
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, default=str) + "\n")
+            f.flush()
+    except Exception as e:
+        LOG.warning("trade-log append failed (link_id=%s): %s", link_id, e)
+
+
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _safe_float(v: Any) -> float | None:
+    try:
+        if v is None:
+            return None
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+# ---- emit_* helpers: each call writes one record to the per-trade jsonl
+
+
+def emit_entry_decision(
+    cfg: dict,
+    *,
+    link_id: str,
+    entry: "Entry",
+    state: State,
+    slot_index: int,
+    slate_size: int,
+    running_gross_at_entry: float,
+    binding_cap: str,
+    target_dollars: float,
+    adv_cap_dollars: float | None,
+    intraday_confirmation_passed: bool | None,
+) -> None:
+    """At submit time: capture every variable the analyst would want
+    to know about why we picked this name at this moment.
+
+    Per-gate breakdown for signal_gates so a quant can bucket entries
+    by which gate was the marginal pass. Sizing rationale flags the
+    binding cap (per_trade_pct vs max_per_trade_dollars vs adv_cap).
+    Selection slot index lets you study slate-position vs realized PnL.
+    """
+    cand = entry.candidate
+    feats = dict(cand.features or {})
+    gates_cfg = cfg.get("signal_gates", {}) or {}
+    spec = [
+        ("rvol_min", "rvol"),
+        ("atr_pct_min", "atr_pct"),
+        ("range_expansion_min", "range_expansion"),
+        ("close_location_min", "close_location"),
+        ("ema_distance_min", "ema_distance"),
+        ("ema_slope_min", "ema_slope"),
+    ]
+    gates_breakdown = {}
+    for cfg_key, feat_key in spec:
+        thr = gates_cfg.get(cfg_key)
+        val = feats.get(feat_key)
+        gates_breakdown[feat_key] = {
+            "value": _safe_float(val),
+            "threshold": _safe_float(thr) if thr is not None else None,
+            "passed": (
+                True if thr is None
+                else (val is not None and float(val) >= float(thr))
+            ),
+        }
+
+    sizing_cfg = cfg.get("sizing", {}) or {}
+    risk_cfg = cfg.get("risk", {}) or {}
+    exits_cfg = cfg.get("exits", {}) or {}
+    entry_cfg = cfg.get("entry", {}) or {}
+
+    rec = {
+        "record_type": "entry_decision",
+        "ts": _now_utc_iso(),
+        "ticker": entry.ticker,
+        "link_id": link_id,
+        "venue_code": entry.venue_code,
+        "exchange": cand.exchange,
+        "candidate": {
+            "close": entry.close_price,
+            "signal_strength": cand.signal_strength,
+            "features": feats,
+        },
+        "gates": gates_breakdown,
+        "selection": {
+            "slot_index": slot_index,
+            "slate_size": slate_size,
+            "max_concurrent_positions": int(sizing_cfg.get("max_concurrent_positions") or 0),
+            "running_gross_at_entry": running_gross_at_entry,
+            "max_gross_exposure_pct": _safe_float(risk_cfg.get("max_gross_exposure_pct")),
+            "max_gross_exposure_dollars": _safe_float(risk_cfg.get("max_gross_exposure_dollars")),
+        },
+        "sizing": {
+            "qty": entry.qty,
+            "candidate_close": entry.close_price,
+            "notional_at_close": entry.qty * entry.close_price,
+            "equity_at_entry": _safe_float(entry.equity_at_entry),
+            "per_trade_pct": _safe_float(sizing_cfg.get("per_trade_pct")),
+            "max_per_trade_dollars": _safe_float(risk_cfg.get("max_per_trade_dollars")),
+            "max_position_as_adv_frac": _safe_float(risk_cfg.get("max_position_as_adv_frac")),
+            "avg_dollar_volume": _safe_float(feats.get("avg_dollar_volume")),
+            "adv_cap_dollars": _safe_float(adv_cap_dollars),
+            "target_dollars": _safe_float(target_dollars),
+            "binding_cap": binding_cap,
+        },
+        "bracket": {
+            "mode": entry_cfg.get("bracket_pricing_mode") or "actual_fill",
+            "target_pct": _safe_float(exits_cfg.get("target_pct")),
+            "stop_pct": _safe_float(exits_cfg.get("stop_pct")),
+            "max_hold_days": int(exits_cfg.get("max_hold_days") or 0),
+            "signal_fade_enabled": bool(exits_cfg.get("signal_fade_enabled", True)),
+        },
+        "risk": {
+            "daily_loss_pct": _safe_float(risk_cfg.get("daily_loss_pct")),
+            "daily_pnl_baseline_equity": _safe_float(state.get("daily_pnl_baseline_equity")),
+            "daily_pnl_tripped": bool(state.get("daily_pnl_tripped", False)),
+        },
+        "intraday_confirmation": {
+            "enabled": bool((entry_cfg.get("intraday_confirmation") or {}).get("enabled")),
+            "passed": intraday_confirmation_passed,
+        },
+        "config_hash": config_hash(cfg),
+    }
+    _append_trade_log(cfg, link_id, rec)
+
+
+def emit_parent_submitted(
+    cfg: dict, *, link_id: str, ticker: str, parent_id: str,
+    qty: int, venue_code: str, http_status: int,
+) -> None:
+    _append_trade_log(cfg, link_id, {
+        "record_type": "parent_submitted",
+        "ts": _now_utc_iso(),
+        "ticker": ticker, "link_id": link_id,
+        "parent_order_id": parent_id,
+        "qty": qty, "venue_code": venue_code,
+        "http_status": http_status,
+    })
+
+
+def emit_entry_fill(
+    cfg: dict, *, pos: dict[str, Any], ev: "FillEvent",
+) -> None:
+    link_id = pos.get("link_id") or ""
+    candidate_close = _safe_float(pos.get("candidate_close"))
+    fill_price = _safe_float(ev.filled_avg_price)
+    slippage_pct = (
+        (fill_price - candidate_close) / candidate_close
+        if (fill_price is not None and candidate_close and candidate_close > 0)
+        else None
+    )
+    submitted_at = pos.get("entry_timestamp")
+    fill_latency_s = None
+    if submitted_at:
+        try:
+            sub_dt = datetime.fromisoformat(submitted_at.replace("Z", "+00:00"))
+            fill_latency_s = (datetime.now(timezone.utc) - sub_dt).total_seconds()
+        except Exception:
+            pass
+    _append_trade_log(cfg, link_id, {
+        "record_type": "entry_fill",
+        "ts": _now_utc_iso(),
+        "ticker": ev.ticker, "link_id": link_id,
+        "parent_order_id": ev.order_id,
+        "filled_qty": ev.filled_qty,
+        "filled_avg_price": fill_price,
+        "candidate_close": candidate_close,
+        "slippage_vs_candidate_close_pct": slippage_pct,
+        "fill_latency_seconds": fill_latency_s,
+        "partial_fill": (
+            ev.filled_qty > 0 and ev.filled_qty < int(pos.get("qty") or 0)
+        ),
+    })
+
+
+def emit_bracket_attached(
+    cfg: dict, *, pos: dict[str, Any], target_id: str, stop_id: str,
+    target_price: float, stop_price: float,
+) -> None:
+    link_id = pos.get("link_id") or ""
+    fill_price = _safe_float(pos.get("entry_price"))
+    _append_trade_log(cfg, link_id, {
+        "record_type": "bracket_attached",
+        "ts": _now_utc_iso(),
+        "ticker": link_id.split("-")[1] if "-" in link_id else "?",
+        "link_id": link_id,
+        "target_order_id": target_id, "stop_order_id": stop_id,
+        "target_price": target_price, "stop_price": stop_price,
+        "fill_price": fill_price,
+        "target_pct": _safe_float(pos.get("target_pct")),
+        "stop_pct": _safe_float(pos.get("stop_pct")),
+        "computed_target_check": (
+            round(fill_price * (1 + float(pos.get("target_pct"))), 2)
+            if fill_price is not None and pos.get("target_pct") is not None
+            else None
+        ),
+        "computed_stop_check": (
+            round(fill_price * (1 - float(pos.get("stop_pct"))), 2)
+            if fill_price is not None and pos.get("stop_pct") is not None
+            else None
+        ),
+    })
+
+
+def emit_order_event(
+    cfg: dict, *, pos: dict[str, Any], role: str, ev: "FillEvent",
+) -> None:
+    """Non-terminal order events (child fills don't go here when they
+    cause closure; the closure record covers those). Use this for
+    intermediate state changes the analyst might want to inspect."""
+    link_id = pos.get("link_id") or ""
+    _append_trade_log(cfg, link_id, {
+        "record_type": "order_event",
+        "ts": _now_utc_iso(),
+        "ticker": ev.ticker, "link_id": link_id,
+        "role": role,
+        "order_id": ev.order_id,
+        "status": ev.status,
+        "filled_qty": ev.filled_qty,
+        "filled_avg_price": _safe_float(ev.filled_avg_price),
+    })
+
+
+def emit_intraday_tick(
+    cfg: dict, *, pos: dict[str, Any], ticker: str,
+    quote: dict[str, Any], now_utc: datetime,
+    session_end_utc: datetime | None = None,
+) -> None:
+    """One snapshot per minute per held position. Captures the quote
+    state, the position's running P&L + excursion, distance to
+    target/stop, and time-in-trade indicators."""
+    link_id = pos.get("link_id") or ""
+    bid = _safe_float(quote.get("bid"))
+    ask = _safe_float(quote.get("ask"))
+    last = _safe_float(quote.get("last"))
+    bid_size = _safe_float(quote.get("bid_size"))
+    ask_size = _safe_float(quote.get("ask_size"))
+    mid = (bid + ask) / 2.0 if (bid and ask and ask > bid) else None
+    spread = (ask - bid) if (bid and ask) else None
+    spread_pct = (spread / mid) if (spread is not None and mid and mid > 0) else None
+
+    metadata = quote.get("metadata") or {}
+    day_open = _safe_float(metadata.get("open"))
+    day_high = _safe_float(metadata.get("high"))
+    day_low = _safe_float(metadata.get("low"))
+    day_close = _safe_float(metadata.get("close"))
+    day_volume = _safe_float(metadata.get("volume"))
+    prev_close = _safe_float(metadata.get("prev_close"))
+
+    entry_price = _safe_float(pos.get("entry_price"))
+    qty = int(pos.get("qty") or 0)
+    target_price = _safe_float(pos.get("target_price"))
+    stop_price = _safe_float(pos.get("stop_price"))
+    # Use mid for P&L calc; fall back to last when only one side has a quote.
+    mark = mid if mid is not None else last
+    unrealized_pnl = (
+        (mark - entry_price) * qty
+        if (mark is not None and entry_price is not None) else None
+    )
+    unrealized_pnl_pct = (
+        (mark - entry_price) / entry_price
+        if (mark is not None and entry_price is not None and entry_price > 0)
+        else None
+    )
+
+    # Update peak/trough on the live mark — finer-grained than the
+    # daily mark. The daily_mark function still updates from day's
+    # high/low at session end so the offline analyst can cross-check.
+    prev_peak = _safe_float(pos.get("peak_since_entry")) or entry_price
+    prev_trough = _safe_float(pos.get("trough_since_entry")) or entry_price
+    new_peak = max(prev_peak, mark) if (prev_peak is not None and mark is not None) else (prev_peak or mark)
+    new_trough = min(prev_trough, mark) if (prev_trough is not None and mark is not None) else (prev_trough or mark)
+    if new_peak is not None:
+        pos["peak_since_entry"] = new_peak
+    if new_trough is not None:
+        pos["trough_since_entry"] = new_trough
+    mfe_dollar = (
+        (new_peak - entry_price) * qty
+        if (new_peak is not None and entry_price is not None) else None
+    )
+    mae_dollar = (
+        (new_trough - entry_price) * qty
+        if (new_trough is not None and entry_price is not None) else None
+    )
+    drawdown_from_peak_pct = (
+        (mark - new_peak) / new_peak
+        if (mark is not None and new_peak and new_peak > 0)
+        else None
+    )
+    runup_from_trough_pct = (
+        (mark - new_trough) / new_trough
+        if (mark is not None and new_trough and new_trough > 0)
+        else None
+    )
+
+    distance_to_target_pct = (
+        (target_price - mark) / mark
+        if (target_price is not None and mark and mark > 0)
+        else None
+    )
+    distance_to_stop_pct = (
+        (stop_price - mark) / mark
+        if (stop_price is not None and mark and mark > 0)
+        else None
+    )
+    target_to_stop_ratio = (
+        (distance_to_target_pct / abs(distance_to_stop_pct))
+        if (distance_to_target_pct is not None
+            and distance_to_stop_pct not in (None, 0))
+        else None
+    )
+
+    # Time-in-trade.
+    entry_iso = pos.get("entry_timestamp")
+    minutes_held = None
+    if entry_iso:
+        try:
+            sub_dt = datetime.fromisoformat(entry_iso.replace("Z", "+00:00"))
+            minutes_held = int((now_utc - sub_dt).total_seconds() / 60)
+        except Exception:
+            pass
+    session_minutes_remaining = None
+    if session_end_utc is not None:
+        session_minutes_remaining = int(
+            max(0, (session_end_utc - now_utc).total_seconds() / 60)
+        )
+
+    rec = {
+        "record_type": "intraday_tick",
+        "ts": _now_utc_iso(),
+        "ticker": ticker,
+        "link_id": link_id,
+        "quote": {
+            "bid": bid, "ask": ask, "mid": mid,
+            "spread": spread, "spread_pct": spread_pct,
+            "bid_size": bid_size, "ask_size": ask_size,
+            "last": last,
+            "ts": quote.get("timestamp"),
+        },
+        "session_bar": {
+            "open": day_open, "high": day_high, "low": day_low,
+            "close": day_close, "volume": day_volume,
+            "prev_close": prev_close,
+            "gap_from_prev_close_pct": (
+                (day_open - prev_close) / prev_close
+                if (day_open is not None and prev_close and prev_close > 0)
+                else None
+            ),
+            "intraday_range_pct": (
+                (day_high - day_low) / day_open
+                if (day_high is not None and day_low is not None
+                    and day_open and day_open > 0)
+                else None
+            ),
+        },
+        "position": {
+            "qty": qty,
+            "entry_price": entry_price,
+            "mark": mark,
+            "current_value": (mark * qty) if (mark is not None) else None,
+            "unrealized_pnl": unrealized_pnl,
+            "unrealized_pnl_pct": unrealized_pnl_pct,
+            "target_price": target_price,
+            "stop_price": stop_price,
+        },
+        "excursion": {
+            "peak_since_entry": new_peak,
+            "trough_since_entry": new_trough,
+            "mfe_dollar": mfe_dollar,
+            "mae_dollar": mae_dollar,
+            "drawdown_from_peak_pct": drawdown_from_peak_pct,
+            "runup_from_trough_pct": runup_from_trough_pct,
+        },
+        "distance": {
+            "to_target_pct": distance_to_target_pct,
+            "to_stop_pct": distance_to_stop_pct,
+            "target_to_stop_ratio": target_to_stop_ratio,
+        },
+        "time": {
+            "minutes_held": minutes_held,
+            "session_minutes_remaining": session_minutes_remaining,
+            "entry_timestamp": entry_iso,
+        },
+    }
+    _append_trade_log(cfg, link_id, rec)
+
+
+def emit_exit(
+    cfg: dict, *, pos: dict[str, Any], closure_record: dict[str, Any],
+) -> None:
+    """Closure twin to the daily_summary closure record. Carries the
+    entry_decision-equivalent context plus everything the analyst
+    needs about the exit (slippage, hold duration, MFE/MAE)."""
+    link_id = pos.get("link_id") or ""
+    rec = dict(closure_record)
+    rec["record_type"] = "exit"
+    rec["ts"] = rec.get("exit_timestamp") or _now_utc_iso()
+    _append_trade_log(cfg, link_id, rec)
+
+
+# ---- intraday tick loop
+
+
+def _fetch_quotes_batch(
+    instruments: list[tuple[str, str]],
+    http: httpx.Client,
+    api_key: str,
+) -> dict[str, dict[str, Any]]:
+    """POST /api/v2/quotes with multiple instruments. Returns a dict
+    keyed by canonical_symbol. Empty / failure → empty dict (caller
+    skips the tick log for missing tickers)."""
+    if not instruments:
+        return {}
+    body = {
+        "apikey": api_key,
+        "instruments": [
+            {"venue_code": v, "canonical_symbol": s} for s, v in instruments
+        ],
+    }
+    try:
+        r = http.post("/api/v2/quotes", json=body, headers=_api_headers(api_key))
+    except httpx.HTTPError as e:
+        LOG.warning("intraday quote batch fetch failed: %s", e)
+        return {}
+    if r.status_code != 200:
+        LOG.warning(
+            "intraday quote batch HTTP %d: %s",
+            r.status_code, (r.text or "")[:200],
+        )
+        return {}
+    try:
+        rows = r.json().get("data") or []
+    except ValueError:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        sym = (row or {}).get("instrument", {}).get("canonical_symbol")
+        q = (row or {}).get("quote") or {}
+        if sym:
+            out[sym] = q
+    return out
+
+
+def run_intraday_tick_logging(
+    cfg: dict,
+    state: State,
+    http: httpx.Client,
+    api_key: str,
+    *,
+    state_path: Path,
+    now_utc: datetime,
+    interval_seconds: int = 60,
+) -> list[str]:
+    """Once per main-loop tick: log a per-position quote snapshot if
+    at least ``interval_seconds`` have elapsed since that position's
+    last tick. Mutates pos.last_tick_logged_at + pos.peak/trough_since
+    in place. Returns the list of tickers logged this call."""
+    open_positions = state.get("open_positions") or {}
+    due: list[tuple[str, str]] = []  # (symbol, venue)
+    for ticker, pos in open_positions.items():
+        if pos.get("status") != "filled":
+            continue
+        last_iso = pos.get("last_tick_logged_at")
+        if last_iso:
+            try:
+                last_dt = datetime.fromisoformat(last_iso.replace("Z", "+00:00"))
+                if (now_utc - last_dt).total_seconds() < interval_seconds:
+                    continue
+            except Exception:
+                pass
+        due.append((
+            ticker,
+            pos.get("venue_code") or cfg["sizing"]["default_venue_code"],
+        ))
+    if not due:
+        return []
+
+    quotes = _fetch_quotes_batch(due, http, api_key)
+    if not quotes:
+        return []
+
+    logged: list[str] = []
+    # Compute today's session-end UTC for "minutes remaining" — used
+    # in the tick payload. Falls back to None when the cfg session
+    # block isn't loadable.
+    session_end_utc: datetime | None = None
+    try:
+        import pytz
+        session_end_str = (cfg.get("session") or {}).get("end") or "15:55"
+        h, m = (int(p) for p in session_end_str.split(":")[:2])
+        et = pytz.timezone((cfg.get("session") or {}).get("timezone") or "America/New_York")
+        today_et = _to_eastern(now_utc).date()
+        session_end_utc = et.localize(
+            datetime.combine(today_et, _dtime(h, m))
+        ).astimezone(timezone.utc)
+    except Exception:
+        session_end_utc = None
+
+    dirty = False
+    for ticker, _venue in due:
+        q = quotes.get(ticker)
+        if q is None:
+            continue
+        pos = open_positions.get(ticker)
+        if pos is None:
+            continue
+        try:
+            emit_intraday_tick(
+                cfg, pos=pos, ticker=ticker, quote=q,
+                now_utc=now_utc, session_end_utc=session_end_utc,
+            )
+            pos["last_tick_logged_at"] = now_utc.isoformat()
+            dirty = True
+            logged.append(ticker)
+        except Exception as e:
+            LOG.warning("emit_intraday_tick failed for %s: %s", ticker, e)
+    if dirty:
+        save_state(state, state_path)
+    return logged
+
+
 def close_position(
     ticker: str,
     state: State,
@@ -2126,6 +2726,9 @@ def close_position(
         "link_id": pos.get("link_id"),
     }
     append_closure_record(summary_path, record)
+    # Per-trade rich log: write the exit record under the same
+    # link_id BEFORE we drop pos from state.
+    emit_exit(cfg, pos=pos, closure_record=record)
     state["open_positions"].pop(ticker, None)
     state.get("pending_signal_fade_exits", {}).pop(ticker, None)
     save_state(state, state_path)
@@ -2792,10 +3395,74 @@ def run_session_entry_pass(
         LOG.info("dry-run: not submitting entry orders")
         return
 
-    for entry in entries:
+    # Compute the running gross at the START of the slate (before
+    # any of these submissions add to it) for the entry_decision
+    # records. select_entries already gated on this; we re-compute
+    # so each entry_decision can carry the snapshot.
+    open_positions_at_decision = state.get("open_positions") or {}
+    running_gross_at_slate_start = current_gross_exposure(
+        open_positions_at_decision, latest_prices={},
+    )
+
+    sizing_cfg = cfg.get("sizing") or {}
+    risk_cfg = cfg.get("risk") or {}
+    per_trade_pct = float(sizing_cfg.get("per_trade_pct") or 0.0)
+    max_per_trade_dollars = risk_cfg.get("max_per_trade_dollars")
+    max_pos_adv = risk_cfg.get("max_position_as_adv_frac")
+
+    for slot_index, entry in enumerate(entries):
+        # Reconstruct sizing rationale: which cap was binding?
+        # equity_pct_target = equity * per_trade_pct, optionally
+        # capped by max_per_trade_dollars and ADV cap. The binding
+        # cap is whichever produced the smallest target_dollars.
+        adv = (entry.candidate.features or {}).get("avg_dollar_volume")
+        adv_cap_dollars = (
+            float(adv) * float(max_pos_adv)
+            if (adv is not None and max_pos_adv is not None and float(max_pos_adv) > 0)
+            else None
+        )
+        candidates_target_dollars = [equity * per_trade_pct]
+        binding_cap_label = "per_trade_pct"
+        if max_per_trade_dollars is not None:
+            candidates_target_dollars.append(float(max_per_trade_dollars))
+            if float(max_per_trade_dollars) < candidates_target_dollars[0]:
+                binding_cap_label = "max_per_trade_dollars"
+        if adv_cap_dollars is not None and adv_cap_dollars < min(candidates_target_dollars):
+            binding_cap_label = "adv_cap"
+        target_dollars = min(candidates_target_dollars + (
+            [adv_cap_dollars] if adv_cap_dollars is not None else []
+        ))
+
+        # The link_id pattern matches the one submit_*_market_buy
+        # uses (ticker + unix seconds), but we generate it here so
+        # the entry_decision record can be filed under the same path.
+        link_id_for_log = f"BOWAKA-{entry.ticker}-{int(time.time())}"
         try:
-            submit_entry(entry, cfg, http, api_key,
-                         state=state, state_path=state_path)
+            emit_entry_decision(
+                cfg, link_id=link_id_for_log, entry=entry, state=state,
+                slot_index=slot_index, slate_size=len(entries),
+                running_gross_at_entry=running_gross_at_slate_start,
+                binding_cap=binding_cap_label,
+                target_dollars=target_dollars,
+                adv_cap_dollars=adv_cap_dollars,
+                # Item 9 gate ran upstream; if entry survived the
+                # filter we know it passed (or wasn't applied).
+                intraday_confirmation_passed=(
+                    True if (cfg.get("entry") or {}).get(
+                        "intraday_confirmation", {}
+                    ).get("enabled") else None
+                ),
+            )
+        except Exception as e:
+            LOG.warning("emit_entry_decision failed for %s: %s", entry.ticker, e)
+        # Carry the same link_id forward so submit_* uses it for the
+        # parent_submitted record (and pos["link_id"]).
+        try:
+            submit_entry(
+                entry, cfg, http, api_key,
+                state=state, state_path=state_path,
+                link_id_override=link_id_for_log,
+            )
         except httpx.HTTPError as e:
             LOG.exception("entry submit network error for %s: %s",
                           entry.ticker, e)
@@ -2905,7 +3572,7 @@ def run_loop(
                     # Subsequent ticks within the same session.
                     try:
                         events = poll_fills(state, http_client, api_key,
-                                             state_path=state_path)
+                                             state_path=state_path, cfg=cfg)
                     except httpx.HTTPError as e:
                         LOG.exception("poll_fills network error: %s", e)
                         events = []
@@ -2928,6 +3595,24 @@ def run_loop(
                             LOG.info("OCO brackets attached post-fill: %s", attached)
                     except Exception as e:
                         LOG.exception("submit_pending_oco_children failed: %s", e)
+                    # Per-trade rich logging: 1-minute intraday tick
+                    # snapshot per filled position. Idempotent — each
+                    # position has its own ``last_tick_logged_at`` so
+                    # this is a no-op until 60s have elapsed since
+                    # the previous snapshot for that ticker.
+                    try:
+                        tick_interval = int(
+                            (cfg.get("logging") or {}).get(
+                                "intraday_tick_interval_seconds", 60,
+                            )
+                        )
+                        run_intraday_tick_logging(
+                            cfg, state, http_client, api_key,
+                            state_path=state_path, now_utc=now,
+                            interval_seconds=tick_interval,
+                        )
+                    except Exception as e:
+                        LOG.exception("intraday tick logging error: %s", e)
                     # Phase 4: daily P&L tracking.
                     try:
                         eq = fetch_equity(http_client, api_key)

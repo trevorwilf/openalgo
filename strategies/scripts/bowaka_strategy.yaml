@@ -112,3 +112,9 @@ indicators:
 logging:
   level: "INFO"
   file: "logs/bowaka_strategy.log"
+  # Per-trade rich logs at data/trades/<link_id>.jsonl. Each held
+  # position is sampled this often — 60s = standard 1-minute
+  # cadence the user wants for offline tuning analysis. Lower the
+  # value to densify ticks (e.g. 30s for high-vol regimes); raise
+  # it to reduce API load if the broker rate-limits quotes.
+  intraday_tick_interval_seconds: 60

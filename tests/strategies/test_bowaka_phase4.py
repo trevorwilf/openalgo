@@ -1173,6 +1173,241 @@ def test_daily_summary_written_only_once_per_day(
     assert rec is None
 
 
+# ---------------------------------------------------------------- per-trade rich logging
+
+
+def _read_trade_jsonl(cfg, link_id):
+    p = Path(cfg["paths"]["daily_summary_path"]).parent / "trades" / f"{link_id}.jsonl"
+    if not p.exists():
+        return []
+    return [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_emit_entry_decision_writes_per_trade_file_with_full_context(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """The decision record carries everything a quant would want
+    about why we picked this name at this moment: per-gate breakdown,
+    sizing rationale, slot index, market regime."""
+    link_id = "BOWAKA-AAPL-1234"
+    cand = strategy_module.Candidate(
+        ticker="AAPL", close=100.0, signal_strength=9.0,
+        venue_code="XNAS", exchange="NASDAQ",
+        features={
+            "rvol": 2.5, "atr_pct": 0.08, "range_expansion": 1.4,
+            "gap_pct": 0.02, "close_location": 0.85,
+            "ema_distance": 0.05, "ema_slope": 0.02,
+            "avg_dollar_volume": 1_000_000.0,
+        },
+    )
+    entry = strategy_module.Entry(
+        ticker="AAPL", qty=10, close_price=100.0, venue_code="XNAS",
+        candidate=cand, equity_at_entry=100_000.0,
+    )
+    state = strategy_module.blank_state()
+    state["daily_pnl_baseline_equity"] = 100_000.0
+
+    strategy_module.emit_entry_decision(
+        cfg_with_paths, link_id=link_id, entry=entry, state=state,
+        slot_index=0, slate_size=5,
+        running_gross_at_entry=0.0,
+        binding_cap="per_trade_pct",
+        target_dollars=10_000.0,
+        adv_cap_dollars=30_000.0,
+        intraday_confirmation_passed=None,
+    )
+
+    rows = _read_trade_jsonl(cfg_with_paths, link_id)
+    assert len(rows) == 1
+    rec = rows[0]
+    assert rec["record_type"] == "entry_decision"
+    assert rec["ticker"] == "AAPL"
+    assert rec["link_id"] == link_id
+    assert rec["candidate"]["signal_strength"] == 9.0
+    assert rec["candidate"]["features"]["rvol"] == 2.5
+    # Per-gate breakdown.
+    assert rec["gates"]["rvol"]["value"] == 2.5
+    assert rec["gates"]["rvol"]["threshold"] == 1.5
+    assert rec["gates"]["rvol"]["passed"] is True
+    # Sizing rationale.
+    assert rec["sizing"]["binding_cap"] == "per_trade_pct"
+    assert rec["sizing"]["target_dollars"] == 10_000.0
+    assert rec["sizing"]["adv_cap_dollars"] == 30_000.0
+    assert rec["sizing"]["equity_at_entry"] == 100_000.0
+    # Selection slot context.
+    assert rec["selection"]["slot_index"] == 0
+    assert rec["selection"]["slate_size"] == 5
+    # Bracket config snapshot.
+    assert rec["bracket"]["mode"] == "actual_fill"
+    assert rec["bracket"]["target_pct"] == 0.15
+    assert rec["bracket"]["stop_pct"] == 0.08
+    # Risk snapshot at decision time.
+    assert rec["risk"]["daily_pnl_baseline_equity"] == 100_000.0
+    assert rec["risk"]["daily_pnl_tripped"] is False
+
+
+def test_emit_intraday_tick_writes_full_quote_and_position_state(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """One snapshot per minute per held position: quote, session
+    bar, position P&L, MFE/MAE, distance to bracket levels, time-
+    in-trade. The analyst can replay the position's life on a per-
+    minute grid."""
+    from datetime import datetime, timezone, timedelta
+    link_id = "BOWAKA-BLDP-1234"
+    pos = {
+        "qty": 100, "entry_price": 5.00, "status": "filled",
+        "venue_code": "XNAS", "link_id": link_id,
+        "target_price": 5.75, "stop_price": 4.60,
+        "entry_timestamp": (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat(),
+        "peak_since_entry": 5.10, "trough_since_entry": 4.95,
+    }
+    quote = {
+        "bid": "5.05", "ask": "5.06", "last": "5.05",
+        "bid_size": "200", "ask_size": "150",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "metadata": {
+            "open": "5.00", "high": "5.20", "low": "4.95",
+            "close": "5.05", "volume": "1234567",
+            "prev_close": "4.76",
+        },
+    }
+    strategy_module.emit_intraday_tick(
+        cfg_with_paths, pos=pos, ticker="BLDP", quote=quote,
+        now_utc=datetime.now(timezone.utc),
+    )
+    rows = _read_trade_jsonl(cfg_with_paths, link_id)
+    assert len(rows) == 1
+    rec = rows[0]
+    assert rec["record_type"] == "intraday_tick"
+    # Quote section
+    assert rec["quote"]["bid"] == 5.05
+    assert rec["quote"]["ask"] == 5.06
+    assert abs(rec["quote"]["mid"] - 5.055) < 1e-9
+    assert abs(rec["quote"]["spread"] - 0.01) < 1e-9
+    # Session bar context
+    assert rec["session_bar"]["open"] == 5.00
+    assert rec["session_bar"]["high"] == 5.20
+    assert rec["session_bar"]["prev_close"] == 4.76
+    # Gap from prev_close = (5.00 - 4.76) / 4.76 ≈ 0.0504
+    assert abs(rec["session_bar"]["gap_from_prev_close_pct"] - (5.00 - 4.76) / 4.76) < 1e-6
+    # Position P&L: mid 5.055 vs entry 5.00 → +5.5 on 100 shares
+    assert abs(rec["position"]["unrealized_pnl"] - 5.5) < 1e-6
+    # Excursion: peak should expand to 5.10 (was 5.10, mid 5.055 didn't
+    # exceed; we don't downshift) — wait, peak is max(prev_peak, mark)
+    # = max(5.10, 5.055) = 5.10. Trough min(4.95, 5.055) = 4.95.
+    assert rec["excursion"]["peak_since_entry"] == 5.10
+    assert rec["excursion"]["trough_since_entry"] == 4.95
+    # Distance fields
+    # to_target = (5.75 - 5.055) / 5.055 ≈ 0.1374
+    assert rec["distance"]["to_target_pct"] is not None
+    assert rec["distance"]["to_stop_pct"] is not None
+    # Time
+    assert rec["time"]["minutes_held"] is not None
+    assert rec["time"]["minutes_held"] >= 29  # ~30 min per setup
+
+
+def test_run_intraday_tick_logging_throttles_to_interval(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Second call within the interval window is a no-op for a given
+    ticker — last_tick_logged_at gates re-emission."""
+    from datetime import datetime, timezone, timedelta
+    state = strategy_module.blank_state()
+    pos = {
+        "qty": 100, "entry_price": 5.00, "status": "filled",
+        "venue_code": "XNAS", "link_id": "BOWAKA-BLDP-1",
+        "entry_timestamp": (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
+    }
+    state["open_positions"] = {"BLDP": pos}
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+
+    n_calls = [0]
+
+    def handler(req):
+        n_calls[0] += 1
+        return httpx.Response(200, json={
+            "data": [{
+                "instrument": {"canonical_symbol": "BLDP"},
+                "quote": {
+                    "bid": "5.05", "ask": "5.06", "last": "5.05",
+                    "metadata": {"open": "5.00", "high": "5.20",
+                                 "low": "4.95", "close": "5.05",
+                                 "volume": "1000", "prev_close": "4.76"},
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            }]
+        })
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+    now = datetime.now(timezone.utc)
+    out1 = strategy_module.run_intraday_tick_logging(
+        cfg_with_paths, state, http, "k",
+        state_path=state_path, now_utc=now, interval_seconds=60,
+    )
+    assert "BLDP" in out1
+    assert n_calls[0] == 1
+    # Second call 30s later — within the 60s window → no-op, no API call.
+    out2 = strategy_module.run_intraday_tick_logging(
+        cfg_with_paths, state, http, "k",
+        state_path=state_path,
+        now_utc=now + timedelta(seconds=30), interval_seconds=60,
+    )
+    assert out2 == []
+    assert n_calls[0] == 1  # batch was NOT re-issued
+    # Third call 70s later — past the window → re-emits.
+    out3 = strategy_module.run_intraday_tick_logging(
+        cfg_with_paths, state, http, "k",
+        state_path=state_path,
+        now_utc=now + timedelta(seconds=70), interval_seconds=60,
+    )
+    assert "BLDP" in out3
+    assert n_calls[0] == 2
+
+
+def test_emit_exit_writes_to_per_trade_file(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """When close_position fires it must also append the exit
+    record to the per-trade file (in addition to the daily summary)."""
+    state = strategy_module.blank_state()
+    link_id = "BOWAKA-AAPL-9999"
+    state["open_positions"] = {
+        "AAPL": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "T-1", "stop": "S-1"},
+            "qty": 10, "entry_price": 100.0,
+            "entry_timestamp": "2026-05-04T13:30:00+00:00",
+            "status": "filled",
+            "venue_code": "XNAS", "link_id": link_id,
+            "peak_since_entry": 110.0, "trough_since_entry": 95.0,
+            "bracket_pricing_mode": "actual_fill",
+            "target_pct": 0.15, "stop_pct": 0.08,
+        }
+    }
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+
+    strategy_module.close_position(
+        "AAPL", state, cfg_with_paths,
+        state_path=state_path, summary_path=summary_path,
+        exit_price=115.0, reason="target_hit",
+    )
+    # Per-trade jsonl carries the exit record too.
+    rows = _read_trade_jsonl(cfg_with_paths, link_id)
+    exit_rows = [r for r in rows if r.get("record_type") == "exit"]
+    assert len(exit_rows) == 1
+    rec = exit_rows[0]
+    assert rec["ticker"] == "AAPL"
+    assert rec["link_id"] == link_id
+    assert rec["reason"] == "target_hit"
+    assert rec["exit_price"] == 115.0
+    assert rec["mfe_dollar"] == 100.0
+
+
 # ---------------------------------------------------------------- prefilter handshake
 
 
