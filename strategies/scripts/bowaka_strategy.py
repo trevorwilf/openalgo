@@ -1010,7 +1010,15 @@ def submit_oco_children(
 
     target_price = round(float(fill_price) * (1.0 + target_pct), 2)
     stop_price = round(float(fill_price) * (1.0 - stop_pct), 2)
-    link_id = f"{pos.get('link_id') or 'BOWAKA-' + ticker}-OCO"
+    # Each OCO submission needs a unique client_order_id. The
+    # position's link_id is fixed for the trade's lifetime; appending
+    # the current unix timestamp keeps every retry / re-bracket
+    # attempt distinct from prior submissions Alpaca remembers
+    # (40010001 "client_order_id must be unique" otherwise rejects
+    # the next-day re-bracket after the original OCO expired).
+    link_id = (
+        f"{pos.get('link_id') or 'BOWAKA-' + ticker}-OCO-{int(time.time())}"
+    )
 
     body = {
         "apikey": api_key,
