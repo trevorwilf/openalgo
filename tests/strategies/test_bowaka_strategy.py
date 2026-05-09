@@ -32,6 +32,35 @@ def test_config_hash_deterministic(strategy_module, cfg_dict):
     assert h1 == h2 and len(h1) == 8
 
 
+def test_setup_logging_writes_to_file_without_buffering_lag(
+    strategy_module, tmp_path,
+):
+    """Regression: the default ``logging.FileHandler`` block-buffers
+    writes, which in a long-running daemon makes the log file look
+    frozen for many minutes. Ops monitoring needs each record visible
+    on disk the moment it's emitted. _LineBufferedFileHandler opens
+    the underlying file with buffering=1 (line-buffered) so each
+    record (which ends in '\\n') flushes immediately."""
+    import logging
+    log_path = tmp_path / "test_bowaka.log"
+    cfg = {"logging": {"level": "INFO", "file": str(log_path)}}
+    strategy_module.setup_logging(cfg)
+    log = logging.getLogger("bowaka_strategy")
+    log.info("first record")
+    # Read the file IMMEDIATELY without flushing the handler. With
+    # the old block-buffered FileHandler this would be empty until
+    # the buffer filled (~8KB). With line buffering it's there now.
+    content = log_path.read_text(encoding="utf-8")
+    assert "first record" in content
+    log.info("second record")
+    content2 = log_path.read_text(encoding="utf-8")
+    assert "second record" in content2
+    # And the count should be 2 distinct records — sanity check that
+    # we're not accidentally double-handler'ing.
+    assert content2.count("first record") == 1
+    assert content2.count("second record") == 1
+
+
 def test_config_hash_changes_when_value_changes(strategy_module, cfg_dict):
     h1 = strategy_module.config_hash(cfg_dict)
     cfg2 = json.loads(json.dumps(cfg_dict))

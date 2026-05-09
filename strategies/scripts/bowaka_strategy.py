@@ -141,13 +141,39 @@ def config_hash(cfg: dict) -> str:
     return hashlib.sha256(blob).hexdigest()[:8]
 
 
+class _LineBufferedFileHandler(logging.FileHandler):
+    """FileHandler whose underlying file is opened with ``buffering=1``
+    (line-buffered). The default ``logging.FileHandler`` block-
+    buffers writes; in a long-running daemon with low log volume the
+    buffer fills slowly and the file on disk looks frozen for
+    minutes at a time, even when the process is actively logging.
+    Live ops monitoring (and post-incident triage) need each record
+    visible the instant it's emitted. Line buffering flushes on
+    every newline, and every log record ends in ``\\n``."""
+
+    def _open(self):
+        return open(
+            self.baseFilename,
+            self.mode,
+            buffering=1,  # line-buffered (text mode only)
+            encoding=self.encoding or "utf-8",
+            errors=self.errors,
+        )
+
+
 def setup_logging(cfg: dict) -> None:
     log_cfg = cfg.get("logging", {})
     level = getattr(logging, log_cfg.get("level", "INFO").upper())
+    # Force stdout to flush per write so the watchdog stdout log
+    # mirrors the strategy's logger in near-real-time.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
     if path := log_cfg.get("file"):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(path))
+        handlers.append(_LineBufferedFileHandler(path))
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
