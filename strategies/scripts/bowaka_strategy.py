@@ -1020,10 +1020,20 @@ def submit_oco_children(
         f"{pos.get('link_id') or 'BOWAKA-' + ticker}-OCO-{int(time.time())}"
     )
 
+    # Overnight gap protection: default to GTC so the bracket survives
+    # past 16:00 ET expiry and stays live for next-day open. DAY-TIF
+    # OCOs auto-cancel at session close, leaving positions naked
+    # overnight — observed live (BLDP, 2026-05-08) costing ~$300+ in
+    # slippage when the next-day reactive re-bracket arrived after the
+    # price had already drifted past the stop level. Operator can
+    # opt back to DAY via ``cfg.exits.oco_time_in_force`` for
+    # backtest-parity / debugging.
+    oco_tif = (cfg.get("exits") or {}).get("oco_time_in_force", "GTC")
+
     body = {
         "apikey": api_key,
         "combo_type": "OCO",
-        "time_in_force": "DAY",
+        "time_in_force": oco_tif,
         "session": "REGULAR",
         "link_id": link_id,
         "legs": [
@@ -3570,6 +3580,27 @@ def run_loop(
                 if state.get("session_date") != today_iso:
                     LOG.info("first session tick for %s — entry pass",
                              today_iso)
+                    # Daily reconcile: reconcile_at_startup only fires
+                    # at process bootstrap, but a long-running strategy
+                    # crosses session boundaries during which OCO
+                    # children may have terminally canceled (DAY-TIF
+                    # expiry pre-GTC, or any operator-side cancel).
+                    # Run reconcile on the first tick of each new
+                    # session so submit_pending_oco_children's
+                    # idempotency check sees an empty slot for any
+                    # carryover position whose bracket expired
+                    # overnight. With GTC OCOs this is mostly a
+                    # safety net; with DAY OCOs it's load-bearing.
+                    try:
+                        reconcile_at_startup(
+                            state, http_client, api_key,
+                            state_path=state_path,
+                            summary_path=summary_path,
+                        )
+                    except Exception as e:
+                        LOG.exception(
+                            "daily reconcile error (continuing): %s", e,
+                        )
                     run_session_entry_pass(
                         cfg, state, state_path, http_client, api_key,
                         today_et=today_et,

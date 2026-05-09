@@ -963,6 +963,85 @@ def test_submit_entry_unknown_mode_raises(strategy_module, cfg_dict, tmp_path):
         )
 
 
+def test_submit_oco_children_uses_gtc_tif_by_default(
+    strategy_module, cfg_dict, tmp_path,
+):
+    """Overnight gap protection: the OCO bracket must ship with
+    time_in_force='GTC' by default so it survives the 16:00 ET
+    DAY-TIF expiry and stays live for next-session-open. Live BLDP
+    2026-05-08 took ~$300 avoidable slippage on a reactive next-day
+    re-bracket; this is the structural fix."""
+    sent_bodies: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        sent_bodies.append(json.loads(req.content))
+        return httpx.Response(200, json={
+            "data": {"native_response": {"id": "P-LIMIT", "legs": [
+                {"id": "S-1", "order_type": "stop"},
+            ]}}
+        })
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "AAPL": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "", "stop": ""},
+            "qty": 10, "entry_price": 13.00, "status": "filled",
+            "venue_code": "XNAS", "bracket_pricing_mode": "actual_fill",
+            "target_pct": 0.15, "stop_pct": 0.08,
+            "link_id": "BOWAKA-AAPL-100",
+        }
+    }
+    strategy_module.submit_pending_oco_children(
+        state, cfg_dict, http, "k",
+        state_path=tmp_path / "state.json",
+    )
+    assert sent_bodies, "OCO submission should have fired"
+    assert sent_bodies[0]["time_in_force"] == "GTC"
+    assert sent_bodies[0]["combo_type"] == "OCO"
+
+
+def test_submit_oco_children_honors_operator_day_override(
+    strategy_module, cfg_dict, tmp_path,
+):
+    """Backtest-parity / legacy operators can opt back to DAY by
+    setting cfg.exits.oco_time_in_force='DAY'."""
+    cfg = dict(cfg_dict)
+    cfg["exits"] = {**cfg["exits"], "oco_time_in_force": "DAY"}
+    sent_bodies: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        sent_bodies.append(json.loads(req.content))
+        return httpx.Response(200, json={
+            "data": {"native_response": {"id": "P-LIMIT", "legs": [
+                {"id": "S-1", "order_type": "stop"},
+            ]}}
+        })
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "AAPL": {
+            "parent_order_id": "P-1",
+            "child_order_ids": {"target": "", "stop": ""},
+            "qty": 10, "entry_price": 13.00, "status": "filled",
+            "venue_code": "XNAS", "bracket_pricing_mode": "actual_fill",
+            "target_pct": 0.15, "stop_pct": 0.08,
+            "link_id": "BOWAKA-AAPL-100",
+        }
+    }
+    strategy_module.submit_pending_oco_children(
+        state, cfg, http, "k",
+        state_path=tmp_path / "state.json",
+    )
+    assert sent_bodies[0]["time_in_force"] == "DAY"
+
+
 def test_submit_pending_oco_children_attaches_after_fill(
     strategy_module, cfg_dict, tmp_path,
 ):
@@ -1246,6 +1325,104 @@ def test_fetch_equity(strategy_module):
 
 
 # ---------------------------------------------------------------- main loop integration
+
+
+def test_first_session_tick_triggers_daily_reconcile_first(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Regression for the cross-session-boundary OCO-expiry case.
+    Process is long-running (no overnight restart), state has a
+    carryover position whose DAY-TIF children expired at yesterday's
+    16:00 ET close. On the FIRST session tick of the new day the
+    main loop must run reconcile BEFORE the entry pass so the
+    expired-child cleanup happens — without this, child_order_ids
+    still point at canceled IDs and submit_pending_oco_children
+    skips the position, leaving it naked all day."""
+    candidates_path = Path(cfg_with_paths["paths"]["candidates_path"])
+    candidates_path.parent.mkdir(parents=True, exist_ok=True)
+    candidates_path.write_text(json.dumps(_candidates_payload(rows=[
+        _row("NEW1", close=10.0, signal=9.0),
+    ])))
+    # Carryover position with stale child_order_ids pointing at
+    # IDs that the broker reports as canceled.
+    state = strategy_module.blank_state()
+    state["session_date"] = "2026-05-04"   # YESTERDAY
+    state["open_positions"] = {
+        "CARRY": {
+            "parent_order_id": "P-CARRY",
+            "child_order_ids": {"target": "T-EXPIRED", "stop": "S-EXPIRED"},
+            "qty": 100, "entry_price": 5.00, "status": "filled",
+            "entry_timestamp": "2026-05-04T13:30:00+00:00",
+            "venue_code": "XNAS",
+            "bracket_pricing_mode": "actual_fill",
+            "target_pct": 0.15, "stop_pct": 0.08,
+        },
+    }
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    strategy_module.save_state(state, state_path)
+
+    sent_combo: list[dict] = []
+    sent_orders: list[dict] = []
+
+    def handler(req):
+        path = req.url.path
+        method = req.method
+        q = req.url.query
+        if method == "GET" and path == "/api/v2/balances":
+            return httpx.Response(200, json={"data": {"balance": {"equity": "100000"}}})
+        if method == "GET" and path == "/api/v2/positions":
+            return httpx.Response(200, json={"data": {"positions": [
+                {"canonical_symbol": "CARRY", "quantity": "100"},
+            ]}})
+        if method == "GET" and path == "/api/v2/orders":
+            # status=open returns empty (children already canceled);
+            # status=all returns the canceled rows so reconcile can
+            # read native_status.
+            is_open = b"status=open" in q
+            if is_open:
+                return httpx.Response(200, json={"data": {"orders": []}})
+            return httpx.Response(200, json={"data": {"orders": [
+                {"id": "T-EXPIRED", "status": "canceled", "native_status": "canceled"},
+                {"id": "S-EXPIRED", "status": "canceled", "native_status": "canceled"},
+            ]}})
+        if method == "POST" and path == "/api/v2/orders/combo":
+            sent_combo.append(json.loads(req.content))
+            return httpx.Response(200, json={"data": {"native_response": {
+                "id": "P-OCO-NEW",
+                "legs": [{"id": "S-OCO-NEW", "order_type": "stop"}],
+            }}})
+        if method == "POST" and path == "/api/v2/orders":
+            sent_orders.append(json.loads(req.content))
+            return httpx.Response(200, json={"data": {"native_response": {"id": "P-NEW1"}}})
+        return httpx.Response(404, json={})
+
+    http = strategy_module.make_http_client(
+        "http://x", transport=httpx.MockTransport(handler),
+    )
+
+    import pytz
+    et = pytz.timezone("America/New_York")
+    now = et.localize(datetime(2026, 5, 5, 14, 0)).astimezone(timezone.utc)
+
+    rc = strategy_module.run_loop(
+        cfg_with_paths, once=True,
+        now_provider=lambda: now,
+        http_client=http, api_key="k",
+    )
+    assert rc == 0
+    # The new entry went out as a MARKET BUY parent.
+    assert any(b.get("instrument", {}).get("canonical_symbol") == "NEW1"
+                for b in sent_orders), "new entry should still go through"
+    # The load-bearing assertion: daily reconcile cleared the
+    # carryover position's stale child_order_ids so the NEXT tick's
+    # submit_pending_oco_children will re-bracket. Without the
+    # daily-reconcile call this stays at the canceled IDs and the
+    # position sits naked all session.
+    state_after = strategy_module.load_state(state_path)
+    carry = state_after["open_positions"]["CARRY"]
+    assert carry["child_order_ids"]["target"] == ""
+    assert carry["child_order_ids"]["stop"] == ""
+    assert carry.get("child_status_at_recon", {}).get("target") == "canceled"
 
 
 def test_first_session_tick_runs_full_entry_pipeline(

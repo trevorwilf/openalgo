@@ -83,6 +83,7 @@ def cfg_dict() -> dict:
             "target_pct": 0.15,
             "max_hold_days": 3,
             "signal_fade_enabled": True,
+            "oco_time_in_force": "GTC",
         },
         "signal_gates": {
             "rvol_min": 1.5,
