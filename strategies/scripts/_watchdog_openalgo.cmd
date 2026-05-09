@@ -19,28 +19,37 @@ set "ROOT=E:\stocktradingsoftware\openalgo"
 
 cd /d "%ROOT%"
 
-set RETRIES=0
-set MAX_RETRIES=10
+REM Quote numeric vars so trailing whitespace can't corrupt the
+REM GEQ comparison.
+set "RETRIES=0"
+set "MAX_RETRIES=10"
 
 :loop
-echo [watchdog %DATE% %TIME%] launching openalgo (retry=!RETRIES!)
+echo [watchdog %DATE% %TIME%] launching openalgo retry=!RETRIES!
 uv run app.py
-set EC=!ERRORLEVEL!
+set "EC=!ERRORLEVEL!"
 echo [watchdog %DATE% %TIME%] openalgo exited code=!EC!
 
 REM 0 = normal SIGINT; treat any non-fatal exit as recoverable.
 REM Operator can break out by killing the watchdog process directly.
-if !EC!==0 goto :end
+if "!EC!"=="0" goto :end
 
-set /a RETRIES=!RETRIES!+1
-if !RETRIES! GEQ %MAX_RETRIES% (
-    echo [watchdog] max restart count (%MAX_RETRIES%) reached; giving up 1>&2
-    exit /b 13
-)
-echo [watchdog] restart in 30s (allow ports / sockets to clear)...
+REM Label-based dispatch on max-retries to avoid putting cmd-special
+REM characters inside ``if (...)`` blocks. The previous
+REM ``( %MAX_RETRIES% ) reached;`` pattern triggered cmd's parser to
+REM close the if-block on a bare `)` mid-echo and emit
+REM "<word> was unexpected at this time".
+set /a RETRIES=!RETRIES! + 1
+if !RETRIES! GEQ !MAX_RETRIES! goto :max_retries
+
+echo [watchdog] restart in 30s, allow ports/sockets to clear
 ping -n 31 127.0.0.1 > nul
 goto :loop
 
+:max_retries
+echo [watchdog] ERROR: max restart count reached, giving up 1>&2
+exit /b 13
+
 :end
-echo [watchdog %DATE% %TIME%] watchdog exiting cleanly (final code=!EC!)
+echo [watchdog %DATE% %TIME%] watchdog exiting cleanly final-code=!EC!
 exit /b !EC!
