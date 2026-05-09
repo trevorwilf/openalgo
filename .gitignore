@@ -117,6 +117,7 @@ reports/*
 strategies/scripts/*
 !strategies/scripts/_watchdog_bowaka_strategy.cmd
 !strategies/scripts/_watchdog_openalgo.cmd
+!strategies/scripts/bowaka_analysis.py
 strategies/scripts/data/state.json
 strategies/scripts/data/state.json.tmp
 strategies/scripts/logs/*.log
