@@ -91,6 +91,13 @@ exits:
   target_pct: 0.15
   max_hold_days: 3
   signal_fade_enabled: true
+  # Overnight gap protection. ``GTC`` keeps the OCO take_profit /
+  # stop_loss live past 16:00 ET expiry so a position carried
+  # overnight doesn't sit naked (saw ~$300+ avoidable slippage on
+  # BLDP 2026-05-08 from the previous DAY-TIF behavior). Set to
+  # ``DAY`` only for backtest parity with the legacy single-session
+  # design.
+  oco_time_in_force: "GTC"
 
 # Phase 3 will populate this from the prefilter YAML at strategy start time.
 # Duplication is intentional. A regression test (see Phase 3) pins parity
