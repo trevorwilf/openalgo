@@ -125,3 +125,7 @@ strategies/scripts/KILL_*.flag
 strategies/scripts/data/daily_summary.jsonl
 tests/e2e_smoke/_artifacts/*
 
+tests/e2e_smoke/_artifacts/*.png
+tests/e2e_smoke/_artifacts/*.json
+logs/openalgo_dev.pid
+logs/bowaka_strategy.pid
