@@ -456,10 +456,18 @@ def test_sizing_basis_uses_bankroll_in_select_entries(
     """Hand select_entries the bankroll value via the equity arg —
     sizing should compute as `bankroll * per_trade_pct`, NOT the
     fallback equity. We verify by feeding a SMALL bankroll and a
-    LARGE equity: only the bankroll figure dictates qty."""
+    LARGE equity: only the bankroll figure dictates qty.
+
+    Note: the ADV-tier-caps feature rejects candidates without an
+    ``avg_dollar_volume``; stamp a permissive ADV so the bankroll
+    arithmetic is what's under test.
+    """
     cfg = dict(cfg_with_paths)
     cfg["risk"] = {**cfg_with_paths["risk"], "max_position_as_adv_frac": None}
-    cands = [strategy_module.Candidate("AAPL", close=10.0, signal_strength=9.0)]
+    cands = [strategy_module.Candidate(
+        "AAPL", close=10.0, signal_strength=9.0,
+        features={"avg_dollar_volume": 1_000_000_000.0},
+    )]
     state = strategy_module.blank_state()
     state["bankroll"] = {"current_dollars": 10_000.0}
     # Sizing basis = 10k * 0.10 = 1k → 100 shares @ $10.
@@ -575,8 +583,14 @@ def test_select_entries_decouples_per_trade_from_gross_cap(strategy_module):
     # 300 shares each, $3k notional each. Cumulative cap is 0.50 *
     # 90k = $45k. So at most 15 of these (15 * $3k = $45k) fit by
     # gross-cap. We give 10 candidates, all should fit.
+    # ADV-tier-caps feature: stamp a permissive ADV so the ADV
+    # check doesn't reject these synthetic candidates.
+    _adv = {"avg_dollar_volume": 1_000_000_000.0}
     cands = [
-        strategy_module.Candidate(f"T{i}", close=10.0, signal_strength=9.0 - i * 0.01)
+        strategy_module.Candidate(
+            f"T{i}", close=10.0, signal_strength=9.0 - i * 0.01,
+            features=dict(_adv),
+        )
         for i in range(10)
     ]
     state = strategy_module.blank_state()
@@ -629,7 +643,10 @@ def test_daily_allocation_per_trade_is_sliced(strategy_module):
     }
     state = strategy_module.blank_state()
     state["bankroll"] = {"current_dollars": 90_000.0}
-    cands = [strategy_module.Candidate("AAPL", close=10.0, signal_strength=9.0)]
+    cands = [strategy_module.Candidate(
+        "AAPL", close=10.0, signal_strength=9.0,
+        features={"avg_dollar_volume": 1_000_000_000.0},
+    )]
 
     # With daily_allocation: $30k slice → 3000 shares at $10.
     basis_sliced = strategy_module.get_sizing_basis(state, 0.0, cfg=cfg)
@@ -680,7 +697,10 @@ def test_equal_slice_per_trade_overrides_pct(strategy_module):
     }
     state = strategy_module.blank_state()
     state["bankroll"] = {"current_dollars": 90_000.0}
-    cand = strategy_module.Candidate("AAPL", close=10.0, signal_strength=9.0)
+    cand = strategy_module.Candidate(
+        "AAPL", close=10.0, signal_strength=9.0,
+        features={"avg_dollar_volume": 1_000_000_000.0},
+    )
     sizing = strategy_module.get_sizing_basis(state, 0.0, cfg=cfg)
     gross = strategy_module.get_bankroll_dollars(state, 0.0)
     selected = strategy_module.select_entries(
@@ -897,8 +917,14 @@ def test_equal_slice_auto_18_slots_fit_gross_cap_exactly(strategy_module):
     }
     state = strategy_module.blank_state()
     state["bankroll"] = {"current_dollars": 90_000.0}
+    # ADV-tier-caps feature: stamp a permissive ADV on every
+    # synthetic candidate so the ADV gate doesn't reject them.
+    _adv = {"avg_dollar_volume": 1_000_000_000.0}
     cands = [
-        strategy_module.Candidate(f"T{i}", close=10.0, signal_strength=9.0 - i * 0.001)
+        strategy_module.Candidate(
+            f"T{i}", close=10.0, signal_strength=9.0 - i * 0.001,
+            features=dict(_adv),
+        )
         for i in range(30)
     ]
     sizing = strategy_module.get_sizing_basis(state, 0.0, cfg=cfg)
@@ -938,8 +964,13 @@ def test_equal_slice_full_bankroll_deployment_simulation(strategy_module):
     }
     state = strategy_module.blank_state()
     state["bankroll"] = {"current_dollars": 90_000.0}
+    # ADV-tier-caps feature: stamp a permissive ADV.
+    _adv = {"avg_dollar_volume": 1_000_000_000.0}
     cands = [
-        strategy_module.Candidate(f"T{i}", close=10.0, signal_strength=9.0 - i * 0.001)
+        strategy_module.Candidate(
+            f"T{i}", close=10.0, signal_strength=9.0 - i * 0.001,
+            features=dict(_adv),
+        )
         for i in range(30)
     ]
     sizing = strategy_module.get_sizing_basis(state, 0.0, cfg=cfg)
@@ -1018,8 +1049,13 @@ def test_daily_allocation_steady_state_capacity(strategy_module):
     }
     state = strategy_module.blank_state()
     state["bankroll"] = {"current_dollars": 90_000.0}
+    # ADV-tier-caps feature: stamp a permissive ADV.
+    _adv = {"avg_dollar_volume": 1_000_000_000.0}
     cands = [
-        strategy_module.Candidate(f"T{i}", close=10.0, signal_strength=9.0 - i * 0.01)
+        strategy_module.Candidate(
+            f"T{i}", close=10.0, signal_strength=9.0 - i * 0.01,
+            features=dict(_adv),
+        )
         for i in range(30)
     ]
     sizing = strategy_module.get_sizing_basis(state, 0.0, cfg=cfg)

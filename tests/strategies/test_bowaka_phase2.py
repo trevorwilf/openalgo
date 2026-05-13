@@ -192,12 +192,18 @@ def test_load_candidates_legacy_format_keeps_venue_none(strategy_module, tmp_pat
 
 def test_select_entries_resolves_per_candidate_venue(strategy_module, cfg_dict):
     """Entry.venue_code reflects the candidate's venue, falling back to
-    cfg.sizing.default_venue_code only when the candidate has none."""
+    cfg.sizing.default_venue_code only when the candidate has none.
+
+    Note: the ADV-tier-caps feature rejects candidates without an
+    avg_dollar_volume; this test stamps a permissive ADV onto each
+    candidate so the ADV check passes and the venue assertion runs.
+    """
     state = strategy_module.blank_state()
+    _adv = {"avg_dollar_volume": 1_000_000_000.0}
     cands = [
-        strategy_module.Candidate("AAPL", 150.0, 5.0, venue_code="XNAS"),
-        strategy_module.Candidate("CAT", 80.0, 6.0, venue_code="XNYS"),
-        strategy_module.Candidate("LEGACY", 10.0, 4.0),  # no venue
+        strategy_module.Candidate("AAPL", 150.0, 5.0, venue_code="XNAS", features=dict(_adv)),
+        strategy_module.Candidate("CAT", 80.0, 6.0, venue_code="XNYS", features=dict(_adv)),
+        strategy_module.Candidate("LEGACY", 10.0, 4.0, features=dict(_adv)),  # no venue
     ]
     cands.sort(key=lambda c: c.signal_strength, reverse=True)
     selected = strategy_module.select_entries(
@@ -447,8 +453,15 @@ def test_select_entries_empty_under_kill_switch_l1(strategy_module, cfg_dict):
 
 
 def test_select_entries_orders_by_signal_strength(strategy_module, cfg_dict):
+    # ADV-tier-caps feature: rejects candidates without an
+    # avg_dollar_volume. Stamp a permissive ADV here so the actual
+    # signal-strength ordering is what's under test.
+    _adv = {"avg_dollar_volume": 1_000_000_000.0}
     cands = [
-        strategy_module.Candidate(f"T{i}", close=10.0, signal_strength=float(i))
+        strategy_module.Candidate(
+            f"T{i}", close=10.0, signal_strength=float(i),
+            features=dict(_adv),
+        )
         for i in range(10)
     ]
     cands.reverse()  # input not pre-sorted

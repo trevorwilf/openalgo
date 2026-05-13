@@ -1108,37 +1108,59 @@ def compute_qty(
 # ---------------------------------------------------------------- Phase 6.2 — risk-per-trade + ADV tier caps
 
 
-def adv_tier_cap(adv: float | None, cfg: dict) -> tuple[bool, float | None]:
-    """Phase 6.2 — return (allowed, max_notional) for ``adv`` against
-    ``cfg.risk.adv_tier_caps``.
+def adv_tier_cap(
+    avg_dollar_volume: float | None, cfg: dict,
+) -> tuple[bool, float]:
+    """Resolve the position dollar cap for ``avg_dollar_volume`` under
+    the tiered ADV policy. Returns ``(allowed, max_position_dollars)``.
 
-    Each tier is matched against the smallest ``max_adv_dollars``
-    bucket that is >= ``adv`` (or the unbounded null tier as the
-    catch-all). When ``reject_if_below`` is True the candidate is
-    dropped entirely (``allowed=False``).
+    Behavior:
+      * If ``risk.adv_tier_caps`` is missing or empty: falls back to
+        the legacy flat ``risk.max_position_as_adv_frac`` (back-
+        compat). Returns ``(True, adv * flat_frac)`` or
+        ``(True, 0.0)`` if no flat fraction is configured.
+      * If ``risk.adv_tier_caps`` is non-empty: walks tiers top-to-
+        bottom (YAML order is meaningful — the operator-authored
+        sequence is the policy). The first tier whose
+        ``max_adv_dollars`` is None (the catch-all) or >=
+        ``avg_dollar_volume`` matches. If that tier has
+        ``reject_if_below: true`` returns ``(False, 0.0)``;
+        otherwise returns
+        ``(True, adv * tier['max_position_as_adv_frac'])``.
+      * If ``avg_dollar_volume`` is None or <= 0: returns
+        ``(False, 0.0)`` — we cannot size against unknown liquidity.
 
-    When the list is empty, return ``(True, None)`` — caller falls
-    back to the legacy ``risk.max_position_as_adv_frac`` path.
+    Boundary semantics: a stock at exactly the tier's
+    ``max_adv_dollars`` threshold is included in that tier (inclusive
+    ``<=`` comparison). Comments in the YAML use "below $X" as a
+    label; the implementation uses ``<=``, which matches a candidate
+    at exactly $X to the next tier up.
     """
-    tiers = (cfg.get("risk") or {}).get("adv_tier_caps") or []
-    if not tiers or adv is None or adv <= 0:
-        return True, None
-    # Sort tiers so the smallest cap fires first; null max_adv_dollars
-    # sorts last (unbounded tier is the catch-all).
-    def _sort_key(t: dict) -> float:
-        v = t.get("max_adv_dollars")
-        return float(v) if v is not None else float("inf")
-    sorted_tiers = sorted(tiers, key=_sort_key)
-    for t in sorted_tiers:
-        bound = t.get("max_adv_dollars")
-        bound_f = float(bound) if bound is not None else float("inf")
-        if float(adv) <= bound_f:
-            if t.get("reject_if_below"):
-                return False, None
-            frac = float(t.get("max_position_as_adv_frac") or 0.0)
-            return True, float(adv) * frac
-    # Should be unreachable — the sorted last bucket has +inf cap.
-    return True, None
+    if avg_dollar_volume is None or float(avg_dollar_volume) <= 0:
+        return False, 0.0
+
+    adv = float(avg_dollar_volume)
+    tiers = ((cfg.get("risk") or {}).get("adv_tier_caps") or [])
+
+    if not tiers:
+        flat = (cfg.get("risk") or {}).get("max_position_as_adv_frac")
+        if flat is None:
+            return True, 0.0
+        return True, adv * float(flat)
+
+    for tier in tiers:
+        max_adv = tier.get("max_adv_dollars")
+        if max_adv is None or adv <= float(max_adv):
+            if tier.get("reject_if_below"):
+                return False, 0.0
+            frac = tier.get("max_position_as_adv_frac")
+            if frac is None:
+                return True, 0.0
+            return True, adv * float(frac)
+
+    # Defensive: if no tier matched (shouldn't happen with a catch-
+    # all null tier), reject conservatively rather than over-sizing.
+    return False, 0.0
 
 
 def compute_risk_sized_qty(
@@ -1189,23 +1211,16 @@ def compute_risk_sized_qty(
 
     # ADV tier cap (tiered) takes precedence over legacy
     # max_position_as_adv_frac when adv_tier_caps is set.
+    # ADV-tier-caps update: ``adv_tier_cap`` now returns ``(True, 0.0)``
+    # only when neither tiers nor a flat fallback frac is configured
+    # — treat that as "no cap" and leave base_qty unchanged. A
+    # positive cap clamps base_qty down; ``(False, 0.0)`` rejects.
     allowed, adv_cap = adv_tier_cap(avg_dollar_volume, cfg)
     if not allowed:
         return 0
-    if adv_cap is not None:
+    if adv_cap > 0:
         adv_qty = int(math.floor(float(adv_cap) / float(entry_price)))
         base_qty = min(base_qty, max(adv_qty, 0))
-    else:
-        # Legacy fallback to max_position_as_adv_frac.
-        legacy_frac = risk_cfg.get("max_position_as_adv_frac")
-        if (
-            legacy_frac is not None
-            and avg_dollar_volume is not None
-            and float(avg_dollar_volume) > 0
-        ):
-            legacy_cap = float(avg_dollar_volume) * float(legacy_frac)
-            legacy_qty = int(math.floor(legacy_cap / float(entry_price)))
-            base_qty = min(base_qty, max(legacy_qty, 0))
     if base_qty <= 0:
         return 0
 
@@ -1410,9 +1425,11 @@ def select_entries(
     max_concurrent = int(sizing_cfg["max_concurrent_positions"])
     per_trade_pct = float(sizing_cfg["per_trade_pct"])
     max_per_trade_abs = risk_cfg.get("max_per_trade_dollars")
-    # Item 3: capacity / ADV-participation cap. Disabled when null.
-    max_pos_adv = risk_cfg.get("max_position_as_adv_frac")
-    max_pos_adv_f = float(max_pos_adv) if max_pos_adv is not None else None
+    # Item 3 / ADV-tier-caps: ADV participation cap is now resolved
+    # per-candidate via :func:`adv_tier_cap` (handles both the
+    # tiered policy AND the legacy flat ``max_position_as_adv_frac``
+    # back-compat fallback). The pre-loop lookup of the flat frac is
+    # no longer needed — the helper reads ``cfg`` directly.
 
     gross_basis = float(gross_cap_basis) if gross_cap_basis is not None else equity
     pct_cap = float(risk_cfg.get("max_gross_exposure_pct") or 0.0) * gross_basis
@@ -1517,9 +1534,34 @@ def select_entries(
             break
         adv = cand.features.get("avg_dollar_volume") if cand.features else None
         adv_f = float(adv) if adv is not None else None
+
+        # ADV-tier-caps integration: resolve the tier-derived dollar
+        # cap (or the legacy flat cap, via adv_tier_cap's fallback).
+        # ``allowed=False`` means the candidate is rejected outright —
+        # either ADV is unknown / zero, or the thinnest tier with
+        # ``reject_if_below: true`` matched. ``adv_cap_dollars`` is
+        # translated back to a per-candidate fraction so the existing
+        # ``compute_qty(max_position_as_adv_frac=...)`` parameter
+        # consumes it without a signature change.
+        adv_allowed, adv_cap_dollars = adv_tier_cap(adv_f, cfg)
+        if not adv_allowed:
+            LOG.info(
+                "adv_tier_caps: %s rejected (adv=%s)",
+                cand.ticker, adv_f,
+            )
+            _reject("adv_tier_reject", qty=0)
+            continue
+        effective_adv_frac = (
+            (adv_cap_dollars / adv_f)
+            if (adv_f and adv_f > 0 and adv_cap_dollars > 0)
+            else None
+        )
+
         # Phase 6.2 — branch on sizing_mode. risk_per_trade caps the
         # planned dollar loss; equal_slice keeps the legacy
-        # bankroll/N notional math.
+        # bankroll/N notional math. compute_risk_sized_qty re-consults
+        # adv_tier_cap internally; the duplicate call is cheap and
+        # keeps the call-site logic uniform.
         sizing_mode = (sizing_cfg.get("sizing_mode") or "equal_slice").lower()
         if sizing_mode == "risk_per_trade":
             stop_pct_q = float((cfg.get("exits") or {}).get("stop_pct") or 0)
@@ -1536,7 +1578,7 @@ def select_entries(
                 per_trade_pct=per_trade_pct,
                 max_per_trade_dollars=max_per_trade_abs,
                 avg_dollar_volume=adv_f,
-                max_position_as_adv_frac=max_pos_adv_f,
+                max_position_as_adv_frac=effective_adv_frac,
                 per_trade_dollars_override=per_trade_dollars_override,
             )
         if qty <= 0:
@@ -4059,6 +4101,8 @@ ENTRY_DECISION_REASONS: set[str] = {
     # Phase 6 (marketable limits)
     "marketable_limit_no_quote",
     "marketable_limit_timeout",
+    # ADV-tier-caps feature.
+    "adv_tier_reject",
 }
 
 
@@ -6110,7 +6154,6 @@ def run_session_entry_pass(
     risk_cfg = cfg.get("risk") or {}
     per_trade_pct = float(sizing_cfg.get("per_trade_pct") or 0.0)
     max_per_trade_dollars = risk_cfg.get("max_per_trade_dollars")
-    max_pos_adv = risk_cfg.get("max_position_as_adv_frac")
     # Equal-slice mode: per-trade target derives from
     # bankroll / max_concurrent_positions, NOT per_trade_pct ×
     # sizing_basis. The same override flows into compute_qty inside
@@ -6126,11 +6169,13 @@ def run_session_entry_pass(
         # capped by max_per_trade_dollars and ADV cap. The binding
         # cap is whichever produced the smallest target_dollars.
         adv = (entry.candidate.features or {}).get("avg_dollar_volume")
-        adv_cap_dollars = (
-            float(adv) * float(max_pos_adv)
-            if (adv is not None and max_pos_adv is not None and float(max_pos_adv) > 0)
-            else None
-        )
+        adv_f = float(adv) if adv is not None else None
+        # ADV-tier-caps: read the tier-derived dollar cap so the
+        # entry_decision rationale reflects what compute_qty actually
+        # used. ``adv_cap_dollars > 0`` is the active cap; 0.0 means
+        # "no cap" (operator disabled both tiers and flat frac).
+        _adv_allowed, _adv_cap_v = adv_tier_cap(adv_f, cfg)
+        adv_cap_dollars = _adv_cap_v if (_adv_allowed and _adv_cap_v > 0) else None
         if equal_slice_target is not None:
             candidates_target_dollars = [float(equal_slice_target)]
             binding_cap_label = "equal_slice_per_position"
