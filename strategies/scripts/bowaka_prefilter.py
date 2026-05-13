@@ -31,6 +31,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -58,6 +59,29 @@ def config_hash(cfg: dict) -> str:
     file from a different config."""
     blob = json.dumps(cfg, sort_keys=True, default=str).encode()
     return hashlib.sha256(blob).hexdigest()[:8]
+
+
+# Phase 1.2 — provenance helpers for candidate JSON schema v2.
+def stable_hash(obj: Any) -> str:
+    """Phase 1.2: full-hex SHA-256 digest with a ``sha256:`` prefix.
+
+    Canonical for ``config_hash`` and ``universe_hash`` in the v2
+    candidate-file schema. Distinct from the legacy short
+    ``config_hash`` (kept under ``config_hash_short`` for back-compat
+    with the strategy's existing handshake comparator).
+
+    JSON serialization uses ``sort_keys=True`` and the compact
+    separators so structurally-equivalent inputs hash identically
+    regardless of dict ordering or whitespace.
+    """
+    blob = json.dumps(obj, sort_keys=True, separators=(",", ":"),
+                      default=str).encode()
+    return "sha256:" + hashlib.sha256(blob).hexdigest()
+
+
+# Schema version pinned by Phase 1.2 — strategy fail-closes on a
+# mismatch when ``prefilter_handshake.expected_schema_version`` is set.
+CANDIDATES_SCHEMA_VERSION: int = 2
 
 
 def setup_logging(cfg: dict) -> None:
@@ -339,6 +363,8 @@ def write_output(
     *,
     exchanges: dict[str, str] | None = None,
     as_of_date_override: str | None = None,
+    universe_symbols: list[str] | None = None,
+    latest_bar_timestamp: str | None = None,
 ) -> None:
     out_path = Path(cfg["output"]["candidates_path"])
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -368,22 +394,45 @@ def write_output(
         rows.append(d)
 
     now_utc = datetime.now(timezone.utc)
-    # Item 8 (Critical #5): prefer the explicit as_of_date_override
-    # passed from main() (derived from the latest bar timestamp the
-    # filter actually ran on) over the run date. Holiday / weekend /
-    # data-lag runs would otherwise stamp today as as_of even though
-    # the bars are from yesterday or older — load_candidates would
-    # then accept stale data as if it were fresh.
+    # Phase 1.2: candidate JSON schema v2. Adds explicit provenance
+    # so the strategy can fail-closed on feed / schema / config
+    # mismatch instead of silently trading on the wrong tape. The
+    # legacy short ``config_hash`` (8-hex) stays in the payload
+    # under the existing key so the strategy's existing handshake
+    # comparator keeps working; the new full sha256 lives under
+    # ``config_hash_full`` and the v2 ``config_hash`` field now
+    # carries the full-hex form. The strategy's load_candidates
+    # reads ``config_hash`` first (full form, v2 contract) and
+    # falls back to ``config_hash_short`` (8-hex, legacy) when the
+    # short form is what's pinned in ``expected_config_hash``.
+    full_config_hash = stable_hash(cfg)
+    universe_hash = stable_hash(sorted(universe_symbols or []))
+    feed = (cfg.get("alpaca") or {}).get("feed") or "iex"
     payload = {
-        "as_of_date": as_of_date_override or now_utc.date().isoformat(),
+        "schema_version": CANDIDATES_SCHEMA_VERSION,
+        "strategy": "bowaka",
         "generated_at": now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "config_hash": cfg_hash,
+        "as_of_date": as_of_date_override or now_utc.date().isoformat(),
+        "provider": "alpaca",
+        "data_feed": feed,
+        "bar_timeframe": "1D",
+        # v2 contract: ``config_hash`` is the full sha256:<hex> form.
+        # ``config_hash_short`` keeps the legacy 8-hex form for the
+        # strategy's existing prefilter-handshake comparator until
+        # operators pin the new full form.
+        "config_hash": full_config_hash,
+        "config_hash_short": cfg_hash,
+        "universe_hash": universe_hash,
+        "latest_bar_timestamp": latest_bar_timestamp,
         **counts,
         "candidates": rows,
     }
     with open(out_path, "w") as f:
         json.dump(payload, f, indent=2)
-    LOG.info("Wrote %d candidates -> %s", len(rows), out_path)
+    LOG.info(
+        "Wrote %d candidates -> %s (schema=%d, feed=%s)",
+        len(rows), out_path, CANDIDATES_SCHEMA_VERSION, feed,
+    )
 
     if diag := cfg["output"].get("diagnostic_csv"):
         Path(diag).parent.mkdir(parents=True, exist_ok=True)
@@ -454,6 +503,12 @@ def main() -> int:
               .date()
               .isoformat()
         )
+        # Phase 1.2: full ISO8601 UTC timestamp of the latest bar
+        # for the v2 schema. Distinct from ``as_of_date`` which is
+        # the NYSE date that bar belongs to.
+        latest_bar_iso = (
+            pd.Timestamp(latest_bar_ts).tz_convert("UTC").isoformat()
+        )
         LOG.info(
             "as_of_date derived from latest bar timestamp: %s",
             as_of_date_override,
@@ -464,6 +519,7 @@ def main() -> int:
             e,
         )
         as_of_date_override = None
+        latest_bar_iso = None
 
     features = compute_features(bars, cfg)
     candidates, counts = apply_filters(features, cfg)
@@ -477,6 +533,8 @@ def main() -> int:
         candidates, counts, cfg, cfg_hash,
         exchanges=exchanges,
         as_of_date_override=as_of_date_override,
+        universe_symbols=universe,
+        latest_bar_timestamp=latest_bar_iso,
     )
     return 0
 

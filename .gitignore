@@ -123,6 +123,11 @@ strategies/scripts/data/state.json.tmp
 strategies/scripts/logs/*.log
 strategies/scripts/KILL_*.flag
 strategies/scripts/data/daily_summary.jsonl
+# Phase 1.5 — immutable trade ledger. Lives next to daily_summary and
+# is rotated only by the operator (corrections are appended, never
+# overwritten). Backups follow the same exclusion.
+strategies/scripts/data/trade_ledger.jsonl
+strategies/scripts/data/trade_ledger.jsonl.bak*
 tests/e2e_smoke/_artifacts/*
 
 tests/e2e_smoke/_artifacts/*.png
