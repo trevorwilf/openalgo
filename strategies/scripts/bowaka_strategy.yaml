@@ -262,9 +262,20 @@ entry:
     max_quote_age_seconds: 15
     # Phase 4.2 — stable-quote streak. A candidate must satisfy
     # spread/age/band gates on N successive ``_fetch_quote`` calls
-    # before being admitted. Null = disabled (legacy single-tick
-    # check). Recommended validation: 3.
-    require_stable_quote_checks: 3
+    # before being admitted. Null / 1 = disabled (single-tick check).
+    #
+    # NOTE on default: the audit prompt's recommended value was 3,
+    # but in production ``run_session_entry_pass`` only fires ONCE
+    # per session (it gates on ``state.session_date != today_iso``).
+    # Combined with Phase 3.1's default of
+    # ``post_closure_rescreen.enabled: false``, the streak counter
+    # can only ever reach 1 — threshold>1 makes the candidate
+    # unreachable. Default ships as 1 until a cross-tick re-fire
+    # mechanism is wired (separate follow-up). Operators wanting
+    # the multi-tick stability check should also flip the rescreen
+    # block on with a permissive ``only_after_reasons`` list, or
+    # wait for the dedicated wiring.
+    require_stable_quote_checks: 1
     # Live price must sit within this band relative to yesterday's
     # close (the candidate.close):
     #   * max_pct_above_close: cap chase risk — skip names already
