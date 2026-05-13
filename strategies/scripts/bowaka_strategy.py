@@ -202,6 +202,13 @@ class State(TypedDict, total=False):
     rescreen_pending: bool
     rescreens_today: int
     post_closure_entries_today: int
+    # Phase 3.3 — daily-risk circuit breakers.
+    daily_stopouts_count: int
+    consecutive_stopouts_count: int
+    block_new_entries_today: bool
+    new_entries_blocked_reason: str | None
+    daily_realized_pnl_strategy: float
+    daily_realized_pnl_bankroll_pct: float
     # Bankroll envelope (cfg.bankroll). When the operator enables the
     # bankroll feature, all sizing reads `bankroll.current_dollars` as
     # the equity-equivalent, not broker equity. Seeded on first init
@@ -227,6 +234,13 @@ def blank_state() -> State:
         "rescreen_pending": False,
         "rescreens_today": 0,
         "post_closure_entries_today": 0,
+        # Phase 3.3 — circuit-breaker daily state.
+        "daily_stopouts_count": 0,
+        "consecutive_stopouts_count": 0,
+        "block_new_entries_today": False,
+        "new_entries_blocked_reason": None,
+        "daily_realized_pnl_strategy": 0.0,
+        "daily_realized_pnl_bankroll_pct": 0.0,
     }
 
 
@@ -451,6 +465,15 @@ def reset_for_new_session(
     state["rescreen_pending"] = False
     state["rescreens_today"] = 0
     state["post_closure_entries_today"] = 0
+    # Phase 3.3 — daily-risk circuit-breaker state. These are
+    # session-scoped — the block flag must NOT survive a session
+    # boundary. (Mid-session restart preserves them, see Phase 3.7.)
+    state["daily_stopouts_count"] = 0
+    state["consecutive_stopouts_count"] = 0
+    state["block_new_entries_today"] = False
+    state["new_entries_blocked_reason"] = None
+    state["daily_realized_pnl_strategy"] = 0.0
+    state["daily_realized_pnl_bankroll_pct"] = 0.0
     # Phase 3: dedupe flags are per-day.
     state.pop("signal_fade_evaluated_for_date", None)
     state.pop("summary_written_for_date", None)
@@ -2417,7 +2440,141 @@ def poll_fills(
 EXIT_REASONS = {
     "stop_hit", "target_hit", "time_stop", "signal_fade",
     "kill_switch_l2", "kill_switch_l3", "closed_externally",
+    # Phase 5 reserves these labels; tests in Phase 3 may not see
+    # them yet but the set is the canonical reasons surface.
+    "protection_violation_flatten",
 }
+
+
+def should_set_rescreen_pending(
+    reason: str, state: State, cfg: dict,
+) -> bool:
+    """Phase 3.2 — fail-closed rescreen gating.
+
+    Returns True only when ALL the following hold:
+    * post_closure_rescreen.enabled is True.
+    * If ``only_after_reasons`` is set, the closure reason is one of
+      the allowed labels (fail-closed: an unrecognised reason yields
+      False).
+    * If ``require_day_pnl_nonnegative`` is True, today's realized
+      PnL is >= 0.
+    * If ``max_stopouts_today`` is set, today's stopout count is
+      below it.
+    * If ``max_entries_per_day`` is set, today's rescreen entries
+      count is below it.
+
+    Any missing ``only_after_reasons`` set (or empty list) is a
+    fail-closed signal: do not rescreen. Operators must explicitly
+    opt in by listing allowed reasons (typically just
+    ``["target_hit"]``).
+    """
+    rc_cfg = (cfg.get("entry") or {}).get("post_closure_rescreen") or {}
+    if not rc_cfg.get("enabled"):
+        return False
+    allow = rc_cfg.get("only_after_reasons")
+    if allow is None or not list(allow):
+        # Fail-closed default per Report §8.4.
+        return False
+    if reason not in set(allow):
+        return False
+    if rc_cfg.get("require_day_pnl_nonnegative"):
+        pnl = float(state.get("daily_realized_pnl_strategy") or 0.0)
+        if pnl < 0:
+            return False
+    cap_stops = rc_cfg.get("max_stopouts_today")
+    if cap_stops is not None:
+        if int(state.get("daily_stopouts_count", 0)) >= int(cap_stops):
+            return False
+    cap_entries = rc_cfg.get("max_entries_per_day")
+    if cap_entries is not None:
+        if int(state.get("post_closure_entries_today", 0)) >= int(cap_entries):
+            return False
+    return True
+
+
+def update_daily_closure_risk_state(
+    state: State, cfg: dict, *, reason: str, realized_pnl: float,
+) -> None:
+    """Phase 3.5 — update circuit-breaker counters after a closure.
+
+    Called from :func:`close_position` after the closure record is
+    appended but BEFORE save_state. Mutates state in place; the
+    caller is responsible for persistence.
+
+    Counters:
+      * ``daily_stopouts_count`` — cumulative count of ``stop_hit``
+        closures today. Incremented only on stop_hit.
+      * ``consecutive_stopouts_count`` — streak of ``stop_hit``
+        closures. Resets on target_hit / time_stop / signal_fade /
+        closed_externally (any non-stop close).
+      * ``daily_realized_pnl_strategy`` / ``daily_realized_pnl_
+        bankroll_pct`` — running sum for the day; the second is the
+        first divided by current bankroll (or 1.0 to avoid divide-
+        by-zero when bankroll is disabled).
+
+    Trip the block flag when any of the cfg.risk caps cross.
+    """
+    if reason == "stop_hit":
+        state["daily_stopouts_count"] = int(state.get("daily_stopouts_count", 0)) + 1
+        state["consecutive_stopouts_count"] = int(
+            state.get("consecutive_stopouts_count", 0)
+        ) + 1
+    elif reason in {
+        "target_hit", "time_stop", "signal_fade", "closed_externally",
+        "protection_violation_flatten",
+    }:
+        state["consecutive_stopouts_count"] = 0
+
+    pnl = float(state.get("daily_realized_pnl_strategy") or 0.0) + float(realized_pnl)
+    state["daily_realized_pnl_strategy"] = pnl
+    bk = (state.get("bankroll") or {}).get("current_dollars") or 0.0
+    if bk and bk > 0:
+        state["daily_realized_pnl_bankroll_pct"] = pnl / float(bk)
+
+    risk_cfg = cfg.get("risk") or {}
+
+    def _block(why: str) -> None:
+        # Only ratchet (never un-block) so the first reason to fire
+        # remains the audit-visible cause.
+        if not state.get("block_new_entries_today"):
+            state["block_new_entries_today"] = True
+            state["new_entries_blocked_reason"] = why
+            LOG.warning(
+                "circuit-breaker tripped: block_new_entries_today=True, reason=%s",
+                why,
+            )
+
+    cap_stops = risk_cfg.get("max_stopouts_per_day")
+    if cap_stops is not None and int(state["daily_stopouts_count"]) >= int(cap_stops):
+        _block("max_stopouts_per_day")
+
+    cap_streak = risk_cfg.get("stop_trading_after_consecutive_stopouts")
+    if cap_streak is not None and int(state["consecutive_stopouts_count"]) >= int(cap_streak):
+        _block("consecutive_stopouts")
+
+    # daily_loss_pct already trips daily_pnl_tripped via
+    # update_daily_pnl on equity ticks. Mirror that signal into the
+    # block flag so the entry path treats both as the same gate.
+    if state.get("daily_pnl_tripped"):
+        _block("daily_pnl_tripped")
+
+    # Phase 3.4 — strategy_slice_loss_pct trip.
+    slice_loss_pct = risk_cfg.get("strategy_slice_loss_pct")
+    if slice_loss_pct is not None:
+        # daily_realized_pnl_bankroll_pct compares against the full
+        # bankroll. For a slice-based check, compare against the
+        # daily slice (bankroll / max_hold_days). When bankroll is
+        # off, the slice = 1.0 sentinel which makes the trip
+        # impossible (correct fail-soft behavior).
+        bk_dollars = (state.get("bankroll") or {}).get("current_dollars")
+        if bk_dollars and bk_dollars > 0:
+            exits_cfg = cfg.get("exits") or {}
+            max_hold = max(1, int(exits_cfg.get("max_hold_days") or 1))
+            slice_basis = float(bk_dollars) / float(max_hold)
+            if slice_basis > 0:
+                slice_pct = pnl / slice_basis
+                if slice_pct <= -float(slice_loss_pct):
+                    _block("strategy_slice_loss")
 
 
 def trading_days_since(entry_iso: str, today_et: date) -> int:
@@ -2542,7 +2699,12 @@ def run_time_stop_pass(
         # async (market sell) and a later poll_fills tick will see it
         # too — that closure also sets rescreen_pending, so this set
         # here just speeds up the first redeployment by one tick.
-        state["rescreen_pending"] = True
+        #
+        # Phase 3.2 — fail-closed: only flip the flag when the
+        # operator's rescreen config admits ``time_stop`` as a
+        # rescreen-eligible reason.
+        if should_set_rescreen_pending("time_stop", state, cfg):
+            state["rescreen_pending"] = True
     return out
 
 
@@ -3922,6 +4084,17 @@ def close_position(
     # write. apply_realized_pnl_to_bankroll is a no-op when the
     # feature is off.
     apply_realized_pnl_to_bankroll(state, cfg, realized)
+    # Phase 3.5 — circuit-breaker counters update right after the
+    # bankroll mutation so the bankroll figure used by the slice-loss
+    # check is post-closure.
+    try:
+        update_daily_closure_risk_state(
+            state, cfg, reason=reason, realized_pnl=realized,
+        )
+    except Exception as e:
+        LOG.exception(
+            "update_daily_closure_risk_state failed (continuing): %s", e,
+        )
     state["open_positions"].pop(ticker, None)
     state.get("pending_signal_fade_exits", {}).pop(ticker, None)
     save_state(state, state_path)
@@ -4044,7 +4217,9 @@ def process_fill_events_for_closures(
                 state_path=state_path, summary_path=summary_path,
                 exit_price=float(price), reason="target_hit",
             ))
-            state["rescreen_pending"] = True
+            # Phase 3.2 — gated rescreen flag.
+            if should_set_rescreen_pending("target_hit", state, cfg):
+                state["rescreen_pending"] = True
         elif ev.role == "stop" and ev.status in {"FILLED"}:
             price = ev.filled_avg_price or pos.get("stop_price") or 0.0
             emit_ledger_event(
@@ -4060,7 +4235,8 @@ def process_fill_events_for_closures(
                 state_path=state_path, summary_path=summary_path,
                 exit_price=float(price), reason="stop_hit",
             ))
-            state["rescreen_pending"] = True
+            if should_set_rescreen_pending("stop_hit", state, cfg):
+                state["rescreen_pending"] = True
         elif ev.role == "exit" and ev.status in {"FILLED"}:
             reason = pos.get("exit_reason") or "time_stop"
             price = ev.filled_avg_price or pos.get("exit_fill_price") or 0.0
@@ -4082,7 +4258,7 @@ def process_fill_events_for_closures(
             # (it fires at 16:05 ET, past the rescreen entry cutoff,
             # and there's no productive re-entry on a signal-faded
             # name anyway).
-            if reason != "signal_fade":
+            if reason != "signal_fade" and should_set_rescreen_pending(reason, state, cfg):
                 state["rescreen_pending"] = True
     return out
 
@@ -4109,6 +4285,12 @@ def update_daily_pnl(
     threshold = float(cfg["risk"]["daily_loss_pct"])
     if pnl_pct <= -threshold:
         state["daily_pnl_tripped"] = True
+        # Phase 3.5: mirror into the unified block flag so entry
+        # gates only need to check one field. (select_entries
+        # already checks both for back-compat.)
+        if not state.get("block_new_entries_today"):
+            state["block_new_entries_today"] = True
+            state["new_entries_blocked_reason"] = "daily_pnl_tripped"
         save_state(state, state_path)
         LOG.error(
             "DAILY P&L CIRCUIT BREAKER tripped: pnl=%.4f baseline=%.2f current=%.2f threshold=-%.4f",
@@ -5200,6 +5382,15 @@ def run_post_closure_rescreen(
     the loop doesn't burn the next tick on the same dead-end check.
     """
     if not state.get("rescreen_pending"):
+        return 0
+    # Phase 3.6 — daily-risk block beats every other rescreen gate.
+    if state.get("block_new_entries_today"):
+        LOG.info(
+            "post_closure_rescreen: entries blocked today (%s); clearing flag",
+            state.get("new_entries_blocked_reason"),
+        )
+        state["rescreen_pending"] = False
+        save_state(state, state_path)
         return 0
     rc_cfg = (cfg.get("entry") or {}).get("post_closure_rescreen") or {}
     if not rc_cfg.get("enabled"):

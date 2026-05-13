@@ -150,6 +150,27 @@ risk:
   # disables the cap (back to "max_concurrent_positions" only).
   max_total_entries_per_day: 4        # Report §7 validation default; pre-audit value was 10
 
+  # Phase 3.4 — circuit breakers. All null = disabled (legacy
+  # behavior). Report's recommended validation values are 2 / 2 /
+  # 0.010 / 0.025 — pin them in the operator config to activate.
+  #   * max_stopouts_per_day: block new entries after N stop_hit
+  #     closures today (cumulative; targets do NOT reset the count).
+  #   * stop_trading_after_consecutive_stopouts: block new entries
+  #     after N stop_hit closures in a row. target_hit / time_stop /
+  #     signal_fade / closed_externally reset the streak.
+  #   * daily_loss_basis: which equity number drives daily_loss_pct.
+  #     "bankroll" (default) reads cfg.bankroll.current_dollars;
+  #     "broker_equity" reads the live /api/v2/balances figure;
+  #     "daily_slice" reads the per-day slice from get_sizing_basis.
+  #   * strategy_slice_loss_pct: when set, in ADDITION to the
+  #     legacy daily_loss_pct, the strategy blocks entries once the
+  #     day's realized PnL crosses -X% of the daily slice. Tighter
+  #     stop than daily_loss_pct because the slice is smaller.
+  max_stopouts_per_day: null
+  stop_trading_after_consecutive_stopouts: null
+  daily_loss_basis: "bankroll"
+  strategy_slice_loss_pct: null
+
 entry:
   # Item 4 — bracket pricing mode.
   #   "actual_fill"  : default. Submit the parent MARKET BUY first,
@@ -207,12 +228,29 @@ entry:
   # exposure cap. Gated by the daily entry cap (risk.max_total_entries
   # _per_day) and the time-of-day cutoff below.
   post_closure_rescreen:
-    enabled: true
+    # Phase 3.1 — DISABLED BY DEFAULT. The audit (Report §C) found
+    # post-closure rescreens were responsible for the worst chained
+    # losses. Re-enable only after baseline validation establishes
+    # the open-tick policy alone has positive expectancy.
+    enabled: false
     # No new entries after this ET time. Late-day entries have too
     # little runway before the signal-fade EOD evaluation and the
     # overnight gap, and the post-closure thesis is even thinner past
     # mid-afternoon.
     last_entry_time: "14:00"
+    # Phase 3.2 — supported keys for when/if re-enabled. The
+    # ``should_set_rescreen_pending`` helper consults these. All
+    # null = legacy behavior (every closure sets the flag); any
+    # set value tightens the gating. Recommended starting policy
+    # (Report §8.4):
+    # only_after_reasons: ["target_hit"]
+    # max_entries_per_day: 1
+    # require_day_pnl_nonnegative: true
+    # max_stopouts_today: 1
+    only_after_reasons: null
+    max_entries_per_day: null
+    require_day_pnl_nonnegative: null
+    max_stopouts_today: null
 
 exits:
   stop_pct: 0.08

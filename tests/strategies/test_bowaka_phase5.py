@@ -107,6 +107,15 @@ def cfg_rescreen(cfg_with_paths):
         "post_closure_rescreen": {
             "enabled": True,
             "last_entry_time": "14:00",
+            # Phase 3.2 — explicit opt-in to the reasons that should
+            # set rescreen_pending. ``should_set_rescreen_pending``
+            # fail-closes when ``only_after_reasons`` is missing, so
+            # the legacy Phase 5 tests need this list to keep their
+            # original target_hit / stop_hit / time_stop behavior
+            # under test.
+            "only_after_reasons": [
+                "target_hit", "stop_hit", "time_stop",
+            ],
         },
     }
     return cfg
