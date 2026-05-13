@@ -413,3 +413,19 @@ logging:
   # value to densify ticks (e.g. 30s for high-vol regimes); raise
   # it to reduce API load if the broker rate-limits quotes.
   intraday_tick_interval_seconds: 60
+
+# Phase 7.1 — per-position intraday liquidity monitor. ``enabled:
+# false`` default; flip true after operator establishes baseline
+# expectations on the configured feed (paper SIP is the recommended
+# minimum). Telemetry only in the ``none`` action; ``tighten_stop``
+# and ``exit_partial`` are scaffolded as NotImplementedError until a
+# follow-up phase wires them.
+liquidity_monitor:
+  enabled: false
+  tick_interval_seconds: 30
+  stale_quote_seconds: 30
+  severe_stale_quote_seconds: 60
+  spread_warning_pct: 0.03
+  spread_severe_pct: 0.05
+  consecutive_warning_ticks: 3
+  action_on_severe_if_profitable: "none"   # none | tighten_stop | exit_partial

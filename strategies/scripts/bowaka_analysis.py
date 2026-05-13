@@ -91,6 +91,350 @@ def load_daily_summary(summary_path: Path) -> pd.DataFrame:
     return df
 
 
+# ----------------------------------------------------------------- Phase 7 — ledger-based analysis
+
+
+def load_ledger(ledger_path: Path) -> pd.DataFrame:
+    """Phase 7.4: read the canonical trade ledger as a flat DataFrame.
+
+    Each row is one ledger event. Returns an empty DataFrame when
+    ``ledger_path`` does not exist (legacy installs without a
+    ledger). The ``ts`` and ``session_date`` columns are parsed to
+    datetimes; ``payload`` stays as a dict for downstream
+    flattening.
+    """
+    if not ledger_path.exists():
+        return pd.DataFrame()
+    rows: list[dict[str, Any]] = []
+    for line in ledger_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        rows.append(ev)
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    if "ts" in df.columns:
+        df["ts"] = pd.to_datetime(df["ts"], errors="coerce", utc=True)
+    return df
+
+
+def _payload_get(p: Any, *path, default=None):
+    """Safely walk a nested payload dict, returning ``default`` on
+    any KeyError / TypeError. Same helper as ``_g`` in to_decisions
+    but local so the function is self-contained for reuse."""
+    cur = p
+    for k in path:
+        if not isinstance(cur, dict):
+            return default
+        cur = cur.get(k)
+    return cur if cur is not None else default
+
+
+def build_canonical_trade_table(ledger_path: Path) -> pd.DataFrame:
+    """Phase 7.4: project the ledger into one row per trade_id.
+
+    Columns:
+      trade_id, ticker, session_date, entry_trigger,
+      entry_timestamp, exit_timestamp, entry_price, exit_price,
+      qty, planned_risk_dollars, realized_pnl, R_multiple,
+      reason (exit), instrument_class, entry_features (dict),
+      mfe_pct, mae_pct, hold_trading_days, candidate_rank,
+      spread_pct_at_decision, avg_dollar_volume, venue_code,
+      exchange, entry_order_style, entry_limit_price.
+
+    Rows without a closure event have NaN exit fields. Correction
+    events override the original closure (last-write-wins by ts).
+    """
+    df = load_ledger(ledger_path)
+    if df.empty:
+        return pd.DataFrame()
+
+    by_trade: dict[str, dict[str, Any]] = {}
+
+    # First pass: entry_decisions (accepted) + order_fills (parent)
+    # populate the entry side of each trade.
+    for _, row in df.iterrows():
+        et = row.get("event_type")
+        trade_id = row.get("trade_id") or ""
+        payload = row.get("payload") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        if et == "entry_decision":
+            if payload.get("decision") != "accepted" or not trade_id:
+                continue
+            r = by_trade.setdefault(trade_id, {})
+            r["trade_id"] = trade_id
+            r["ticker"] = payload.get("ticker") or row.get("ticker")
+            r["session_date"] = row.get("session_date")
+            r["entry_trigger"] = payload.get("entry_trigger")
+            r["candidate_rank"] = payload.get("candidate_rank")
+            r["entry_features"] = _payload_get(payload, "candidate", "features")
+            r["avg_dollar_volume"] = _payload_get(
+                payload, "sizing", "avg_dollar_volume",
+            )
+            quote = payload.get("quote")
+            r["spread_pct_at_decision"] = (
+                ((quote.get("ask") or 0) - (quote.get("bid") or 0))
+                / (((quote.get("ask") or 0) + (quote.get("bid") or 0)) / 2.0)
+                if isinstance(quote, dict) and (quote.get("ask") or 0) > 0
+                and (quote.get("bid") or 0) > 0
+                else None
+            )
+            r["venue_code"] = payload.get("venue_code")
+            r["exchange"] = payload.get("exchange")
+            r["instrument_class"] = _payload_get(
+                payload, "candidate", "features", "instrument_class",
+            )
+
+        elif et == "order_fill" and row.get("role") == "parent":
+            r = by_trade.setdefault(trade_id, {})
+            r["entry_price"] = payload.get("filled_avg_price")
+            r["qty"] = payload.get("filled_qty")
+            r["entry_timestamp"] = row.get("ts")
+        elif et == "closure":
+            r = by_trade.setdefault(trade_id, {})
+            r["exit_price"] = payload.get("exit_price")
+            r["exit_timestamp"] = (
+                payload.get("exit_timestamp") or row.get("ts")
+            )
+            r["realized_pnl"] = payload.get("realized_pnl")
+            r["reason"] = payload.get("reason")
+            r["mfe_pct"] = payload.get("mfe_pct")
+            r["mae_pct"] = payload.get("mae_pct")
+            r["hold_trading_days"] = payload.get("hold_trading_days")
+            r["planned_risk_dollars"] = payload.get("planned_risk_dollars")
+            r["R_multiple"] = payload.get("R_multiple")
+            r["entry_order_style"] = payload.get("entry_order_style")
+            r["entry_limit_price"] = payload.get("entry_limit_price")
+            if not r.get("session_date"):
+                r["session_date"] = row.get("session_date")
+        elif et == "correction":
+            # Last-write-wins overlay of the closure payload.
+            r = by_trade.setdefault(trade_id, {})
+            for k in ("exit_price", "realized_pnl", "reason",
+                      "mfe_pct", "mae_pct", "hold_trading_days",
+                      "planned_risk_dollars", "R_multiple"):
+                if k in payload:
+                    r[k] = payload[k]
+
+    if not by_trade:
+        return pd.DataFrame()
+    out = pd.DataFrame(list(by_trade.values()))
+    return out
+
+
+# ---------------------------------------------------------------- Phase 7.4 reports
+
+
+def _bucketize(series: pd.Series, edges: list[float],
+               labels: list[str] | None = None) -> pd.Series:
+    return pd.cut(series, bins=edges, labels=labels, include_lowest=True)
+
+
+def report_by_entry_trigger(trades: pd.DataFrame) -> pd.DataFrame:
+    if trades.empty or "entry_trigger" not in trades.columns:
+        return pd.DataFrame()
+    closed = trades.dropna(subset=["realized_pnl"]).copy()
+    grouped = closed.groupby("entry_trigger", dropna=False).agg(
+        trades=("realized_pnl", "size"),
+        total_pnl=("realized_pnl", "sum"),
+        mean_pnl=("realized_pnl", "mean"),
+        win_rate=("realized_pnl", lambda s: float((s > 0).mean())),
+    ).reset_index()
+    return grouped
+
+
+def report_by_instrument_class(trades: pd.DataFrame) -> pd.DataFrame:
+    if trades.empty or "instrument_class" not in trades.columns:
+        return pd.DataFrame()
+    closed = trades.dropna(subset=["realized_pnl"]).copy()
+    return closed.groupby("instrument_class", dropna=False).agg(
+        trades=("realized_pnl", "size"),
+        total_pnl=("realized_pnl", "sum"),
+        mean_pnl=("realized_pnl", "mean"),
+        win_rate=("realized_pnl", lambda s: float((s > 0).mean())),
+    ).reset_index()
+
+
+def report_by_adv_tier(trades: pd.DataFrame) -> pd.DataFrame:
+    if trades.empty or "avg_dollar_volume" not in trades.columns:
+        return pd.DataFrame()
+    closed = trades.dropna(subset=["realized_pnl"]).copy()
+    edges = [0, 500_000, 1_000_000, 5_000_000, 50_000_000, float("inf")]
+    labels = ["<500k", "500k-1M", "1M-5M", "5M-50M", ">50M"]
+    closed["adv_tier"] = _bucketize(
+        closed["avg_dollar_volume"].astype(float), edges, labels,
+    )
+    return closed.groupby("adv_tier", observed=False).agg(
+        trades=("realized_pnl", "size"),
+        total_pnl=("realized_pnl", "sum"),
+        mean_pnl=("realized_pnl", "mean"),
+        win_rate=("realized_pnl", lambda s: float((s > 0).mean())),
+    ).reset_index()
+
+
+def report_by_spread_bucket(trades: pd.DataFrame) -> pd.DataFrame:
+    if trades.empty or "spread_pct_at_decision" not in trades.columns:
+        return pd.DataFrame()
+    closed = trades.dropna(subset=["realized_pnl"]).copy()
+    edges = [0, 0.005, 0.01, 0.02, 0.05, float("inf")]
+    labels = ["<0.5%", "0.5-1%", "1-2%", "2-5%", ">5%"]
+    closed["spread_bucket"] = _bucketize(
+        closed["spread_pct_at_decision"].astype(float), edges, labels,
+    )
+    return closed.groupby("spread_bucket", observed=False).agg(
+        trades=("realized_pnl", "size"),
+        total_pnl=("realized_pnl", "sum"),
+        mean_pnl=("realized_pnl", "mean"),
+        win_rate=("realized_pnl", lambda s: float((s > 0).mean())),
+    ).reset_index()
+
+
+def report_mfe_mae_distribution(trades: pd.DataFrame) -> pd.DataFrame:
+    if trades.empty:
+        return pd.DataFrame()
+    closed = trades.dropna(subset=["realized_pnl"]).copy()
+    rows = []
+    for col in ("mfe_pct", "mae_pct"):
+        if col in closed.columns:
+            s = closed[col].dropna().astype(float)
+            if not s.empty:
+                rows.append({
+                    "metric": col,
+                    "min": s.min(), "p10": s.quantile(0.1),
+                    "p50": s.median(), "p90": s.quantile(0.9),
+                    "max": s.max(), "mean": s.mean(),
+                })
+    return pd.DataFrame(rows)
+
+
+def report_stop_slippage(trades: pd.DataFrame) -> pd.DataFrame:
+    """Stop slippage = planned stop vs actual exit_price on stop_hit."""
+    if trades.empty:
+        return pd.DataFrame()
+    closed = trades[trades.get("reason") == "stop_hit"].copy()
+    if closed.empty:
+        return pd.DataFrame()
+    # Planned stop = entry_price * (1 - stop_pct) — we don't have
+    # stop_pct directly in the trade row; approximate via
+    # planned_risk_dollars / (entry_price * qty) when available.
+    closed["slippage_dollars"] = closed.apply(
+        lambda r: float(r.get("realized_pnl") or 0)
+        + float(r.get("planned_risk_dollars") or 0),
+        axis=1,
+    )
+    s = closed["slippage_dollars"]
+    return pd.DataFrame([{
+        "stop_hit_trades": len(closed),
+        "median_slippage_dollars": s.median(),
+        "mean_slippage_dollars": s.mean(),
+        "worst_slippage_dollars": s.min(),
+    }])
+
+
+def report_ex_top_winners(trades: pd.DataFrame) -> pd.DataFrame:
+    """PnL excluding top 1 / top 5 winners — sanity check for skew."""
+    if trades.empty:
+        return pd.DataFrame()
+    closed = trades.dropna(subset=["realized_pnl"]).copy()
+    if closed.empty:
+        return pd.DataFrame()
+    sorted_pnl = closed["realized_pnl"].astype(float).sort_values(ascending=False)
+    rows = [
+        {"basis": "all", "n": int(len(sorted_pnl)),
+         "total_pnl": float(sorted_pnl.sum())},
+        {"basis": "ex_top_1", "n": int(len(sorted_pnl) - 1),
+         "total_pnl": float(sorted_pnl.iloc[1:].sum())},
+        {"basis": "ex_top_5", "n": int(max(len(sorted_pnl) - 5, 0)),
+         "total_pnl": float(sorted_pnl.iloc[5:].sum())},
+    ]
+    return pd.DataFrame(rows)
+
+
+def report_rescreen_ablation(trades: pd.DataFrame) -> pd.DataFrame:
+    """PnL with rescreen entries included vs excluded."""
+    if trades.empty or "entry_trigger" not in trades.columns:
+        return pd.DataFrame()
+    closed = trades.dropna(subset=["realized_pnl"]).copy()
+    rescreen_trades = closed[closed["entry_trigger"] == "post_closure_rescreen"]
+    open_trades = closed[closed["entry_trigger"] != "post_closure_rescreen"]
+    return pd.DataFrame([
+        {"basis": "all", "n": int(len(closed)),
+         "total_pnl": float(closed["realized_pnl"].sum())},
+        {"basis": "ex_rescreen", "n": int(len(open_trades)),
+         "total_pnl": float(open_trades["realized_pnl"].sum())},
+        {"basis": "rescreen_only", "n": int(len(rescreen_trades)),
+         "total_pnl": float(rescreen_trades["realized_pnl"].sum())},
+    ])
+
+
+# ---------------------------------------------------------------- Phase 7.5 reconcile guard
+
+
+def reconcile_ledger_vs_summary(
+    ledger_path: Path, summary_path: Path,
+) -> dict[str, Any]:
+    """Phase 7.5: rebuild a daily_summary projection from the ledger
+    for every date it covers, compare against the on-disk session_
+    summary records, and report differences.
+
+    Returns a dict with ``differences`` (list of {date, field, on_disk,
+    expected}) and ``matched`` (count). Operators run this in CI to
+    catch ledger / summary drift.
+    """
+    # Import here to avoid circular dep when this module is imported
+    # before bowaka_strategy in test harnesses.
+    import bowaka_strategy as bw
+
+    ledger_df = load_ledger(ledger_path)
+    summary_df = load_daily_summary(summary_path)
+    if ledger_df.empty:
+        return {"differences": [], "matched": 0,
+                "note": "empty ledger — nothing to compare"}
+
+    on_disk_summaries: dict[str, dict[str, Any]] = {}
+    if not summary_df.empty and "record_type" in summary_df.columns:
+        for _, row in summary_df.iterrows():
+            if row.get("record_type") != "session_summary":
+                continue
+            date_str = row.get("session_date")
+            # Last write wins (matches reconcile_summary_for_date
+            # appending corrections).
+            if date_str:
+                on_disk_summaries[date_str] = row.to_dict()
+
+    differences: list[dict[str, Any]] = []
+    matched = 0
+    dates_in_ledger = sorted(
+        d for d in ledger_df["session_date"].dropna().unique()
+    )
+    for date_str in dates_in_ledger:
+        expected = bw.recompute_daily_summary_from_ledger(ledger_path, date_str)
+        on_disk = on_disk_summaries.get(date_str)
+        if on_disk is None:
+            differences.append({
+                "date": date_str, "field": "*", "on_disk": None,
+                "expected": expected,
+            })
+            continue
+        for k in ("count_opened", "count_closed", "total_realized_pnl"):
+            d = on_disk.get(k)
+            e = expected.get(k)
+            if d != e:
+                differences.append({
+                    "date": date_str, "field": k,
+                    "on_disk": d, "expected": e,
+                })
+        if not any(d["date"] == date_str for d in differences):
+            matched += 1
+    return {"differences": differences, "matched": matched}
+
+
 # ----------------------------------------------------------------- shape transforms
 
 
@@ -505,7 +849,28 @@ def main(argv: list[str] | None = None) -> int:
         default=str(Path(__file__).resolve().parent / "data" / "daily_summary.jsonl"),
         help="Cross-trade roll-up jsonl (used as fallback for closures)",
     )
+    parser.add_argument(
+        "--ledger",
+        default=str(Path(__file__).resolve().parent / "data" / "trade_ledger.jsonl"),
+        help="Phase 7.4: canonical trade ledger (read by Phase 7 reports)",
+    )
+    parser.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="Phase 7.5: rebuild session summary from ledger and diff "
+             "against on-disk daily_summary. Exits non-zero on mismatch.",
+    )
     args = parser.parse_args(argv)
+
+    if args.reconcile:
+        result = reconcile_ledger_vs_summary(
+            Path(args.ledger), Path(args.summary),
+        )
+        print(f"reconcile: matched={result['matched']} "
+              f"differences={len(result['differences'])}")
+        for d in result["differences"]:
+            print(f"  {d}")
+        return 0 if not result["differences"] else 2
 
     trades_dir = Path(args.trades_dir)
     print(f"loading trades from {trades_dir}")
@@ -520,6 +885,31 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"  decisions: {len(decisions)}  exits: {len(exits)}  "
           f"closed (joined): {len(closed)}  ticks: {len(ticks)}")
+
+    # Phase 7.4 — ledger-based reports. These run alongside the
+    # legacy per-trade jsonl analysis; both views are useful while
+    # the migration from daily_summary-driven to ledger-driven
+    # analysis is in flight.
+    ledger_path = Path(args.ledger)
+    if ledger_path.exists():
+        trades = build_canonical_trade_table(ledger_path)
+        if not trades.empty:
+            _print_section("Ledger — by entry_trigger",
+                            report_by_entry_trigger(trades))
+            _print_section("Ledger — by instrument_class",
+                            report_by_instrument_class(trades))
+            _print_section("Ledger — by ADV tier",
+                            report_by_adv_tier(trades))
+            _print_section("Ledger — by spread bucket",
+                            report_by_spread_bucket(trades))
+            _print_section("Ledger — MFE/MAE distribution",
+                            report_mfe_mae_distribution(trades))
+            _print_section("Ledger — stop slippage",
+                            report_stop_slippage(trades))
+            _print_section("Ledger — PnL ex-top-winners",
+                            report_ex_top_winners(trades))
+            _print_section("Ledger — rescreen ablation",
+                            report_rescreen_ablation(trades))
 
     _print_section("Slot-index alpha (does signal_strength rank predict?)",
                     slot_alpha(closed))
