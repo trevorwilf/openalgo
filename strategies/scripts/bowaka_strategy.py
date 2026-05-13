@@ -4700,6 +4700,208 @@ def run_intraday_tick_logging(
     return logged
 
 
+# ---------------------------------------------------------------- Phase 7.1 — liquidity monitor
+
+
+def _classify_liquidity_status(
+    quote: dict[str, Any] | None, cfg_lm: dict, now_utc: datetime,
+) -> tuple[str, dict[str, Any]]:
+    """Phase 7.3 helper. Return ``(status, metrics)``.
+
+    Status ladder (most-severe wins):
+      * ``stale``   — quote age >= severe_stale_quote_seconds
+      * ``severe``  — spread_pct >= spread_severe_pct
+      * ``warning`` — spread_pct >= spread_warning_pct OR age >=
+                       stale_quote_seconds
+      * ``ok``      — none of the above
+
+    ``metrics`` carries the raw spread_pct / quote_age_seconds / mid
+    values for downstream telemetry.
+    """
+    if quote is None:
+        return "stale", {"reason": "no_quote"}
+    try:
+        bid = float(quote.get("bid") or 0)
+        ask = float(quote.get("ask") or 0)
+    except (TypeError, ValueError):
+        return "stale", {"reason": "bad_quote"}
+    if bid <= 0 or ask <= 0 or ask <= bid:
+        return "stale", {"reason": "bad_quote"}
+    mid = (bid + ask) / 2.0
+    spread_pct = (ask - bid) / mid
+
+    quote_age_seconds: float | None = None
+    ts = quote.get("timestamp")
+    if isinstance(ts, str):
+        quote_age_seconds = seconds_since_iso(ts, now_utc=now_utc)
+    severe_stale = float(cfg_lm.get("severe_stale_quote_seconds") or 60)
+    warning_stale = float(cfg_lm.get("stale_quote_seconds") or 30)
+    severe_spread = float(cfg_lm.get("spread_severe_pct") or 0.05)
+    warning_spread = float(cfg_lm.get("spread_warning_pct") or 0.03)
+
+    if quote_age_seconds is not None and quote_age_seconds >= severe_stale:
+        return "stale", {
+            "spread_pct": spread_pct, "mid": mid,
+            "quote_age_seconds": quote_age_seconds,
+        }
+    if spread_pct >= severe_spread:
+        return "severe", {
+            "spread_pct": spread_pct, "mid": mid,
+            "quote_age_seconds": quote_age_seconds,
+        }
+    if (
+        spread_pct >= warning_spread
+        or (quote_age_seconds is not None and quote_age_seconds >= warning_stale)
+    ):
+        return "warning", {
+            "spread_pct": spread_pct, "mid": mid,
+            "quote_age_seconds": quote_age_seconds,
+        }
+    return "ok", {
+        "spread_pct": spread_pct, "mid": mid,
+        "quote_age_seconds": quote_age_seconds,
+    }
+
+
+def run_liquidity_monitor_pass(
+    cfg: dict,
+    state: State,
+    http: httpx.Client | None,
+    api_key: str | None,
+    *,
+    state_path: Path,
+    now_utc: datetime | None = None,
+) -> list[str]:
+    """Phase 7.3 — per-position liquidity classifier.
+
+    Returns the list of tickers for which a liquidity_status event
+    was emitted this call. No-op when ``cfg.liquidity_monitor.
+    enabled`` is False.
+
+    Position fields updated in place (Phase 7.2):
+      * ``liquidity_warning_count`` / ``liquidity_severe_count`` —
+        cumulative counters for the session.
+      * ``last_liquidity_status`` — current bucket.
+      * ``max_spread_pct_seen`` / ``max_quote_age_seconds_seen`` —
+        running maxima for the position's life.
+
+    When ``action_on_severe_if_profitable`` is non-``none`` AND the
+    position is profitable AND the severe count crosses the
+    threshold, raise NotImplementedError to signal that the
+    operator-selected action is scaffolded but not yet wired.
+    Calling code catches this with the standard try/except
+    (LOG.exception) so the strategy keeps ticking.
+    """
+    lm_cfg = cfg.get("liquidity_monitor") or {}
+    if not lm_cfg.get("enabled"):
+        return []
+    now = now_utc or datetime.now(timezone.utc)
+    open_positions = state.get("open_positions") or {}
+    if not open_positions or http is None or api_key is None:
+        return []
+    interval_s = float(lm_cfg.get("tick_interval_seconds") or 30)
+    due: list[tuple[str, str]] = []
+    for ticker, pos in open_positions.items():
+        if pos.get("status") != "filled":
+            continue
+        last = pos.get("last_liquidity_check_at")
+        if last:
+            try:
+                last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                if (now - last_dt).total_seconds() < interval_s:
+                    continue
+            except Exception:
+                pass
+        due.append((
+            ticker,
+            pos.get("venue_code") or cfg["sizing"]["default_venue_code"],
+        ))
+    if not due:
+        return []
+    quotes = _fetch_quotes_batch(due, http, api_key)
+    if not quotes:
+        return []
+    consecutive_n = int(lm_cfg.get("consecutive_warning_ticks") or 3)
+    action_cfg = (lm_cfg.get("action_on_severe_if_profitable") or "none").lower()
+    emitted: list[str] = []
+    dirty = False
+    for ticker, _venue in due:
+        pos = open_positions.get(ticker)
+        if pos is None:
+            continue
+        q = quotes.get(ticker)
+        status, metrics = _classify_liquidity_status(q, lm_cfg, now)
+        pos["last_liquidity_check_at"] = now.isoformat()
+        pos["last_liquidity_status"] = status
+        # Cumulative counters.
+        if status == "warning":
+            pos["liquidity_warning_count"] = int(
+                pos.get("liquidity_warning_count", 0)
+            ) + 1
+        elif status == "severe":
+            pos["liquidity_severe_count"] = int(
+                pos.get("liquidity_severe_count", 0)
+            ) + 1
+        # Running maxima.
+        sp = metrics.get("spread_pct")
+        if sp is not None:
+            prev_max = float(pos.get("max_spread_pct_seen") or 0)
+            if sp > prev_max:
+                pos["max_spread_pct_seen"] = sp
+        age = metrics.get("quote_age_seconds")
+        if age is not None:
+            prev_max_age = float(pos.get("max_quote_age_seconds_seen") or 0)
+            if age > prev_max_age:
+                pos["max_quote_age_seconds_seen"] = age
+        # Telemetry record.
+        rec = {
+            "record_type": "liquidity_status",
+            "ts": _now_utc_iso(),
+            "ticker": ticker,
+            "link_id": pos.get("link_id"),
+            "status": status,
+            **metrics,
+            "warning_count": pos.get("liquidity_warning_count", 0),
+            "severe_count": pos.get("liquidity_severe_count", 0),
+        }
+        _append_trade_log(cfg, pos.get("link_id"), rec)
+        emit_ledger_event(
+            cfg, event_type="liquidity_status",
+            trade_id=pos.get("link_id"), ticker=ticker,
+            payload=rec,
+        )
+        emitted.append(ticker)
+        dirty = True
+
+        # Optional action wiring.
+        if action_cfg != "none" and status == "severe":
+            severe_n = int(pos.get("liquidity_severe_count", 0))
+            entry_price = pos.get("entry_price")
+            mid = metrics.get("mid")
+            is_profitable = (
+                entry_price is not None and mid is not None
+                and float(mid) > float(entry_price)
+            )
+            if is_profitable and severe_n >= consecutive_n and not pos.get(
+                "liquidity_action_taken"
+            ):
+                pos["liquidity_action_taken"] = True
+                if action_cfg in {"tighten_stop", "exit_partial"}:
+                    # Scaffolded but not yet wired — Phase 5's
+                    # stop-manager is the natural home for tighten_
+                    # stop; exit_partial needs a partial-order
+                    # path the strategy doesn't yet have.
+                    raise NotImplementedError(
+                        f"liquidity_monitor.action_on_severe_if_profitable={action_cfg!r} "
+                        "is scaffolded but not yet wired. Set to 'none' until follow-up."
+                    )
+    if dirty:
+        save_state(state, state_path)
+    return emitted
+
+
 def close_position(
     ticker: str,
     state: State,
@@ -6959,6 +7161,18 @@ def run_loop(
                         )
                     except Exception as e:
                         LOG.exception("intraday tick logging error: %s", e)
+                    # Phase 7.3 — per-position liquidity monitor.
+                    # No-op when disabled. Raises NotImplementedError
+                    # for the tighten_stop / exit_partial actions —
+                    # caught here so the strategy keeps running and
+                    # the operator sees the error in the log.
+                    try:
+                        run_liquidity_monitor_pass(
+                            cfg, state, http_client, api_key,
+                            state_path=state_path, now_utc=now,
+                        )
+                    except Exception as e:
+                        LOG.exception("liquidity monitor error: %s", e)
                     # Phase 4: daily P&L tracking.
                     try:
                         eq = fetch_equity(http_client, api_key)
