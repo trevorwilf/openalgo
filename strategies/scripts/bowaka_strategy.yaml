@@ -191,26 +191,34 @@ entry:
   # has drifted away from the signal.
   intraday_confirmation:
     enabled: true
-    # Wait this many minutes after the session start before the entry
-    # pass runs. Lets the opening-print noise settle and gives quotes
-    # time to be fresh. Common values: 5–15 minutes.
-    window_minutes: 5
-    # Reject a candidate when the live spread is wider than this
-    # fraction of the mid. Microcaps with double-digit-percent spreads
-    # are uneconomic regardless of the daily signal.
-    max_spread_pct: 0.02
-    # Reject a candidate whose live quote is older than this. Stale
-    # quotes mean the name is unlikely to fill cleanly.
-    max_quote_age_seconds: 60
+    # Phase 4.1 — Report §6 / §7 validation defaults. Wait 15 minutes
+    # so opening-range noise has fully settled (was 5).
+    window_minutes: 15
+    # Tighter spread limit (was 0.02 = 2% of mid). 1% catches the
+    # blow-off / wide-spread regime audited as uneconomic.
+    max_spread_pct: 0.01
+    # Quote must be ≤15 seconds old (was 60). Live trading needs
+    # sub-second freshness; 15s is a forgiving cap for paper.
+    max_quote_age_seconds: 15
+    # Phase 4.2 — stable-quote streak. A candidate must satisfy
+    # spread/age/band gates on N successive ``_fetch_quote`` calls
+    # before being admitted. Null = disabled (legacy single-tick
+    # check). Recommended validation: 3.
+    require_stable_quote_checks: 3
     # Live price must sit within this band relative to yesterday's
     # close (the candidate.close):
     #   * max_pct_above_close: cap chase risk — skip names already
     #     up >X% (likely exhausted or about to halt).
     #   * min_pct_below_close: floor on failure — skip names that
     #     gapped down or sold off through the prior close.
+    #
+    # Phase 4.1: tighter band — Report §6 says 15% gap-up is the
+    # outer edge of what's recoverable; bigger gaps tend to fade.
+    # min_pct_below_close at -2% rejects names that already broke
+    # the prior close (signal is decidedly not in play).
     price_band:
-      max_pct_above_close: 0.30
-      min_pct_below_close: -0.15
+      max_pct_above_close: 0.15
+      min_pct_below_close: -0.02
     # Tighter band applied ONLY to post-closure rescreens. At the open
     # tick a 25% gap-up is exactly the trade ("daily candidate + live
     # confirmation"); at 13:00 a name already up 25% from yesterday's
@@ -220,6 +228,38 @@ entry:
     post_closure_price_band:
       max_pct_above_close: 0.10
       min_pct_below_close: -0.08
+
+    # Phase 4.3 — opening-range / VWAP confirmation. When enabled,
+    # build a per-ticker opening-range context (first
+    # ``window_minutes`` of session) and require:
+    #   - price above VWAP
+    #   - price above session open
+    #   - price above prior close
+    #   - close_location_in_OR_bar >= require_close_location_min
+    #   - breakout_mode: either above the OR-high outright, or
+    #     ``above_or_near_high`` with tolerance.
+    #   - opening_volume_rvol_min: today's OR-window volume vs the
+    #     historical OR-window average must clear this multiple.
+    #
+    # ``enabled: false`` is the safe default. Flip true after
+    # operator validates opening-range bars are reliable on the
+    # configured feed (IEX may be too thin; SIP recommended).
+    opening_range:
+      enabled: false
+      window_minutes: 15
+      require_price_above_vwap: true
+      require_price_above_session_open: true
+      require_price_above_prior_close: true
+      require_close_location_min: 0.60
+      breakout_mode: "above_or_near_high"   # above_or_near_high | above_high
+      near_high_tolerance_pct: 0.02
+      opening_volume_rvol_min: 1.25
+      # Phase 4.4 — approximate the historical OR-window volume mean
+      # as a fixed fraction of avg_volume (market-microstructure
+      # baseline: ~8% of session volume in first 15 min). Replace
+      # with a calibrated value once SIP minute-bar history is
+      # available.
+      opening_volume_session_share: 0.08
 
   # Re-run the entry pass after any position closes intraday so freed
   # capital and concurrency slots can be redeployed. Carryover-position

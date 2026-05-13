@@ -1581,6 +1581,254 @@ def _confirm_entry(
     return True, None
 
 
+# ---------------------------------------------------------------- Phase 4.3 opening range / VWAP
+
+
+def compute_vwap_from_bars(bars: list[dict]) -> float | None:
+    """Volume-weighted average price across ``bars``.
+
+    Each bar is a dict with ``high`` / ``low`` / ``close`` / ``volume``
+    keys; typical-price = (high + low + close) / 3. Returns None
+    when ``bars`` is empty or total volume is zero (degenerate
+    case: no trades in the window).
+    """
+    if not bars:
+        return None
+    num = 0.0
+    den = 0.0
+    for b in bars:
+        try:
+            h = float(b.get("high"))
+            l = float(b.get("low"))
+            c = float(b.get("close"))
+            v = float(b.get("volume") or 0)
+        except (TypeError, ValueError):
+            continue
+        typ = (h + l + c) / 3.0
+        num += typ * v
+        den += v
+    if den <= 0:
+        return None
+    return num / den
+
+
+def build_opening_range_context(
+    ticker: str,
+    bars_1m: list[dict],
+    *,
+    prior_opening_vol_mean: float | None = None,
+    prior_close: float | None = None,
+) -> dict | None:
+    """Compute the OR context from a list of 1-minute bars.
+
+    Returns:
+      {
+        "ticker": ...,
+        "high": float, "low": float, "open": float, "close": float,
+        "volume": float,
+        "vwap": float | None,
+        "close_location": float in [0, 1] | None,
+        "prior_opening_vol_mean": float | None,
+        "opening_rvol": float | None,
+        "prior_close": float | None,
+      }
+
+    Returns None when ``bars_1m`` is empty (no OR window data
+    available — caller should fail-closed). ``close_location`` is
+    the OR-bar's close relative to its high/low range — 1.0 means
+    closed at the high.
+    """
+    if not bars_1m:
+        return None
+    try:
+        highs = [float(b["high"]) for b in bars_1m]
+        lows = [float(b["low"]) for b in bars_1m]
+        opens = [float(b["open"]) for b in bars_1m]
+        closes = [float(b["close"]) for b in bars_1m]
+        volumes = [float(b.get("volume") or 0) for b in bars_1m]
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    or_high = max(highs)
+    or_low = min(lows)
+    or_open = opens[0]
+    or_close = closes[-1]
+    or_volume = float(sum(volumes))
+    rng = or_high - or_low
+    close_loc = (
+        (or_close - or_low) / rng if rng > 0 else 0.5
+    )
+    opening_rvol = None
+    if prior_opening_vol_mean is not None and prior_opening_vol_mean > 0:
+        opening_rvol = or_volume / float(prior_opening_vol_mean)
+    return {
+        "ticker": ticker,
+        "high": or_high,
+        "low": or_low,
+        "open": or_open,
+        "close": or_close,
+        "volume": or_volume,
+        "vwap": compute_vwap_from_bars(bars_1m),
+        "close_location": close_loc,
+        "prior_opening_vol_mean": prior_opening_vol_mean,
+        "opening_rvol": opening_rvol,
+        "prior_close": prior_close,
+    }
+
+
+def confirm_opening_range_vwap(
+    entry: "Entry",
+    quote: dict[str, Any],
+    ctx: dict | None,
+    cfg_or: dict,
+) -> tuple[bool, str]:
+    """Apply the configured OR/VWAP gates against ``ctx`` and the
+    live ``quote``.
+
+    Returns ``(passed, reason_label)``. ``reason_label`` is a short
+    machine-readable string ("ok" on pass, e.g. "below_vwap" /
+    "below_session_open" / "below_prior_close" / "close_location_low"
+    / "below_or_high" / "opening_rvol_low" / "no_or_data" on fail).
+    """
+    if ctx is None:
+        return False, "no_or_data"
+    try:
+        bid = float(quote.get("bid") or 0)
+        ask = float(quote.get("ask") or 0)
+    except (TypeError, ValueError):
+        return False, "bad_quote"
+    mid = ((bid + ask) / 2.0) if (bid > 0 and ask > 0 and ask > bid) else None
+    if mid is None:
+        # Fall back to the OR bar close as a "live price" proxy when
+        # the live quote is degenerate — operators see this in
+        # paper trading when the quote feed is sparse.
+        mid = float(ctx.get("close") or 0)
+    if mid <= 0:
+        return False, "bad_quote"
+
+    if cfg_or.get("require_price_above_vwap"):
+        vwap = ctx.get("vwap")
+        if vwap is None or mid < float(vwap):
+            return False, "below_vwap"
+    if cfg_or.get("require_price_above_session_open"):
+        op = ctx.get("open")
+        if op is None or mid < float(op):
+            return False, "below_session_open"
+    if cfg_or.get("require_price_above_prior_close"):
+        pc = ctx.get("prior_close")
+        if pc is None or mid < float(pc):
+            return False, "below_prior_close"
+    cl_min = cfg_or.get("require_close_location_min")
+    if cl_min is not None:
+        cl = ctx.get("close_location")
+        if cl is None or float(cl) < float(cl_min):
+            return False, "close_location_low"
+    mode = (cfg_or.get("breakout_mode") or "above_high").lower()
+    or_high = ctx.get("high")
+    if or_high is None:
+        return False, "no_or_data"
+    or_high_f = float(or_high)
+    if mode == "above_high":
+        if mid < or_high_f:
+            return False, "below_or_high"
+    elif mode == "above_or_near_high":
+        tol = float(cfg_or.get("near_high_tolerance_pct") or 0.0)
+        if mid < or_high_f * (1.0 - tol):
+            return False, "below_or_high"
+    # Volume RVOL check
+    vmin = cfg_or.get("opening_volume_rvol_min")
+    if vmin is not None:
+        ov = ctx.get("opening_rvol")
+        if ov is None or float(ov) < float(vmin):
+            return False, "opening_rvol_low"
+    return True, "ok"
+
+
+def fetch_or_compute_opening_range_context(
+    ticker: str,
+    cfg: dict,
+    http: httpx.Client | None,
+    api_key: str | None,
+    *,
+    venue_code: str | None,
+    avg_volume: float | None,
+    avg_dollar_volume: float | None,
+    candidate_close: float | None,
+    now_utc: datetime,
+) -> dict | None:
+    """Build the OR context for one ticker.
+
+    Pulls the first ``opening_range.window_minutes`` of today's
+    1-minute bars from /api/v2/bars (uses the same auth pattern as
+    fetch_daily_bars_for_signal_fade). Returns None on any failure
+    — caller treats that as "no OR data; fail-closed".
+
+    Phase 4.4 — prior_opening_vol_mean is approximated as
+    ``avg_volume * opening_volume_session_share`` (default 8% of
+    daily volume in the first 15 min). Replace with calibrated SIP
+    history once available.
+    """
+    or_cfg = ((cfg.get("entry") or {}).get("intraday_confirmation")
+              or {}).get("opening_range") or {}
+    window_min = int(or_cfg.get("window_minutes") or 15)
+    if http is None or api_key is None:
+        return None
+
+    session_cfg = cfg.get("session") or {}
+    sizing_cfg = cfg.get("sizing") or {}
+    venue = venue_code or sizing_cfg.get("default_venue_code") or "XNAS"
+
+    import pytz
+    tz = pytz.timezone(session_cfg.get("timezone") or "America/New_York")
+    today_et = _to_eastern(now_utc).date()
+    try:
+        sh, sm = (int(p) for p in str(session_cfg.get("start") or "09:30").split(":")[:2])
+    except Exception:
+        sh, sm = 9, 30
+    session_start = tz.localize(datetime.combine(today_et, _dtime(sh, sm)))
+    or_end = session_start + timedelta(minutes=window_min)
+    body = {
+        "apikey": api_key,
+        "instrument": {"venue_code": venue, "canonical_symbol": ticker},
+        "interval": "1m",
+        "start": session_start.astimezone(timezone.utc).isoformat(),
+        "end": or_end.astimezone(timezone.utc).isoformat(),
+    }
+    try:
+        r = http.post("/api/v2/bars", json=body, headers=_api_headers(api_key))
+    except Exception as e:
+        LOG.warning("opening_range bars fetch failed for %s: %s", ticker, e)
+        return None
+    if r.status_code != 200:
+        LOG.warning(
+            "opening_range bars HTTP %d for %s: %s",
+            r.status_code, ticker, (r.text or "")[:200],
+        )
+        return None
+    try:
+        payload = r.json().get("data") or {}
+    except ValueError:
+        return None
+    rows = payload.get("bars") or []
+    if not rows:
+        return None
+
+    # Approximate prior_opening_vol_mean. avg_volume is the rolling
+    # daily-volume mean from the prefilter; multiply by the
+    # configured first-X-minutes share.
+    session_share = float(or_cfg.get("opening_volume_session_share") or 0.08)
+    prior_opening_vol_mean = (
+        float(avg_volume) * session_share
+        if avg_volume is not None and avg_volume > 0
+        else None
+    )
+    return build_opening_range_context(
+        ticker, rows,
+        prior_opening_vol_mean=prior_opening_vol_mean,
+        prior_close=candidate_close,
+    )
+
+
 def _reason_label_for_confirmation_fail(raw: str | None) -> str:
     """Map :func:`_confirm_entry`'s human-readable reason into the
     canonical Phase 1.4 reason label set.
@@ -1604,6 +1852,22 @@ def _reason_label_for_confirmation_fail(raw: str | None) -> str:
     if raw.startswith("failure"):
         return "failure_band"
     return "bad_quote"
+
+
+def _confirmation_streak(state: State | None) -> dict[str, int]:
+    """Phase 4.2 — transient per-ticker stable-quote streak counter.
+
+    Stored under ``state["confirmation_streak"]`` so it survives
+    across ticks within a session. reset_for_new_session does NOT
+    explicitly clear it (it's name-scoped, not date-scoped), but a
+    new session means a fresh slate so the dict stays effectively
+    empty until the first new candidate arrives.
+    """
+    if state is None:
+        # Test/legacy path with no state — return a throwaway dict
+        # that the caller will not persist.
+        return {}
+    return state.setdefault("confirmation_streak", {})
 
 
 def filter_by_intraday_confirmation(
@@ -1646,6 +1910,15 @@ def filter_by_intraday_confirmation(
         ic = dict(ic)
         ic["price_band"] = band_override
     now_utc = now_utc or datetime.now(timezone.utc)
+    # Phase 4.2 — stable-quote streak threshold. Default 1 = legacy
+    # single-tick behavior.
+    required_streak = int(ic.get("require_stable_quote_checks") or 1)
+    streaks = _confirmation_streak(state)
+    # Phase 4.3 — opening-range / VWAP context (per-ticker cached
+    # within this call so multiple entries on the same ticker reuse).
+    or_cfg = (ic.get("opening_range") or {})
+    or_enabled = bool(or_cfg.get("enabled"))
+    or_ctx_cache: dict[str, dict | None] = {}
     out: list[Entry] = []
     for rank, entry in enumerate(entries, start=1):
         quote = _fetch_quote(entry, http, api_key)
@@ -1654,6 +1927,9 @@ def filter_by_intraday_confirmation(
                 "intraday_confirmation: %s — no quote available, skipping",
                 entry.ticker,
             )
+            # Reset the streak on quote miss so a momentarily
+            # unavailable quote does not "freeze" prior pass count.
+            streaks.pop(entry.ticker, None)
             if state is not None:
                 emit_entry_decision_rejected(
                     cfg, candidate=entry.candidate, state=state,
@@ -1664,9 +1940,9 @@ def filter_by_intraday_confirmation(
                 )
             continue
         passed, raw_reason = _confirm_entry(entry, ic, quote, now_utc=now_utc)
-        if passed:
-            out.append(entry)
-        else:
+        if not passed:
+            # Reset streak on fail.
+            streaks.pop(entry.ticker, None)
             LOG.info(
                 "intraday_confirmation: %s rejected (%s) bid=%s ask=%s",
                 entry.ticker, raw_reason,
@@ -1681,6 +1957,69 @@ def filter_by_intraday_confirmation(
                     qty=entry.qty, venue_code=entry.venue_code,
                     quote=quote,
                 )
+            continue
+
+        # Phase 4.3 — OR/VWAP gate (only when enabled). The check
+        # runs AFTER the spread/age/band gates because OR data
+        # requires more fetching; cheap checks reject first.
+        if or_enabled:
+            ctx = or_ctx_cache.get(entry.ticker)
+            if ctx is None:
+                ctx = fetch_or_compute_opening_range_context(
+                    entry.ticker, cfg, http, api_key,
+                    venue_code=entry.venue_code,
+                    avg_volume=(
+                        (entry.candidate.features or {}).get("avg_volume")
+                        if entry.candidate else None
+                    ),
+                    avg_dollar_volume=(
+                        (entry.candidate.features or {}).get("avg_dollar_volume")
+                        if entry.candidate else None
+                    ),
+                    candidate_close=entry.close_price,
+                    now_utc=now_utc,
+                )
+                or_ctx_cache[entry.ticker] = ctx
+            or_pass, or_reason = confirm_opening_range_vwap(
+                entry, quote, ctx, or_cfg,
+            )
+            if not or_pass:
+                streaks.pop(entry.ticker, None)
+                LOG.info(
+                    "opening_range_confirmation: %s rejected (%s)",
+                    entry.ticker, or_reason,
+                )
+                if state is not None:
+                    emit_entry_decision_rejected(
+                        cfg, candidate=entry.candidate, state=state,
+                        reason="opening_range_failed",
+                        entry_trigger=entry_trigger,
+                        candidate_rank=rank,
+                        qty=entry.qty, venue_code=entry.venue_code,
+                        quote=quote,
+                    )
+                continue
+
+        # Pass — bump streak. Admit only when threshold reached.
+        new_count = int(streaks.get(entry.ticker, 0)) + 1
+        streaks[entry.ticker] = new_count
+        if new_count >= required_streak:
+            # Reset after admit so subsequent passes start fresh
+            # (defensive — admitted entries are popped from the
+            # candidate slate by the caller, but a re-entry in a
+            # later session shouldn't inherit stale streak count).
+            streaks.pop(entry.ticker, None)
+            out.append(entry)
+        else:
+            LOG.info(
+                "intraday_confirmation: %s streak=%d/%d — defer to next tick",
+                entry.ticker, new_count, required_streak,
+            )
+            # Pre-threshold pass: drop from this slate; the
+            # next-tick pass will retry and bump the streak. No
+            # entry_decision event yet — neither accepted nor
+            # rejected per the audit's "exactly one event"
+            # contract.
     return out
 
 
