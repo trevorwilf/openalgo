@@ -297,6 +297,44 @@ exits:
   target_pct: 0.15
   max_hold_days: 3
   signal_fade_enabled: true
+
+  # Phase 5.1 — protected-position invariant. After a parent MARKET
+  # BUY fills, the OCO bracket attach has ``max_unprotected_seconds``
+  # to confirm. Beyond that the strategy escalates:
+  #   1. Retry the OCO attach (up to max_oco_attach_attempts).
+  #   2. Submit a stand-alone fallback STOP (or STOP_LIMIT) order.
+  #   3. Flatten the position with a MARKET SELL (DAY-TIF) and block
+  #      new entries for the session.
+  # block_entries_on_violation flags whether step 3 also sets
+  # block_new_entries_today (Phase 3 circuit breaker integration).
+  protected_position:
+    enabled: true
+    max_unprotected_seconds: 10
+    max_oco_attach_attempts: 2
+    fallback_stop_enabled: true
+    fallback_stop_order_type: "stop"        # stop | stop_limit
+    fallback_stop_limit_offset_pct: 0.02
+    flatten_if_unprotected: true
+    block_entries_on_violation: true
+
+  # Phase 5.8 — stop-manager scaffolding (DISABLED by default).
+  # When enabled, every intraday tick consults
+  # ``desired_stop_from_mfe(pos, cfg)``; when the desired stop is
+  # higher than the current OCO stop, the existing stop leg is
+  # cancelled and a replacement is submitted at the new price.
+  # Stops NEVER move down (a lower desired stop is a no-op).
+  stop_manager:
+    enabled: false
+    # When MFE crosses each threshold, the stop is moved to the
+    # corresponding break-even / lock-in level. ``mfe_min`` is the
+    # minimum unrealized-gain percent (vs entry) for the rule to
+    # fire; ``stop_at`` is the percent above entry to place the
+    # stop. Phase 5 ships the contract; operator-tuned values live
+    # in the operator config.
+    rules:
+      - {mfe_min: 0.05, stop_at: 0.00}   # at +5% MFE, move stop to break-even
+      - {mfe_min: 0.08, stop_at: 0.03}   # at +8%, lock in +3%
+      - {mfe_min: 0.12, stop_at: 0.06}   # at +12%, lock in +6%
   # Overnight gap protection. ``GTC`` keeps the OCO take_profit /
   # stop_loss live past 16:00 ET expiry so a position carried
   # overnight doesn't sit naked (saw ~$300+ avoidable slippage on

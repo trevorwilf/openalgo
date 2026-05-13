@@ -2135,6 +2135,15 @@ def submit_parent_market_buy(
             # fill; updated by write_daily_marks each session end.
             "peak_since_entry": None,
             "trough_since_entry": None,
+            # Phase 5.2 — protected-position invariant fields. Set
+            # when the parent fills (poll_fills); the protection
+            # enforcer reads them on every tick after the fill.
+            "parent_filled_at": None,
+            "protection_status": "none",
+            "protection_deadline_at": None,
+            "oco_attach_attempts": 0,
+            "fallback_stop_order_id": None,
+            "protection_violation": False,
         }
         save_state(state, state_path)
         LOG.info("Parent MARKET BUY submitted (actual_fill mode): %s qty=%d parent=%s",
@@ -2716,6 +2725,9 @@ def poll_fills(
                     if pos.get("entry_price") is not None:
                         pos["peak_since_entry"] = float(pos["entry_price"])
                         pos["trough_since_entry"] = float(pos["entry_price"])
+                    # Phase 5.3 — set the protection deadline so the
+                    # invariant enforcer has something to act on.
+                    _mark_parent_filled_for_protection(pos, cfg)
                     dirty = True
                     events.append(ev)
                     # Per-trade rich log: parent fill is a state
@@ -2731,6 +2743,10 @@ def poll_fills(
                     if pos.get("entry_price") is not None:
                         pos["peak_since_entry"] = float(pos["entry_price"])
                         pos["trough_since_entry"] = float(pos["entry_price"])
+                    # Phase 5.3 — partial-fill-then-cancel still needs
+                    # protection. The remaining filled portion is a
+                    # naked long until the OCO attaches.
+                    _mark_parent_filled_for_protection(pos, cfg)
                     LOG.warning(
                         "parent %s ended in %s with partial fill %d shares",
                         ticker, canonical, filled_qty,
@@ -5884,6 +5900,461 @@ def run_post_closure_rescreen(
     return submitted
 
 
+# ---------------------------------------------------------------- Phase 5 — protected-position invariant
+
+
+def _protected_position_cfg(cfg: dict | None) -> dict:
+    if not cfg:
+        return {}
+    return ((cfg.get("exits") or {}).get("protected_position") or {})
+
+
+def _mark_parent_filled_for_protection(pos: dict, cfg: dict | None) -> None:
+    """Phase 5.3: stamp the position with protection-deadline state
+    at parent-fill time. Called from poll_fills' fill branch.
+
+    ``cfg=None`` is tolerated (legacy poll_fills test callers) — we
+    fall back to the audit default ``max_unprotected_seconds=10``."""
+    pp = _protected_position_cfg(cfg)
+    max_unp = float(pp.get("max_unprotected_seconds") or 10.0)
+    now = datetime.now(timezone.utc)
+    pos["parent_filled_at"] = now.isoformat()
+    pos["protection_status"] = "none"
+    pos["oco_attach_attempts"] = 0
+    pos["protection_deadline_at"] = (now + timedelta(seconds=max_unp)).isoformat()
+
+
+def seconds_since_iso(ts: str | None, now_utc: datetime | None = None) -> float | None:
+    """Phase 5.4 helper. Returns None when ts is missing /
+    unparseable."""
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        now = now_utc or datetime.now(timezone.utc)
+        return (now - dt).total_seconds()
+    except (TypeError, ValueError):
+        return None
+
+
+def has_confirmed_protection(pos: dict) -> bool:
+    """A position is protected when it has an OCO attached OR a
+    fallback STOP order live, OR it's already exiting / flat."""
+    status = pos.get("protection_status")
+    if status in {"oco_attached", "fallback_stop_attached", "flat"}:
+        return True
+    # Also true if the OCO child IDs are populated (back-compat with
+    # pre-Phase-5 positions that have valid IDs but no
+    # protection_status field).
+    children = pos.get("child_order_ids") or {}
+    if children.get("target") and children.get("stop"):
+        return True
+    return False
+
+
+def protection_deadline_breached(
+    pos: dict, cfg: dict, now_utc: datetime | None = None,
+) -> bool:
+    """Phase 5.4: True when the protection deadline has passed."""
+    deadline = pos.get("protection_deadline_at")
+    if not deadline:
+        return False
+    try:
+        dt = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        now = now_utc or datetime.now(timezone.utc)
+        return now > dt
+    except (TypeError, ValueError):
+        return False
+
+
+def submit_fallback_stop(
+    ticker: str,
+    pos: dict,
+    cfg: dict,
+    http: httpx.Client,
+    api_key: str,
+) -> str | None:
+    """Phase 5.5: stand-alone STOP order for a position whose OCO
+    attach has timed out.
+
+    Returns the broker order id on success, None on failure. The
+    order is GTC so it persists across session boundaries until the
+    operator intervenes or the next OCO retry succeeds.
+    """
+    pp = _protected_position_cfg(cfg)
+    venue_code = pos.get("venue_code") or cfg["sizing"]["default_venue_code"]
+    qty = int(pos.get("qty") or 0)
+    entry_price = float(pos.get("entry_price") or 0)
+    stop_pct = float(pos.get("stop_pct") or cfg["exits"]["stop_pct"])
+    if qty <= 0 or entry_price <= 0:
+        LOG.warning(
+            "submit_fallback_stop: %s has qty=%d entry_price=%.4f; skipping",
+            ticker, qty, entry_price,
+        )
+        return None
+    stop_price = round(entry_price * (1.0 - stop_pct), 2)
+    order_type = (pp.get("fallback_stop_order_type") or "stop").lower()
+    body = {
+        "apikey": api_key,
+        "instrument": {"venue_code": venue_code, "canonical_symbol": ticker},
+        "side": "SELL",
+        "quantity": str(qty),
+        "quantity_unit": "WHOLE",
+        "time_in_force": "GTC",
+        "session": "REGULAR",
+    }
+    if order_type == "stop_limit":
+        offset = float(pp.get("fallback_stop_limit_offset_pct") or 0.02)
+        limit_price = round(stop_price * (1.0 - offset), 2)
+        body["order_type"] = "STOP_LIMIT"
+        body["trigger_price"] = str(stop_price)
+        body["price"] = str(limit_price)
+    else:
+        body["order_type"] = "STOP"
+        body["trigger_price"] = str(stop_price)
+    try:
+        r = http.post("/api/v2/orders", json=body, headers=_api_headers(api_key))
+    except Exception as e:
+        LOG.exception("submit_fallback_stop network error for %s: %s", ticker, e)
+        return None
+    parsed = r.json() if r.content else {}
+    if r.status_code != 200:
+        LOG.error(
+            "submit_fallback_stop failed for %s: HTTP %d %s",
+            ticker, r.status_code, parsed,
+        )
+        return None
+    data = parsed.get("data") or {}
+    native = data.get("native_response") or {}
+    oid = (
+        native.get("id") or native.get("order_id")
+        or data.get("order_id") or ""
+    )
+    if not oid:
+        LOG.error(
+            "submit_fallback_stop accepted but no order_id surfaced for %s: %s",
+            ticker, parsed,
+        )
+        return None
+    LOG.warning(
+        "fallback stop submitted for %s: order_id=%s stop_price=%.4f",
+        ticker, oid, stop_price,
+    )
+    return oid
+
+
+def _emit_protection_event(
+    cfg: dict, pos: dict, *, event_type: str, ticker: str,
+    payload: dict[str, Any],
+) -> None:
+    """Phase 5.6 telemetry. Mirrors to both the per-trade jsonl
+    and the canonical Phase 1.5 ledger."""
+    link_id = pos.get("link_id") or ""
+    rec = {
+        "record_type": "protection_event",
+        "ts": _now_utc_iso(),
+        "ticker": ticker, "link_id": link_id,
+        "event_type": event_type,
+        **payload,
+    }
+    _append_trade_log(cfg, link_id, rec)
+    emit_ledger_event(
+        cfg, event_type="protection_event",
+        trade_id=link_id, ticker=ticker,
+        payload=rec,
+    )
+
+
+def enforce_protected_position_invariant(
+    state: State,
+    cfg: dict,
+    http: httpx.Client | None,
+    api_key: str | None,
+    *,
+    state_path: Path,
+    now_utc: datetime | None = None,
+) -> dict[str, Any]:
+    """Phase 5.6: iterate filled positions and ensure each one is
+    protected (OCO attached OR fallback stop attached).
+
+    Returns a summary dict for logging.
+    """
+    pp = _protected_position_cfg(cfg)
+    summary = {
+        "checked": 0, "retried": 0, "fallback_attached": 0,
+        "flattened": 0, "violations": 0,
+    }
+    if not pp.get("enabled"):
+        return summary
+    now = now_utc or datetime.now(timezone.utc)
+    open_positions = state.get("open_positions") or {}
+    dirty = False
+
+    max_attempts = int(pp.get("max_oco_attach_attempts") or 2)
+    fallback_enabled = bool(pp.get("fallback_stop_enabled"))
+    flatten = bool(pp.get("flatten_if_unprotected"))
+    block_on_viol = bool(pp.get("block_entries_on_violation"))
+
+    for ticker, pos in list(open_positions.items()):
+        if pos.get("status") != "filled":
+            continue
+        # Skip exiting / cancel_failed positions — they're already
+        # in a state the protection enforcer can't help with.
+        if pos.get("status") == "exiting":
+            continue
+        if has_confirmed_protection(pos):
+            # If we have OCO children, normalize the status so the
+            # state record reflects reality.
+            if (pos.get("child_order_ids") or {}).get("target") and (
+                pos.get("child_order_ids") or {}
+            ).get("stop"):
+                if pos.get("protection_status") not in {
+                    "oco_attached", "fallback_stop_attached"
+                }:
+                    pos["protection_status"] = "oco_attached"
+                    dirty = True
+            continue
+        summary["checked"] += 1
+
+        # 1. Attempt to attach OCO (if we still have retries).
+        attempts = int(pos.get("oco_attach_attempts") or 0)
+        if attempts < max_attempts and http is not None and api_key is not None:
+            pos["oco_attach_attempts"] = attempts + 1
+            summary["retried"] += 1
+            try:
+                res = submit_oco_children(
+                    ticker, pos, cfg, http, api_key,
+                    state=state, state_path=state_path,
+                )
+            except Exception as e:
+                LOG.exception(
+                    "enforce_protected_position_invariant OCO submit "
+                    "raised for %s: %s", ticker, e,
+                )
+                res = None
+            # On success the child IDs are populated; has_confirmed_
+            # protection will return True next pass.
+            children = pos.get("child_order_ids") or {}
+            if children.get("target") and children.get("stop"):
+                pos["protection_status"] = "oco_attached"
+                _emit_protection_event(
+                    cfg, pos, event_type="oco_attached", ticker=ticker,
+                    payload={"oco_attach_attempts": pos["oco_attach_attempts"]},
+                )
+                dirty = True
+                continue
+            # Soft fail — leave attempts incremented and fall through
+            # to the deadline check.
+
+        # 2. Deadline not breached yet → wait.
+        if not protection_deadline_breached(pos, cfg, now_utc=now):
+            continue
+
+        # 3. Deadline breached + fallback enabled → submit STOP.
+        if fallback_enabled and not pos.get("fallback_stop_order_id"):
+            if http is not None and api_key is not None:
+                fb_oid = submit_fallback_stop(ticker, pos, cfg, http, api_key)
+            else:
+                fb_oid = None
+            if fb_oid:
+                pos["fallback_stop_order_id"] = fb_oid
+                pos["protection_status"] = "fallback_stop_attached"
+                summary["fallback_attached"] += 1
+                _emit_protection_event(
+                    cfg, pos, event_type="fallback_stop_attached",
+                    ticker=ticker,
+                    payload={"order_id": fb_oid},
+                )
+                dirty = True
+                continue
+
+        # 4. Still unprotected → flatten + violation.
+        if flatten and http is not None and api_key is not None:
+            pos["protection_status"] = "flattening"
+            pos["protection_violation"] = True
+            summary["violations"] += 1
+            summary["flattened"] += 1
+            if block_on_viol and not state.get("block_new_entries_today"):
+                state["block_new_entries_today"] = True
+                state["new_entries_blocked_reason"] = "unprotected_position_violation"
+            _emit_protection_event(
+                cfg, pos, event_type="unprotected_deadline_breached",
+                ticker=ticker,
+                payload={
+                    "max_unprotected_seconds": pp.get("max_unprotected_seconds"),
+                    "oco_attach_attempts": pos.get("oco_attach_attempts"),
+                },
+            )
+            try:
+                trigger_time_stop(
+                    ticker, pos, cfg, http, api_key,
+                    state=state, state_path=state_path,
+                    reason="protection_violation_flatten",
+                    time_in_force="DAY",
+                )
+            except Exception as e:
+                LOG.exception(
+                    "protection-violation flatten failed for %s (best effort): %s",
+                    ticker, e,
+                )
+            dirty = True
+
+    if dirty:
+        save_state(state, state_path)
+    return summary
+
+
+# ---------------------------------------------------------------- Phase 5.8 — stop-manager ablation
+
+
+def desired_stop_from_mfe(pos: dict, cfg: dict) -> float | None:
+    """Return the highest stop price implied by ``stop_manager.rules``
+    given the position's current MFE, or None when no rule fires.
+
+    ``rules`` is a list of ``{mfe_min, stop_at}`` dicts; the rule
+    with the largest mfe_min that the position has crossed wins.
+    Stops never move down — caller is responsible for clamping
+    against the prior stop.
+    """
+    sm_cfg = ((cfg.get("exits") or {}).get("stop_manager") or {})
+    if not sm_cfg.get("enabled"):
+        return None
+    entry = pos.get("entry_price")
+    peak = pos.get("peak_since_entry")
+    if entry is None or peak is None:
+        return None
+    try:
+        entry_f = float(entry)
+        peak_f = float(peak)
+    except (TypeError, ValueError):
+        return None
+    if entry_f <= 0:
+        return None
+    mfe = (peak_f - entry_f) / entry_f
+    best: float | None = None
+    for rule in sm_cfg.get("rules") or []:
+        mfe_min = float(rule.get("mfe_min") or 0)
+        stop_at = float(rule.get("stop_at") or 0)
+        if mfe >= mfe_min:
+            candidate = entry_f * (1.0 + stop_at)
+            if best is None or candidate > best:
+                best = candidate
+    return best
+
+
+def maybe_advance_stop(
+    pos: dict,
+    cfg: dict,
+    http: httpx.Client | None,
+    api_key: str | None,
+    *,
+    state: State,
+    state_path: Path,
+    ticker: str,
+) -> str | None:
+    """Phase 5.8 stop-manager step. No-op when the feature is
+    disabled or the position lacks OCO children.
+
+    Returns the new stop order id when a replacement was submitted,
+    None otherwise.
+    """
+    sm_cfg = ((cfg.get("exits") or {}).get("stop_manager") or {})
+    if not sm_cfg.get("enabled"):
+        return None
+    if pos.get("protection_status") != "oco_attached":
+        return None
+    children = pos.get("child_order_ids") or {}
+    if not (children.get("target") and children.get("stop")):
+        return None
+
+    target_stop = desired_stop_from_mfe(pos, cfg)
+    if target_stop is None:
+        return None
+    current_stop = pos.get("stop_price")
+    if current_stop is None:
+        return None
+    try:
+        current_f = float(current_stop)
+        target_f = float(target_stop)
+    except (TypeError, ValueError):
+        return None
+    # Stops never move down.
+    if target_f <= current_f:
+        return None
+
+    old_stop_id = children.get("stop")
+    # Cancel old, then submit a replacement STOP order. On
+    # replacement-submit failure leave child_order_ids untouched so
+    # the next tick retries.
+    try:
+        cancel_order(old_stop_id, http, api_key)
+    except Exception as e:
+        LOG.exception(
+            "maybe_advance_stop: cancel old stop %s failed for %s: %s",
+            old_stop_id, ticker, e,
+        )
+        return None
+    venue_code = pos.get("venue_code") or cfg["sizing"]["default_venue_code"]
+    qty = int(pos.get("qty") or 0)
+    body = {
+        "apikey": api_key,
+        "instrument": {"venue_code": venue_code, "canonical_symbol": ticker},
+        "side": "SELL",
+        "order_type": "STOP",
+        "quantity": str(qty), "quantity_unit": "WHOLE",
+        "trigger_price": str(round(target_f, 2)),
+        "time_in_force": "GTC",
+        "session": "REGULAR",
+    }
+    try:
+        r = http.post("/api/v2/orders", json=body, headers=_api_headers(api_key))
+    except Exception as e:
+        LOG.exception("maybe_advance_stop submit failed for %s: %s", ticker, e)
+        return None
+    parsed = r.json() if r.content else {}
+    if r.status_code != 200:
+        LOG.error(
+            "maybe_advance_stop new stop rejected for %s (status=%d): %s",
+            ticker, r.status_code, parsed,
+        )
+        return None
+    data = parsed.get("data") or {}
+    native = data.get("native_response") or {}
+    new_oid = (
+        native.get("id") or native.get("order_id")
+        or data.get("order_id") or ""
+    )
+    if not new_oid:
+        return None
+    pos["child_order_ids"]["stop"] = new_oid
+    pos["stop_price"] = round(target_f, 2)
+    save_state(state, state_path)
+    rec = {
+        "record_type": "stop_replaced",
+        "ts": _now_utc_iso(),
+        "ticker": ticker, "link_id": pos.get("link_id") or "",
+        "old_stop_order_id": old_stop_id,
+        "new_stop_order_id": new_oid,
+        "old_stop_price": current_f,
+        "new_stop_price": pos["stop_price"],
+    }
+    _append_trade_log(cfg, pos.get("link_id"), rec)
+    emit_ledger_event(
+        cfg, event_type="protection_event",
+        trade_id=pos.get("link_id"), ticker=ticker,
+        payload=rec,
+    )
+    LOG.info(
+        "stop_manager: %s stop advanced %.4f -> %.4f (new_id=%s)",
+        ticker, current_f, pos["stop_price"], new_oid,
+    )
+    return new_oid
+
+
 def run_loop(
     cfg: dict,
     *,
@@ -6051,6 +6522,34 @@ def run_loop(
                             LOG.info("OCO brackets attached post-fill: %s", attached)
                     except Exception as e:
                         LOG.exception("submit_pending_oco_children failed: %s", e)
+                    # Phase 5.7 — protected-position invariant runs
+                    # AFTER the OCO-attach pass and BEFORE the entry
+                    # passes. A protection violation flips
+                    # block_new_entries_today so the same-tick entry
+                    # pass cannot launch a new long while a prior
+                    # one is unprotected.
+                    try:
+                        enforce_protected_position_invariant(
+                            state, cfg, http_client, api_key,
+                            state_path=state_path, now_utc=now,
+                        )
+                    except Exception as e:
+                        LOG.exception(
+                            "enforce_protected_position_invariant error: %s", e,
+                        )
+                    # Phase 5.8 — stop-manager step. No-op when
+                    # cfg.exits.stop_manager.enabled == False.
+                    try:
+                        for ticker_sm, pos_sm in list(
+                            (state.get("open_positions") or {}).items()
+                        ):
+                            maybe_advance_stop(
+                                pos_sm, cfg, http_client, api_key,
+                                state=state, state_path=state_path,
+                                ticker=ticker_sm,
+                            )
+                    except Exception as e:
+                        LOG.exception("maybe_advance_stop error: %s", e)
                     # Per-trade rich logging: 1-minute intraday tick
                     # snapshot per filled position. Idempotent — each
                     # position has its own ``last_tick_logged_at`` so
