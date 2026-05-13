@@ -28,12 +28,93 @@ broker:
 
 sizing:
   per_trade_pct: 0.10
-  max_concurrent_positions: 5
+  max_concurrent_positions: 18
   default_venue_code: "XNAS"
+  # When true (and bankroll is enabled), each trade is sized to
+  # ``bankroll / max_concurrent_positions`` instead of
+  # ``per_trade_pct × sizing_basis``. This pairs naturally with
+  # bankroll + daily_allocation: each concurrent slot receives an
+  # equal share of the bankroll, so a full
+  # max_concurrent_positions deployment consumes exactly the
+  # bankroll. Concrete example: bankroll=$90,000,
+  # max_concurrent_positions=18 → per-trade = $5,000.
+  # max_hold_days=3 → ~6 new entries/day × $5,000 = $30,000 daily
+  # deployment, matching the daily_allocation slice.
+  #
+  # When false (legacy), per-trade derives from per_trade_pct ×
+  # sizing_basis (which is the daily slice when daily_allocation is
+  # enabled, full bankroll otherwise).
+  equal_slice_per_position: true
+  # Optional scaling for equal_slice mode. The per-trade dollar size
+  # becomes ``fraction × bankroll / max_concurrent_positions``.
+  #
+  # Default ``null`` = AUTO-COUPLE to ``risk.max_gross_exposure_pct``,
+  # so the natural max deployment (max_concurrent × per_trade) lands
+  # exactly on the gross-exposure cap. Concrete example with
+  # bankroll=$90,000, max_concurrent=18, max_gross_exposure_pct=0.80:
+  #   per_trade = 0.80 × $90,000 / 18 = $4,000
+  #   18 × $4,000 = $72,000 = the gross cap (no idle slots, no cap
+  #   surprises). The per-trade size scales with bankroll: a 50%
+  #   drawdown to $45k → per_trade = $2,000; growth to $200k →
+  #   per_trade = $8,889. Risk discipline travels with the equity
+  #   curve.
+  #
+  # Set an explicit fraction in (0, 1] to override the auto value
+  # (useful if you want per-trade *smaller* than the gross cap would
+  # imply — e.g., a 0.50 fraction with gross_cap=0.80 leaves a 30%
+  # cumulative buffer on top of the per-trade buffer).
+  equal_slice_bankroll_fraction: null
+
+# Bowaka's working bankroll — the strategy's "envelope" within your
+# broker account. All sizing decisions (per_trade_pct, gross_exposure_
+# pct) compute against this number, NOT the full account equity. The
+# bankroll seeds once, then grows with realized P&L from bowaka's own
+# closures and is capped at ``cap_dollars``. Losses also reduce it
+# (clamped at $0). The state survives restarts via state.json.
+#
+# To reset the bankroll to its initial value: change ``reset_token`` to
+# any new string and restart. The strategy detects the changed token,
+# re-seeds, and records the new token so subsequent reboots don't
+# loop-reset.
+#
+# Disable the bankroll entirely by omitting this whole block — sizing
+# reverts to using the full account equity as the basis.
+bankroll:
+  initial:
+    # Exactly one of these must be set; the other must be null.
+    pct_of_cash: null        # e.g., 0.10 = 10% of available cash at init
+    fixed_dollars: 90000     # e.g., 10000 = seed at exactly $10k
+  # Hard ceiling. Realized profits that would push the bankroll above
+  # this value are forfeit (the cap stays at cap_dollars). Set to null
+  # for unbounded growth.
+  cap_dollars: 300000
+  # Change this string to force a re-seed at the next launch. The
+  # strategy stores the last-seen token and only re-seeds when the
+  # YAML's token differs from state's, so leaving it empty after the
+  # first run is fine — the bankroll persists across reboots.
+  reset_token: "2026-05-11-seed-90k"
+  # Slice the bankroll into one allocation per holding day so the
+  # strategy always has fresh capital to deploy, even when prior days'
+  # positions are still carried. Concrete example: bankroll = $90,000,
+  # max_hold_days = 3 → today's per-trade SIZING basis is $30,000
+  # (= 90000 / 3), so per_trade_pct=0.10 produces $3,000 per trade.
+  # The gross-exposure cap STILL applies to the full $90,000 (not the
+  # daily slice), so total carried exposure across all in-flight days
+  # is bounded by max_gross_exposure_pct × bankroll. Note that
+  # max_concurrent_positions is a total cap on open positions; to keep
+  # firing N new entries every day, set max_concurrent_positions ≥
+  # N × max_hold_days (e.g., 5 × 3 = 15 to allow 5 new entries each
+  # day with 3-day holds).
+  daily_allocation:
+    enabled: true
+    # Override the slice denominator. Null = use cfg.exits.max_hold_days
+    # (the natural choice — the slice matches the maximum number of
+    # in-flight vintages).
+    days: null
 
 risk:
   daily_loss_pct: 0.03
-  max_gross_exposure_pct: 0.50
+  max_gross_exposure_pct: 0.80
   max_per_trade_dollars: null         # nullable absolute floor
   max_gross_exposure_dollars: null    # nullable absolute floor
   # Item 3 — capacity cap. Each position is bounded to this fraction
@@ -43,6 +124,12 @@ risk:
   # past where market-impact dominates the trade). 3% is conservative
   # for microcap names. Set to null to disable.
   max_position_as_adv_frac: 0.03
+  # Total entries per session (open-tick + post-closure rescreens
+  # combined). Bounds runaway chaining if every entry instantly stops
+  # out. Without this cap a fast-mean-reverting morning could burn
+  # through 10+ trades on stale signals, all paying spread. Null
+  # disables the cap (back to "max_concurrent_positions" only).
+  max_total_entries_per_day: 10
 
 entry:
   # Item 4 — bracket pricing mode.
@@ -59,12 +146,11 @@ entry:
 
   # Item 9 — intraday confirmation gate (Critical #4 in the review).
   # Bowaka's strongest reconstruction is "daily candidate + live
-  # confirmation before entry". Default is OFF — enable after you've
-  # backtested the gates against your own data, since adding a delay
-  # changes fill prices and the gates can either help (skip names that
-  # already exhausted) or hurt (miss runners that opened higher).
+  # confirmation before entry". Enabled together with the post-closure
+  # rescreen below so rescreens never trade on a name whose live price
+  # has drifted away from the signal.
   intraday_confirmation:
-    enabled: false
+    enabled: true
     # Wait this many minutes after the session start before the entry
     # pass runs. Lets the opening-print noise settle and gives quotes
     # time to be fresh. Common values: 5–15 minutes.
@@ -85,6 +171,29 @@ entry:
     price_band:
       max_pct_above_close: 0.30
       min_pct_below_close: -0.15
+    # Tighter band applied ONLY to post-closure rescreens. At the open
+    # tick a 25% gap-up is exactly the trade ("daily candidate + live
+    # confirmation"); at 13:00 a name already up 25% from yesterday's
+    # close has had four hours for the move to fade or exhaust, so the
+    # signal-to-price distance has different statistics. When null,
+    # rescreens fall back to ``price_band`` above.
+    post_closure_price_band:
+      max_pct_above_close: 0.10
+      min_pct_below_close: -0.08
+
+  # Re-run the entry pass after any position closes intraday so freed
+  # capital and concurrency slots can be redeployed. Carryover-position
+  # exits in the morning would otherwise leave the strategy idle for
+  # the rest of the session even with full headroom on the gross-
+  # exposure cap. Gated by the daily entry cap (risk.max_total_entries
+  # _per_day) and the time-of-day cutoff below.
+  post_closure_rescreen:
+    enabled: true
+    # No new entries after this ET time. Late-day entries have too
+    # little runway before the signal-fade EOD evaluation and the
+    # overnight gap, and the post-closure thesis is even thinner past
+    # mid-afternoon.
+    last_entry_time: "14:00"
 
 exits:
   stop_pct: 0.08

@@ -83,6 +83,29 @@ class State(TypedDict, total=False):
     pending_signal_fade_exits: dict[str, dict[str, Any]]
     halt_skip_today: list[str]
     kill_switch_state: str | None
+    # Post-closure rescreen support (added with the policy):
+    # entered_today: every ticker submitted today regardless of trigger.
+    #   The same-day re-entry block reads this so a name that stopped
+    #   out in the morning is not re-entered in the afternoon.
+    # daily_entries_count: total submitted entries today; bounded by
+    #   risk.max_total_entries_per_day to prevent runaway chaining.
+    # rescreen_pending: flag set by every intraday closure path; read
+    #   once per tick at end-of-tick so multiple simultaneous closures
+    #   debounce to one rescreen invocation.
+    # rescreens_today / post_closure_entries_today: pure telemetry
+    #   carried into the daily session_summary record.
+    entered_today: list[str]
+    daily_entries_count: int
+    rescreen_pending: bool
+    rescreens_today: int
+    post_closure_entries_today: int
+    # Bankroll envelope (cfg.bankroll). When the operator enables the
+    # bankroll feature, all sizing reads `bankroll.current_dollars` as
+    # the equity-equivalent, not broker equity. Seeded on first init
+    # or when cfg.bankroll.reset_token changes. Grows / shrinks with
+    # bowaka's own realized P&L, capped above at cap_dollars and
+    # clamped below at $0.
+    bankroll: dict[str, Any]
 
 
 def blank_state() -> State:
@@ -96,6 +119,11 @@ def blank_state() -> State:
         "pending_signal_fade_exits": {},
         "halt_skip_today": [],
         "kill_switch_state": None,
+        "entered_today": [],
+        "daily_entries_count": 0,
+        "rescreen_pending": False,
+        "rescreens_today": 0,
+        "post_closure_entries_today": 0,
     }
 
 
@@ -302,6 +330,12 @@ def reset_for_new_session(
     state["daily_pnl_baseline_equity"] = equity
     state["daily_pnl_tripped"] = False
     state["halt_skip_today"] = []
+    # Post-closure rescreen daily counters/sets.
+    state["entered_today"] = []
+    state["daily_entries_count"] = 0
+    state["rescreen_pending"] = False
+    state["rescreens_today"] = 0
+    state["post_closure_entries_today"] = 0
     # Phase 3: dedupe flags are per-day.
     state.pop("signal_fade_evaluated_for_date", None)
     state.pop("summary_written_for_date", None)
@@ -523,6 +557,295 @@ def fetch_equity(http: httpx.Client, api_key: str) -> float:
     raise RuntimeError(f"could not parse equity from /api/v2/balances response: {body!r}")
 
 
+def fetch_cash(http: httpx.Client, api_key: str) -> float:
+    """GET /api/v2/balances and return only the cash figure.
+
+    Used at bankroll initialization when ``initial.pct_of_cash`` is
+    set — we want the available cash, not total equity (which would
+    include open-position market value, double-counting the bankroll
+    against itself).
+    """
+    r = http.get("/api/v2/balances",
+                 headers=_api_headers(api_key),
+                 params={"apikey": api_key})
+    r.raise_for_status()
+    body = r.json().get("data") or {}
+    bal = body.get("balance") or body.get("balances") or {}
+    if isinstance(bal, dict) and bal.get("cash") is not None:
+        return float(bal["cash"])
+    raise RuntimeError(
+        f"could not parse cash from /api/v2/balances response: {body!r}"
+    )
+
+
+# ---------------------------------------------------------------- bankroll
+
+
+class BankrollConfigError(Exception):
+    """Operator-facing error for malformed cfg.bankroll. Raising at
+    init is intentional — the safe behavior is "refuse to run" rather
+    than "silently fall back to broker equity and over-size every
+    trade by 10×"."""
+
+
+def _bankroll_cfg(cfg: dict) -> dict | None:
+    """Return cfg.bankroll dict when the feature is enabled, else None
+    (so existing legacy callers continue to use broker equity)."""
+    bk = cfg.get("bankroll")
+    if not bk:
+        return None
+    return bk
+
+
+def _validate_bankroll_cfg(bk_cfg: dict) -> None:
+    """Strict-mode validation. Exactly one of pct_of_cash / fixed_
+    dollars must be set; values must be non-negative; cap_dollars (when
+    set) must be > initial."""
+    initial = bk_cfg.get("initial") or {}
+    pct = initial.get("pct_of_cash")
+    fixed = initial.get("fixed_dollars")
+    if pct is None and fixed is None:
+        raise BankrollConfigError(
+            "bankroll.initial requires exactly one of "
+            "pct_of_cash or fixed_dollars; both are null"
+        )
+    if pct is not None and fixed is not None:
+        raise BankrollConfigError(
+            "bankroll.initial: set EXACTLY one of pct_of_cash or "
+            "fixed_dollars; got both"
+        )
+    if pct is not None:
+        try:
+            pct_f = float(pct)
+        except (TypeError, ValueError):
+            raise BankrollConfigError(
+                f"bankroll.initial.pct_of_cash must be numeric; got {pct!r}"
+            )
+        if pct_f <= 0 or pct_f > 1:
+            raise BankrollConfigError(
+                f"bankroll.initial.pct_of_cash must be in (0, 1]; got {pct_f}"
+            )
+    if fixed is not None:
+        try:
+            fixed_f = float(fixed)
+        except (TypeError, ValueError):
+            raise BankrollConfigError(
+                f"bankroll.initial.fixed_dollars must be numeric; got {fixed!r}"
+            )
+        if fixed_f <= 0:
+            raise BankrollConfigError(
+                f"bankroll.initial.fixed_dollars must be > 0; got {fixed_f}"
+            )
+    cap = bk_cfg.get("cap_dollars")
+    if cap is not None:
+        try:
+            cap_f = float(cap)
+        except (TypeError, ValueError):
+            raise BankrollConfigError(
+                f"bankroll.cap_dollars must be numeric or null; got {cap!r}"
+            )
+        if cap_f <= 0:
+            raise BankrollConfigError(
+                f"bankroll.cap_dollars must be > 0 when set; got {cap_f}"
+            )
+
+    # daily_allocation validation. Only checked when enabled — the
+    # ``days`` override may be null, in which case we'll defer to
+    # cfg.exits.max_hold_days at sizing time (which must be > 0; the
+    # exits block has its own validation, so we don't re-check here).
+    da = bk_cfg.get("daily_allocation") or {}
+    if da.get("enabled"):
+        days = da.get("days")
+        if days is not None:
+            try:
+                days_int = int(days)
+            except (TypeError, ValueError):
+                raise BankrollConfigError(
+                    f"bankroll.daily_allocation.days must be an integer "
+                    f"or null; got {days!r}"
+                )
+            if days_int <= 0:
+                raise BankrollConfigError(
+                    f"bankroll.daily_allocation.days must be > 0; "
+                    f"got {days_int}"
+                )
+
+
+def initialize_bankroll(
+    state: State,
+    cfg: dict,
+    http: httpx.Client,
+    api_key: str,
+    *,
+    state_path: Path,
+    now_utc: datetime | None = None,
+) -> bool:
+    """Seed or re-seed the bankroll envelope based on cfg.bankroll.
+
+    Returns True when a (re-)init happened, False when no action was
+    needed (feature disabled, or persisted state matches the YAML's
+    reset_token already).
+
+    Init triggers:
+    - State has no bankroll dict (first launch with the feature on).
+    - cfg.bankroll.reset_token differs from
+      state.bankroll.last_reset_token (operator-driven reset).
+
+    Init can fail two ways:
+    - cfg validation raises BankrollConfigError — the operator must
+      fix the YAML. Strategy refuses to start.
+    - pct_of_cash mode requires fetching cash from the broker; a
+      network failure here also raises so the strategy doesn't proceed
+      with a half-initialized bankroll. Next launch retries.
+
+    Cap is applied at init too: if initial > cap, we clamp at cap and
+    note the clamp in initial_source.
+    """
+    bk_cfg = _bankroll_cfg(cfg)
+    if bk_cfg is None:
+        return False
+    _validate_bankroll_cfg(bk_cfg)
+
+    yaml_token = str(bk_cfg.get("reset_token", "") or "")
+    state_bk = state.get("bankroll") or {}
+    state_token = str(state_bk.get("last_reset_token", "") or "")
+    if state_bk and yaml_token == state_token:
+        # Already initialized at this token — surface the current
+        # state so operators have a one-line summary on every restart
+        # (instead of having to grep prior logs / open state.json).
+        cap = bk_cfg.get("cap_dollars")
+        LOG.info(
+            "bankroll persisted: current=$%.2f (high_water=$%.2f, "
+            "source: %s, cap=%s, token=%r)",
+            float(state_bk.get("current_dollars", 0.0)),
+            float(state_bk.get("high_water_mark", 0.0)),
+            state_bk.get("initial_source", "?"),
+            f"${float(cap):.2f}" if cap is not None else "none",
+            yaml_token,
+        )
+        return False  # already initialized at the current token
+
+    initial = bk_cfg.get("initial") or {}
+    pct = initial.get("pct_of_cash")
+    fixed = initial.get("fixed_dollars")
+    if fixed is not None:
+        amount = float(fixed)
+        source = f"fixed_dollars={fixed}"
+    else:
+        cash = fetch_cash(http, api_key)
+        amount = float(cash) * float(pct)
+        source = f"pct_of_cash={pct} * cash={cash:.2f}"
+
+    cap = bk_cfg.get("cap_dollars")
+    if cap is not None and amount > float(cap):
+        amount = float(cap)
+        source += f" (initial clamped to cap={cap})"
+
+    iso = (now_utc or datetime.now(timezone.utc)).isoformat()
+    state["bankroll"] = {
+        "current_dollars": amount,
+        "initialized_at": iso,
+        "initial_source": source,
+        "high_water_mark": amount,
+        "last_reset_token": yaml_token,
+    }
+    save_state(state, state_path)
+    LOG.info(
+        "bankroll initialized: $%.2f (source: %s, cap=%s, token=%r)",
+        amount, source,
+        f"${float(cap):.2f}" if cap is not None else "none",
+        yaml_token,
+    )
+    return True
+
+
+def apply_realized_pnl_to_bankroll(
+    state: State, cfg: dict, realized_pnl: float,
+) -> None:
+    """Update bankroll after a closure. Caller is responsible for
+    save_state (close_position already saves at the end).
+
+    - Cap: realized profits that push above cap_dollars are forfeit.
+    - Floor: realized losses can't drive bankroll negative; clamp at 0.
+    - high_water_mark: monotonic. Useful for postmortem (max bankroll
+      ever reached this lifetime).
+
+    No-op when the bankroll feature is disabled (state lacks the dict).
+    """
+    state_bk = state.get("bankroll")
+    if not state_bk:
+        return
+    bk_cfg = _bankroll_cfg(cfg) or {}
+    cur = float(state_bk.get("current_dollars", 0.0))
+    new = cur + float(realized_pnl)
+    cap = bk_cfg.get("cap_dollars")
+    if cap is not None and new > float(cap):
+        new = float(cap)
+    if new < 0.0:
+        new = 0.0
+    state_bk["current_dollars"] = new
+    state_bk["high_water_mark"] = max(
+        new, float(state_bk.get("high_water_mark", new))
+    )
+    state["bankroll"] = state_bk
+
+
+def get_bankroll_dollars(state: State, fallback_equity: float) -> float:
+    """Return the full bankroll envelope value (the un-sliced number).
+
+    Used as the gross-exposure-cap basis. Falls back to broker equity
+    when the bankroll feature is disabled.
+    """
+    state_bk = state.get("bankroll")
+    if state_bk and "current_dollars" in state_bk:
+        return float(state_bk["current_dollars"])
+    return float(fallback_equity)
+
+
+def get_sizing_basis(
+    state: State,
+    fallback_equity: float,
+    cfg: dict | None = None,
+) -> float:
+    """Return the per-trade sizing basis: the dollar number multiplied
+    by per_trade_pct to compute each individual trade's budget.
+
+    By default this is the full bankroll (or fallback equity). When
+    cfg.bankroll.daily_allocation.enabled is true, the basis is sliced
+    down to bankroll / N, where N is either
+    cfg.bankroll.daily_allocation.days or cfg.exits.max_hold_days when
+    the override is null. The gross-exposure cap continues to use the
+    full bankroll via :func:`get_bankroll_dollars`, so total cumulative
+    exposure is bounded by max_gross_exposure_pct × bankroll, not by
+    the daily slice.
+
+    A misconfigured daily_allocation (enabled but no usable day count)
+    falls back to the full bankroll with a logged warning rather than
+    raising — operators editing YAML live shouldn't trip a crash.
+    """
+    bankroll = get_bankroll_dollars(state, fallback_equity)
+    if cfg is None:
+        return bankroll
+    da = ((cfg.get("bankroll") or {}).get("daily_allocation") or {})
+    if not da.get("enabled"):
+        return bankroll
+    days = da.get("days")
+    if days is None:
+        days = (cfg.get("exits") or {}).get("max_hold_days")
+    try:
+        days_int = int(days) if days is not None else 0
+    except (TypeError, ValueError):
+        days_int = 0
+    if days_int <= 0:
+        LOG.warning(
+            "bankroll.daily_allocation enabled but no usable day count "
+            "(days=%r, exits.max_hold_days=%r); falling back to full bankroll",
+            da.get("days"), (cfg.get("exits") or {}).get("max_hold_days"),
+        )
+        return bankroll
+    return bankroll / days_int
+
+
 # ---------------------------------------------------------------- sizing
 
 
@@ -534,6 +857,7 @@ def compute_qty(
     *,
     avg_dollar_volume: float | None = None,
     max_position_as_adv_frac: float | None = None,
+    per_trade_dollars_override: float | None = None,
 ) -> int:
     """floor(min(equity*pct, abs_cap, adv_cap) / close). Whole shares
     only — bracket orders reject fractional at Alpaca. Returns 0 when
@@ -545,8 +869,18 @@ def compute_qty(
     contradicts the capacity-limited thesis. Pass both
     ``avg_dollar_volume`` (from the candidate features) and
     ``max_position_as_adv_frac`` (from ``cfg.risk``) to enable the cap.
+
+    ``per_trade_dollars_override``: when set, replaces ``equity *
+    per_trade_pct`` as the starting target. The
+    sizing.equal_slice_per_position mode uses this to apportion the
+    bankroll evenly across max_concurrent_positions slots, so each
+    trade is bankroll/N regardless of the configured per_trade_pct.
+    The other caps (max_per_trade_dollars, ADV cap) still apply.
     """
-    target = equity * per_trade_pct
+    if per_trade_dollars_override is not None:
+        target = float(per_trade_dollars_override)
+    else:
+        target = equity * per_trade_pct
     if max_per_trade_dollars is not None:
         target = min(target, max_per_trade_dollars)
     if (
@@ -559,6 +893,95 @@ def compute_qty(
     if close_price <= 0 or target <= 0:
         return 0
     return int(math.floor(target / close_price))
+
+
+def _equal_slice_fraction(cfg: dict) -> float:
+    """Resolve the equal-slice bankroll fraction.
+
+    Resolution order:
+    1. Explicit ``sizing.equal_slice_bankroll_fraction`` when set
+       in (0, 1].
+    2. AUTO-COUPLE to ``risk.max_gross_exposure_pct`` when the
+       explicit field is null. This pins per-trade × max_concurrent
+       to the gross-exposure cap so the cap can't silently block
+       the last few slots.
+    3. ``1.0`` (full bankroll) when both are unset.
+
+    Invalid values (non-numeric, out of range) log a warning and
+    fall back to 1.0 — fail-soft so a typo at startup doesn't kill
+    sizing entirely.
+    """
+    sizing_cfg = cfg.get("sizing") or {}
+    risk_cfg = cfg.get("risk") or {}
+
+    explicit = sizing_cfg.get("equal_slice_bankroll_fraction")
+    if explicit is not None:
+        try:
+            f = float(explicit)
+        except (TypeError, ValueError):
+            LOG.warning(
+                "sizing.equal_slice_bankroll_fraction=%r non-numeric; "
+                "falling back to auto-couple",
+                explicit,
+            )
+        else:
+            if 0.0 < f <= 1.0:
+                return f
+            LOG.warning(
+                "sizing.equal_slice_bankroll_fraction=%r out of (0, 1]; "
+                "falling back to auto-couple",
+                explicit,
+            )
+
+    auto = risk_cfg.get("max_gross_exposure_pct")
+    if auto is not None:
+        try:
+            f = float(auto)
+        except (TypeError, ValueError):
+            return 1.0
+        if 0.0 < f <= 1.0:
+            return f
+    return 1.0
+
+
+def _per_trade_dollars_for_slate(
+    state: State, cfg: dict, fallback_equity: float,
+) -> float | None:
+    """Return the per-trade dollar target when
+    sizing.equal_slice_per_position is enabled.
+
+    Math: ``fraction × bankroll / max_concurrent_positions``, where
+    ``fraction`` resolves via :func:`_equal_slice_fraction` —
+    explicit override, then auto-coupled to max_gross_exposure_pct,
+    then 1.0. So with bankroll=$90k, max_concurrent=18, and
+    max_gross_exposure_pct=0.80:
+        per_trade = 0.80 × $90,000 / 18 = $4,000
+    Each $1 of bankroll growth scales per_trade by
+    ``fraction / max_concurrent``.
+
+    Falls back to None (and the caller's per_trade_pct path) when:
+    - The toggle is off.
+    - max_concurrent_positions is missing, zero, or negative
+      (misconfigured — we log a warning rather than divide by zero).
+    """
+    sizing_cfg = cfg.get("sizing") or {}
+    if not sizing_cfg.get("equal_slice_per_position"):
+        return None
+    n = sizing_cfg.get("max_concurrent_positions")
+    try:
+        n_int = int(n) if n is not None else 0
+    except (TypeError, ValueError):
+        n_int = 0
+    if n_int <= 0:
+        LOG.warning(
+            "sizing.equal_slice_per_position enabled but "
+            "max_concurrent_positions=%r; falling back to per_trade_pct",
+            n,
+        )
+        return None
+    bankroll = get_bankroll_dollars(state, fallback_equity)
+    fraction = _equal_slice_fraction(cfg)
+    return (fraction * bankroll) / n_int
 
 
 def current_gross_exposure(
@@ -602,11 +1025,30 @@ def select_entries(
     latest_prices: dict[str, float],
     cfg: dict,
     kill_state: KillLevel,
+    entry_trigger: str = "session_open",
+    remaining_entries_budget: int | None = None,
+    gross_cap_basis: float | None = None,
 ) -> list[Entry]:
     """Walk candidates in signal_strength order, applying the entry
     gates from the architecture decisions. Returns the slate of
-    accepted entries (bounded by max_concurrent_positions and gross
-    exposure)."""
+    accepted entries (bounded by max_concurrent_positions, gross
+    exposure, and — when set — the daily total-entry cap).
+
+    ``entry_trigger`` records why this pass ran (``"session_open"`` or
+    ``"post_closure_rescreen"``) and is passed through to the position
+    record so analytics can split the two populations.
+
+    ``remaining_entries_budget``: when provided, caps the slate to at
+    most this many entries. The post-closure rescreen uses this to
+    enforce ``risk.max_total_entries_per_day`` accounting for entries
+    already submitted earlier in the day.
+
+    ``gross_cap_basis``: optional override for the gross-exposure cap
+    calculation. When None, the cap is computed against ``equity``
+    (back-compat). When set (typically to the FULL bankroll when
+    ``equity`` is a per-day slice), the cap uses this number instead,
+    decoupling per-trade size from the cumulative-exposure limit.
+    """
     if state.get("daily_pnl_tripped"):
         return []
     if kill_state in (KillLevel.L1_NEW, KillLevel.L2_SOFT, KillLevel.L3_HARD):
@@ -621,23 +1063,43 @@ def select_entries(
     max_pos_adv = risk_cfg.get("max_position_as_adv_frac")
     max_pos_adv_f = float(max_pos_adv) if max_pos_adv is not None else None
 
-    pct_cap = float(risk_cfg.get("max_gross_exposure_pct") or 0.0) * equity
+    gross_basis = float(gross_cap_basis) if gross_cap_basis is not None else equity
+    pct_cap = float(risk_cfg.get("max_gross_exposure_pct") or 0.0) * gross_basis
     abs_cap = risk_cfg.get("max_gross_exposure_dollars")
     gross_cap = abs_cap if abs_cap is not None else pct_cap
 
     open_positions = state.get("open_positions") or {}
     halt_skip = set(state.get("halt_skip_today") or [])
+    # Same-day re-entry block: never re-enter a name that already had a
+    # submitted entry today, regardless of how it exited. Without this
+    # the rescreen path would happily re-buy a stock that just stopped
+    # out an hour ago.
+    entered_today = set(state.get("entered_today") or [])
 
     selected: list[Entry] = []
     running_gross = current_gross_exposure(open_positions, latest_prices)
     open_count = len(open_positions)
+    # Equal-slice mode (sizing.equal_slice_per_position): override the
+    # per-trade dollar target with bankroll / max_concurrent_positions.
+    # Computed once per slate so every entry in this pass uses the
+    # same target.
+    per_trade_dollars_override = _per_trade_dollars_for_slate(
+        state, cfg, fallback_equity=equity,
+    )
 
     for cand in candidates:
         if cand.ticker in halt_skip:
             continue
         if cand.ticker in open_positions:
             continue
+        if cand.ticker in entered_today:
+            continue
         if open_count + len(selected) >= max_concurrent:
+            break
+        if (
+            remaining_entries_budget is not None
+            and len(selected) >= int(remaining_entries_budget)
+        ):
             break
         adv = cand.features.get("avg_dollar_volume") if cand.features else None
         adv_f = float(adv) if adv is not None else None
@@ -648,6 +1110,7 @@ def select_entries(
             max_per_trade_dollars=max_per_trade_abs,
             avg_dollar_volume=adv_f,
             max_position_as_adv_frac=max_pos_adv_f,
+            per_trade_dollars_override=per_trade_dollars_override,
         )
         if qty <= 0:
             continue
@@ -820,15 +1283,32 @@ def filter_by_intraday_confirmation(
     api_key: str,
     *,
     now_utc: datetime | None = None,
+    band_override: dict | None = None,
 ) -> list[Entry]:
     """Item 9: gate each entry on a fresh quote. Skips a name when
     spread is too wide, the quote is stale, or the live price is
     outside the configured band relative to candidate.close. Returns
     the filtered list. When the gate is disabled (``enabled: false``
-    or empty config) returns the input unchanged."""
+    or empty config) returns the input unchanged.
+
+    ``band_override``: when set, replaces ``price_band`` in the gate
+    config for this call only. Post-closure rescreens pass the tighter
+    ``post_closure_price_band`` so they don't chase names that have
+    already run since the open.
+
+    Fail-closed: a quote that returns None, has an unparseable
+    timestamp, or has bad bid/ask values causes the candidate to be
+    rejected (not silently passed). Operators relying on this gate
+    need it to err on the side of skipping the trade.
+    """
     ic = _intraday_confirmation_cfg(cfg)
     if not ic.get("enabled"):
         return entries
+    if band_override is not None:
+        # Shallow-copy and substitute price_band so the original cfg
+        # dict is not mutated for the next caller.
+        ic = dict(ic)
+        ic["price_band"] = band_override
     now_utc = now_utc or datetime.now(timezone.utc)
     out: list[Entry] = []
     for entry in entries:
@@ -860,6 +1340,7 @@ def submit_entry(
     state: State,
     state_path: Path,
     link_id_override: str | None = None,
+    entry_trigger: str = "session_open",
 ) -> dict[str, Any]:
     """Dispatch to the configured bracket-pricing mode. The legacy
     ``submit_otoco`` is kept as the ``candidate_close`` implementation
@@ -871,6 +1352,9 @@ def submit_entry(
     so the entry_decision record (written before this call) shares the
     link_id with the submitted order — that's the join key for per-
     trade jsonl files.
+
+    ``entry_trigger`` is recorded on the position record so the
+    opened / closure jsonl entries carry it through to analytics.
     """
     mode = _bracket_pricing_mode(cfg)
     if mode == "actual_fill":
@@ -878,11 +1362,13 @@ def submit_entry(
             entry, cfg, http, api_key,
             state=state, state_path=state_path,
             link_id_override=link_id_override,
+            entry_trigger=entry_trigger,
         )
     return submit_otoco(
         entry, cfg, http, api_key,
         state=state, state_path=state_path,
         link_id_override=link_id_override,
+        entry_trigger=entry_trigger,
     )
 
 
@@ -895,6 +1381,7 @@ def submit_parent_market_buy(
     state: State,
     state_path: Path,
     link_id_override: str | None = None,
+    entry_trigger: str = "session_open",
 ) -> dict[str, Any]:
     """Item 4 (actual_fill mode): submit a stand-alone parent MARKET
     BUY via /api/v2/orders. The OCO take_profit / stop_loss children
@@ -950,6 +1437,7 @@ def submit_parent_market_buy(
             "candidate_close": entry.close_price,
             "signal_strength": entry.candidate.signal_strength,
             "equity_at_entry": entry.equity_at_entry,
+            "entry_trigger": entry_trigger,
             # Tracks worst/best fill-relative excursion across the
             # position's life. Initialized to entry_price on parent
             # fill; updated by write_daily_marks each session end.
@@ -1197,6 +1685,7 @@ def submit_otoco(
     state: State,
     state_path: Path,
     link_id_override: str | None = None,
+    entry_trigger: str = "session_open",
 ) -> dict[str, Any]:
     """Legacy ``candidate_close`` mode: POST /api/v2/orders/combo with
     an OTOCO bracket priced off the prefilter's prior close. Records
@@ -1303,6 +1792,7 @@ def submit_otoco(
             "candidate_close": entry.close_price,
             "signal_strength": entry.candidate.signal_strength,
             "equity_at_entry": entry.equity_at_entry,
+            "entry_trigger": entry_trigger,
             "peak_since_entry": None,
             "trough_since_entry": None,
         }
@@ -1714,6 +2204,13 @@ def run_time_stop_pass(
                 reason="time_stop", time_in_force="DAY",
             )
             out.append(ticker)
+    if out:
+        # Time-stop frees capacity; let the post-closure rescreen pick
+        # up the slack at end-of-tick. The actual exit fill happens
+        # async (market sell) and a later poll_fills tick will see it
+        # too — that closure also sets rescreen_pending, so this set
+        # here just speeds up the first redeployment by one tick.
+        state["rescreen_pending"] = True
     return out
 
 
@@ -2768,16 +3265,26 @@ def close_position(
         "mfe_pct": mfe_pct,
         "mae_pct": mae_pct,
         "link_id": pos.get("link_id"),
+        "entry_trigger": pos.get("entry_trigger") or "session_open",
     }
     append_closure_record(summary_path, record)
     # Per-trade rich log: write the exit record under the same
     # link_id BEFORE we drop pos from state.
     emit_exit(cfg, pos=pos, closure_record=record)
+    # Bankroll update happens BEFORE state["open_positions"].pop +
+    # save_state so the bankroll mutation is part of the same atomic
+    # write. apply_realized_pnl_to_bankroll is a no-op when the
+    # feature is off.
+    apply_realized_pnl_to_bankroll(state, cfg, realized)
     state["open_positions"].pop(ticker, None)
     state.get("pending_signal_fade_exits", {}).pop(ticker, None)
     save_state(state, state_path)
-    LOG.info("closed %s: %s pnl=%.2f hold=%s mfe=%s mae=%s",
-             ticker, reason, realized, hold_trading_days, mfe_dollar, mae_dollar)
+    bk_now = (state.get("bankroll") or {}).get("current_dollars")
+    LOG.info(
+        "closed %s: %s pnl=%.2f hold=%s mfe=%s mae=%s%s",
+        ticker, reason, realized, hold_trading_days, mfe_dollar, mae_dollar,
+        f" bankroll=${bk_now:.2f}" if bk_now is not None else "",
+    )
     return record
 
 
@@ -2863,6 +3370,7 @@ def process_fill_events_for_closures(
                     "notional": notional,
                     "notional_pct_of_equity": notional_pct_of_equity,
                     "intraday_confirmation_enabled": bool(ic_cfg.get("enabled")) if ic_cfg else False,
+                    "entry_trigger": pos.get("entry_trigger") or "session_open",
                 })
             except Exception as e:
                 LOG.exception(
@@ -2879,6 +3387,7 @@ def process_fill_events_for_closures(
                 state_path=state_path, summary_path=summary_path,
                 exit_price=float(price), reason="target_hit",
             ))
+            state["rescreen_pending"] = True
         elif ev.role == "stop" and ev.status in {"FILLED"}:
             price = ev.filled_avg_price or pos.get("stop_price") or 0.0
             out.append(close_position(
@@ -2886,6 +3395,7 @@ def process_fill_events_for_closures(
                 state_path=state_path, summary_path=summary_path,
                 exit_price=float(price), reason="stop_hit",
             ))
+            state["rescreen_pending"] = True
         elif ev.role == "exit" and ev.status in {"FILLED"}:
             reason = pos.get("exit_reason") or "time_stop"
             price = ev.filled_avg_price or pos.get("exit_fill_price") or 0.0
@@ -2894,6 +3404,12 @@ def process_fill_events_for_closures(
                 state_path=state_path, summary_path=summary_path,
                 exit_price=float(price), reason=reason,
             ))
+            # time_stop sets rescreen_pending; signal_fade does NOT
+            # (it fires at 16:05 ET, past the rescreen entry cutoff,
+            # and there's no productive re-entry on a signal-faded
+            # name anyway).
+            if reason != "signal_fade":
+                state["rescreen_pending"] = True
     return out
 
 
@@ -2967,6 +3483,66 @@ def fetch_positions(http: httpx.Client, api_key: str) -> list[dict]:
 # ---------------------------------------------------------------- reconciliation
 
 
+def _exit_fill_from_tracked_children(
+    pos: dict[str, Any],
+    all_orders_by_id: dict[str, dict],
+) -> tuple[float, int, str] | None:
+    """Find the actual exit fill for a vanished position by walking
+    its tracked sell-side order IDs.
+
+    Returns ``(filled_avg_price, filled_qty, role)`` for the first
+    FILLED order found, or ``None`` if no tracked child shows a fill.
+
+    Roles searched in order: ``target`` (OCO take-profit), ``stop``
+    (OCO stop-loss), ``exit`` (standalone helper for time_stop /
+    signal_fade exits via ``pos.exit_order_id``).
+
+    Used by :func:`reconcile_at_startup` to recover real PnL when a
+    position disappears between restarts — without this, OCO stops
+    that fire while the strategy is offline get recorded as zero-PnL
+    ``closed_externally`` stubs and daily_summary drifts from the
+    broker.
+    """
+    children = pos.get("child_order_ids") or {}
+    # Walk OCO peers first, then any standalone exit order. Preserve
+    # a stable role order (target → stop → exit) so the recovered
+    # reason is deterministic when multiple orders somehow show
+    # ``filled`` (OCO guarantees at most one fills; defensive only).
+    candidates: list[tuple[str, str]] = []
+    for role in ("target", "stop"):
+        oid = children.get(role)
+        if oid:
+            candidates.append((role, oid))
+    exit_oid = pos.get("exit_order_id")
+    if exit_oid:
+        candidates.append(("exit", exit_oid))
+
+    for role, oid in candidates:
+        order = all_orders_by_id.get(oid)
+        if not order:
+            continue
+        native = (order.get("native_status")
+                  or order.get("canonical_status")
+                  or order.get("status") or "").lower()
+        if native != "filled":
+            continue
+        try:
+            price = float(order.get("filled_avg_price") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        try:
+            filled_qty = int(float(
+                order.get("filled_qty")
+                or order.get("filled_quantity")
+                or 0
+            ))
+        except (TypeError, ValueError):
+            filled_qty = 0
+        if price > 0:
+            return price, filled_qty, role
+    return None
+
+
 def reconcile_at_startup(
     state: State,
     http: httpx.Client,
@@ -2974,6 +3550,7 @@ def reconcile_at_startup(
     *,
     state_path: Path,
     summary_path: Path,
+    cfg: dict | None = None,
 ) -> dict[str, Any]:
     """Bring state in line with broker reality. Runs once before the
     main loop. Returns a summary dict for logging.
@@ -3018,26 +3595,130 @@ def reconcile_at_startup(
         if key:
             broker_pos_by_ticker[key] = p
 
+    all_orders_by_id: dict[str, dict] = {
+        (o.get("id") or o.get("order_id")): o for o in broker_all_orders
+    }
+
     for ticker, pos in list(open_positions.items()):
         if ticker not in broker_pos_by_ticker:
-            # Position vanished externally — synthesize a closure.
+            # Position vanished from the broker between restarts.
+            #
+            # Best-effort recovery: walk the tracked child orders
+            # (target/stop OCO peers + any standalone exit order) and
+            # promote the first FILLED one into the closure record.
+            # Without this, an OCO stop that fires overnight produces
+            # a zero-PnL ``closed_externally`` stub and daily_summary
+            # drifts from broker reality by the missed loss / gain
+            # (e.g. BLDP 2026-05-08: stop fired @ 4.20 vs entry 4.7618
+            # — the strategy's books missed −$1,173.68 until 2026-05-11
+            # when this fix landed). If no tracked child shows a fill
+            # we still write the $0 stub as before so the position
+            # is dropped from state.
             entry_price = float(pos.get("entry_price") or 0.0)
             qty = int(pos.get("qty") or 0)
+            entry_iso = pos.get("entry_timestamp")
+            exit_iso = datetime.now(timezone.utc).isoformat()
+
+            fill = _exit_fill_from_tracked_children(pos, all_orders_by_id)
+            if fill is not None:
+                exit_price, _exit_qty, role = fill
+                if role == "target":
+                    reason = "target_hit"
+                elif role == "stop":
+                    reason = "stop_hit"
+                else:  # role == "exit" (signal_fade / time_stop helper)
+                    reason = pos.get("exit_reason") or "signal_fade"
+                realized = (exit_price - entry_price) * qty
+            else:
+                exit_price = entry_price
+                reason = "closed_externally"
+                realized = 0.0
+
+            hold_trading_days: int | None = None
+            if entry_iso:
+                try:
+                    today_et = _to_eastern(datetime.now(timezone.utc)).date()
+                    hold_trading_days = trading_days_since(entry_iso, today_et)
+                except Exception:
+                    hold_trading_days = None
+            entry_to_exit_pct = (
+                (exit_price - entry_price) / entry_price
+                if entry_price > 0 else None
+            )
+            peak = pos.get("peak_since_entry")
+            trough = pos.get("trough_since_entry")
+            try:
+                peak_f = float(peak) if peak is not None else None
+                trough_f = float(trough) if trough is not None else None
+            except (TypeError, ValueError):
+                peak_f = trough_f = None
+            mfe_dollar = (
+                (peak_f - entry_price) * qty
+                if (peak_f is not None and entry_price > 0) else None
+            )
+            mae_dollar = (
+                (trough_f - entry_price) * qty
+                if (trough_f is not None and entry_price > 0) else None
+            )
+            mfe_pct = (
+                (peak_f - entry_price) / entry_price
+                if (peak_f is not None and entry_price > 0) else None
+            )
+            mae_pct = (
+                (trough_f - entry_price) / entry_price
+                if (trough_f is not None and entry_price > 0) else None
+            )
+
             record = {
                 "record_type": "closure",
                 "ticker": ticker, "qty": qty,
                 "entry_price": entry_price,
-                "exit_price": entry_price,  # best effort
-                "entry_timestamp": pos.get("entry_timestamp"),
-                "exit_timestamp": datetime.now(timezone.utc).isoformat(),
-                "realized_pnl": 0.0,
-                "reason": "closed_externally",
+                "exit_price": exit_price,
+                "entry_timestamp": entry_iso,
+                "exit_timestamp": exit_iso,
+                "realized_pnl": realized,
+                "reason": reason,
                 "entry_features": pos.get("entry_features", {}),
+                "venue_code": pos.get("venue_code"),
+                "exchange": pos.get("exchange"),
+                "signal_strength": pos.get("signal_strength"),
+                "candidate_close": pos.get("candidate_close"),
+                "target_pct": pos.get("target_pct"),
+                "stop_pct": pos.get("stop_pct"),
+                "target_price": pos.get("target_price"),
+                "stop_price": pos.get("stop_price"),
+                "bracket_pricing_mode": pos.get("bracket_pricing_mode"),
+                "hold_trading_days": hold_trading_days,
+                "entry_to_exit_pct": entry_to_exit_pct,
+                "peak_since_entry": peak_f,
+                "trough_since_entry": trough_f,
+                "mfe_dollar": mfe_dollar,
+                "mae_dollar": mae_dollar,
+                "mfe_pct": mfe_pct,
+                "mae_pct": mae_pct,
+                "link_id": pos.get("link_id"),
+                "recovered_from_child_fill": fill is not None,
             }
             append_closure_record(summary_path, record)
+            # Recovered fills update the bankroll just like a normal
+            # closure path. The $0 stub is a no-op (no real P&L
+            # signal), so skip the bankroll update there.
+            if fill is not None:
+                apply_realized_pnl_to_bankroll(state, cfg or {}, realized)
             open_positions.pop(ticker, None)
             summary["closed_externally"].append(ticker)
-            LOG.warning("reconcile: %s closed externally — recording synthetic closure", ticker)
+            if fill is not None:
+                LOG.warning(
+                    "reconcile: %s closed externally — recovered %s @ %.4f "
+                    "from tracked child fill (pnl=%.2f)",
+                    ticker, reason, exit_price, realized,
+                )
+            else:
+                LOG.warning(
+                    "reconcile: %s closed externally — no tracked child fill found, "
+                    "recording $0 stub",
+                    ticker,
+                )
             continue
 
         bp = broker_pos_by_ticker[ticker]
@@ -3056,11 +3737,9 @@ def reconcile_at_startup(
                         ticker, bp.get("quantity") or bp.get("qty"))
             summary["untracked"].append(ticker)
 
-    # Child order status sync.
+    # Child order status sync. ``all_orders_by_id`` was built above
+    # for the vanished-externally fill recovery.
     open_order_ids = {o.get("id") or o.get("order_id") for o in broker_open_orders}
-    all_orders_by_id = {
-        (o.get("id") or o.get("order_id")): o for o in broker_all_orders
-    }
     # Statuses that mean the child is gone for good — DAY-TIF OCO
     # children expire as ``canceled`` at session close; rejected /
     # expired / replaced are also non-recoverable. When we see one
@@ -3284,6 +3963,11 @@ def write_session_summary(
             "count_closed": 0,
             "total_realized_pnl": 0.0,
             "by_reason": {},
+            "by_trigger": {},
+            "rescreens_today": int(state.get("rescreens_today", 0)),
+            "post_closure_entries_today": int(
+                state.get("post_closure_entries_today", 0)
+            ),
         }
         append_closure_record(summary_path, record)
         state["summary_written_for_date"] = today_iso
@@ -3299,6 +3983,16 @@ def write_session_summary(
     # trips (which the old len(open_positions) missed) and excludes
     # carryover positions (which the old count over-counted).
     count_opened = 0
+    # by_trigger: per-entry-trigger breakdown. Lets the operator A/B
+    # the post-closure rescreen policy vs the open-tick policy after a
+    # week of live data without having to re-derive it from raw jsonl.
+    by_trigger: dict[str, dict[str, Any]] = {}
+
+    def _trigger_bucket(name: str) -> dict[str, Any]:
+        return by_trigger.setdefault(name, {
+            "opened": 0, "closed": 0, "realized_pnl": 0.0,
+        })
+
     with open(summary_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -3313,6 +4007,9 @@ def write_session_summary(
                 ts = rec.get("entry_timestamp") or ""
                 if today_iso in ts:
                     count_opened += 1
+                    _trigger_bucket(
+                        rec.get("entry_trigger") or "session_open"
+                    )["opened"] += 1
                 continue
             if rt != "closure":
                 continue
@@ -3320,9 +4017,15 @@ def write_session_summary(
             if today_iso not in ts:
                 continue
             count_closed += 1
-            total_pnl += float(rec.get("realized_pnl") or 0.0)
+            pnl = float(rec.get("realized_pnl") or 0.0)
+            total_pnl += pnl
             r = rec.get("reason") or "unknown"
             by_reason[r] = by_reason.get(r, 0) + 1
+            bucket = _trigger_bucket(
+                rec.get("entry_trigger") or "session_open"
+            )
+            bucket["closed"] += 1
+            bucket["realized_pnl"] += pnl
 
     record = {
         "record_type": "session_summary",
@@ -3331,6 +4034,11 @@ def write_session_summary(
         "count_closed": count_closed,
         "total_realized_pnl": total_pnl,
         "by_reason": by_reason,
+        "by_trigger": by_trigger,
+        "rescreens_today": int(state.get("rescreens_today", 0)),
+        "post_closure_entries_today": int(
+            state.get("post_closure_entries_today", 0)
+        ),
     }
     append_closure_record(summary_path, record)
     state["summary_written_for_date"] = today_iso
@@ -3417,15 +4125,40 @@ def run_session_entry_pass(
     reset_for_new_session(state, today_et.isoformat(), equity)
     save_state(state, state_path)
 
-    LOG.info("Loaded %d candidates for %s (equity=%.2f)",
-             len(cands), today_et, equity)
+    # Sizing basis: the bankroll envelope when configured, broker
+    # equity otherwise. With daily_allocation enabled the per-trade
+    # basis is sliced by max_hold_days; the gross-exposure cap still
+    # applies to the full bankroll so cumulative exposure across all
+    # in-flight day-vintages is bounded.
+    bankroll_basis = get_bankroll_dollars(state, fallback_equity=equity)
+    sizing_basis = get_sizing_basis(state, fallback_equity=equity, cfg=cfg)
+    bk_now = (state.get("bankroll") or {}).get("current_dollars")
+    LOG.info(
+        "Loaded %d candidates for %s (equity=%.2f, sizing_basis=%.2f, "
+        "gross_basis=%.2f%s)",
+        len(cands), today_et, equity, sizing_basis, bankroll_basis,
+        f", bankroll=${bk_now:.2f}" if bk_now is not None else "",
+    )
 
+    # Daily total-entry cap also applies to the open-tick pass; this is
+    # the first pass of the day so usually `daily_entries_count==0` and
+    # the budget is the cap itself, but a restart mid-session could
+    # inherit nonzero state.
+    daily_cap = (cfg.get("risk") or {}).get("max_total_entries_per_day")
+    remaining_budget = None
+    if daily_cap is not None:
+        remaining_budget = max(
+            0, int(daily_cap) - int(state.get("daily_entries_count", 0)),
+        )
     entries = select_entries(
         cands, state,
-        equity=equity,
+        equity=sizing_basis,
         latest_prices={},
         cfg=cfg,
         kill_state=kill_state,
+        entry_trigger="session_open",
+        remaining_entries_budget=remaining_budget,
+        gross_cap_basis=bankroll_basis,
     )
     LOG.info("Selected %d entries: %s", len(entries),
              [e.ticker for e in entries])
@@ -3453,6 +4186,14 @@ def run_session_entry_pass(
     per_trade_pct = float(sizing_cfg.get("per_trade_pct") or 0.0)
     max_per_trade_dollars = risk_cfg.get("max_per_trade_dollars")
     max_pos_adv = risk_cfg.get("max_position_as_adv_frac")
+    # Equal-slice mode: per-trade target derives from
+    # bankroll / max_concurrent_positions, NOT per_trade_pct ×
+    # sizing_basis. The same override flows into compute_qty inside
+    # select_entries, so the entry_decision rationale matches the
+    # actual submitted qty.
+    equal_slice_target = _per_trade_dollars_for_slate(
+        state, cfg, fallback_equity=equity,
+    )
 
     for slot_index, entry in enumerate(entries):
         # Reconstruct sizing rationale: which cap was binding?
@@ -3465,8 +4206,12 @@ def run_session_entry_pass(
             if (adv is not None and max_pos_adv is not None and float(max_pos_adv) > 0)
             else None
         )
-        candidates_target_dollars = [equity * per_trade_pct]
-        binding_cap_label = "per_trade_pct"
+        if equal_slice_target is not None:
+            candidates_target_dollars = [float(equal_slice_target)]
+            binding_cap_label = "equal_slice_per_position"
+        else:
+            candidates_target_dollars = [sizing_basis * per_trade_pct]
+            binding_cap_label = "per_trade_pct"
         if max_per_trade_dollars is not None:
             candidates_target_dollars.append(float(max_per_trade_dollars))
             if float(max_per_trade_dollars) < candidates_target_dollars[0]:
@@ -3506,10 +4251,305 @@ def run_session_entry_pass(
                 entry, cfg, http, api_key,
                 state=state, state_path=state_path,
                 link_id_override=link_id_for_log,
+                entry_trigger="session_open",
             )
         except httpx.HTTPError as e:
             LOG.exception("entry submit network error for %s: %s",
                           entry.ticker, e)
+            continue
+        # Track this entry against the daily cap and same-day re-entry
+        # block. We tally on submit (not on fill) so a rejected
+        # submission still uses one slot — that's the safer behavior:
+        # it bounds runaway resubmissions when the broker is rejecting
+        # every order. The dedup also needs this immediate so the
+        # rescreen path later in the day cannot pick the same name.
+        if entry.ticker in (state.get("open_positions") or {}):
+            state["daily_entries_count"] = int(state.get("daily_entries_count", 0)) + 1
+            entered = state.setdefault("entered_today", [])
+            if entry.ticker not in entered:
+                entered.append(entry.ticker)
+            save_state(state, state_path)
+
+
+# ---------------------------------------------------------------- post-closure rescreen
+
+
+def _post_closure_band(cfg: dict) -> dict | None:
+    """Return the override price_band for post-closure rescreens, or
+    None when the operator wants the open-tick band reused."""
+    ic = _intraday_confirmation_cfg(cfg)
+    return ic.get("post_closure_price_band")
+
+
+def _past_last_entry_time(
+    now_utc: datetime, today_et: date, last_entry_time: str, cfg: dict,
+) -> bool:
+    """Return True if the current wall clock is at/after ``last_entry_time``
+    in the session's configured timezone. Format: ``"HH:MM"``. A bad
+    value fails-closed (returns True) so a typo locks out rescreens
+    rather than silently allowing late entries."""
+    import pytz
+
+    session = cfg.get("session") or {}
+    tz_name = session.get("timezone") or "America/New_York"
+    try:
+        h, m = (int(p) for p in last_entry_time.split(":")[:2])
+    except Exception:
+        LOG.error(
+            "post_closure_rescreen.last_entry_time=%r unparseable; "
+            "fail-closed (no rescreen entries)",
+            last_entry_time,
+        )
+        return True
+    tz = pytz.timezone(tz_name)
+    cutoff = tz.localize(datetime.combine(today_et, _dtime(h, m)))
+    return now_utc.astimezone(tz) >= cutoff
+
+
+def _fetch_open_position_marks(
+    state: State, http: httpx.Client, api_key: str,
+) -> dict[str, float]:
+    """Refresh the latest price for every currently-open position so
+    select_entries' gross-exposure calc sees real marks. Falls back to
+    entry_price on any per-ticker fetch failure — better to slightly
+    misstate gross than skip the whole rescreen on a single hiccup.
+
+    Returns a ``{ticker: price}`` dict. Empty when no open positions.
+    """
+    open_positions = state.get("open_positions") or {}
+    out: dict[str, float] = {}
+    if not open_positions:
+        return out
+    # Pull every open ticker in one /api/v2/quotes call.
+    body = {
+        "apikey": api_key,
+        "instruments": [
+            {
+                "venue_code": pos.get("venue_code") or "XNAS",
+                "canonical_symbol": ticker,
+            }
+            for ticker, pos in open_positions.items()
+        ],
+    }
+    try:
+        r = http.post("/api/v2/quotes", json=body, headers=_api_headers(api_key))
+        rows = (r.json().get("data") or []) if r.status_code == 200 else []
+    except Exception as e:
+        LOG.warning("rescreen: open-position mark refresh failed: %s", e)
+        rows = []
+    by_symbol: dict[str, dict] = {}
+    for row in rows:
+        sym = (row or {}).get("instrument", {}).get("canonical_symbol") or row.get("canonical_symbol")
+        if sym:
+            by_symbol[sym] = row.get("quote") or {}
+    for ticker, pos in open_positions.items():
+        quote = by_symbol.get(ticker) or {}
+        # Use mid when both sides available, else last, else entry.
+        try:
+            bid = float(quote.get("bid") or 0)
+            ask = float(quote.get("ask") or 0)
+            if bid > 0 and ask > 0 and ask >= bid:
+                out[ticker] = (bid + ask) / 2.0
+                continue
+        except (TypeError, ValueError):
+            pass
+        try:
+            last = quote.get("last")
+            if last is not None:
+                out[ticker] = float(last)
+                continue
+        except (TypeError, ValueError):
+            pass
+        ep = pos.get("entry_price")
+        if ep is not None:
+            try:
+                out[ticker] = float(ep)
+            except (TypeError, ValueError):
+                pass
+    return out
+
+
+def run_post_closure_rescreen(
+    cfg: dict,
+    state: State,
+    state_path: Path,
+    http: httpx.Client,
+    api_key: str,
+    *,
+    today_et: date,
+    kill_state: KillLevel,
+    now_utc: datetime | None = None,
+) -> int:
+    """Item: after any position closes intraday, re-run the entry pass
+    against the still-valid candidate slate so freed capital can be
+    redeployed. Returns the number of new entries submitted.
+
+    The function is a no-op when:
+    - ``rescreen_pending`` is False (no closure happened since the
+      last rescreen).
+    - ``entry.post_closure_rescreen.enabled`` is False.
+    - A kill switch is active.
+    - The current time is at/after ``last_entry_time``.
+    - The daily entry cap is already reached.
+    - Candidates can't be loaded (e.g., file vanished mid-day).
+
+    Side effects:
+    - Clears ``rescreen_pending`` at the end of a successful pass.
+    - Increments ``rescreens_today`` and ``post_closure_entries_today``.
+    - For each new entry: appends the ticker to ``entered_today`` and
+      bumps ``daily_entries_count``.
+    - Saves state once at the end.
+
+    Gating order matters: kill > time-cutoff > cap > candidates >
+    select > confirm. Any earlier rejection clears the pending flag so
+    the loop doesn't burn the next tick on the same dead-end check.
+    """
+    if not state.get("rescreen_pending"):
+        return 0
+    rc_cfg = (cfg.get("entry") or {}).get("post_closure_rescreen") or {}
+    if not rc_cfg.get("enabled"):
+        state["rescreen_pending"] = False
+        save_state(state, state_path)
+        return 0
+    if kill_state in (KillLevel.L1_NEW, KillLevel.L2_SOFT, KillLevel.L3_HARD):
+        LOG.info(
+            "post_closure_rescreen: kill_state=%s; clearing flag, no entries",
+            kill_state.value,
+        )
+        state["rescreen_pending"] = False
+        save_state(state, state_path)
+        return 0
+
+    now_utc = now_utc or datetime.now(timezone.utc)
+    last_entry = rc_cfg.get("last_entry_time", "14:00")
+    if _past_last_entry_time(now_utc, today_et, last_entry, cfg):
+        LOG.info(
+            "post_closure_rescreen: past last_entry_time=%s; clearing flag",
+            last_entry,
+        )
+        state["rescreen_pending"] = False
+        save_state(state, state_path)
+        return 0
+
+    risk_cfg = cfg.get("risk") or {}
+    daily_cap = risk_cfg.get("max_total_entries_per_day")
+    daily_count = int(state.get("daily_entries_count", 0))
+    if daily_cap is not None and daily_count >= int(daily_cap):
+        LOG.info(
+            "post_closure_rescreen: daily entry cap %d reached (count=%d)",
+            int(daily_cap), daily_count,
+        )
+        state["rescreen_pending"] = False
+        save_state(state, state_path)
+        return 0
+
+    # Fresh equity + open-position marks for accurate gross-exposure
+    # accounting. An /api/v2/balances failure aborts the rescreen
+    # WITHOUT clearing the flag — next tick will retry.
+    try:
+        equity = fetch_equity(http, api_key)
+    except Exception as e:
+        LOG.warning("post_closure_rescreen: equity fetch failed: %s", e)
+        return 0
+    latest_prices = _fetch_open_position_marks(state, http, api_key)
+
+    # Reload candidates — same validation as the open-tick pass. If
+    # they've gone stale or the file vanished, fail-closed: clear the
+    # flag and log loudly; operator action required to refresh.
+    handshake = cfg.get("prefilter_handshake", {}) or {}
+    try:
+        cands = load_candidates(
+            _resolve_path(cfg, "candidates_path"),
+            max_age_trading_days=int(handshake.get("max_age_trading_days", 1)),
+            expected_config_hash=handshake.get("expected_config_hash"),
+            today_et=today_et,
+        )
+    except CandidatesError as e:
+        LOG.warning("post_closure_rescreen: candidate reload failed: %s", e)
+        state["rescreen_pending"] = False
+        save_state(state, state_path)
+        return 0
+
+    remaining_budget = None
+    if daily_cap is not None:
+        remaining_budget = max(0, int(daily_cap) - daily_count)
+        if remaining_budget == 0:
+            state["rescreen_pending"] = False
+            save_state(state, state_path)
+            return 0
+
+    # Bankroll envelope drives sizing in the rescreen too. The daily
+    # slicing applies here as well so afternoon redeployments don't
+    # break the per-day allocation discipline.
+    bankroll_basis = get_bankroll_dollars(state, fallback_equity=equity)
+    sizing_basis = get_sizing_basis(state, fallback_equity=equity, cfg=cfg)
+    entries = select_entries(
+        cands, state,
+        equity=sizing_basis, latest_prices=latest_prices,
+        cfg=cfg, kill_state=kill_state,
+        entry_trigger="post_closure_rescreen",
+        remaining_entries_budget=remaining_budget,
+        gross_cap_basis=bankroll_basis,
+    )
+    if not entries:
+        LOG.info(
+            "post_closure_rescreen: 0 entries from %d candidates "
+            "(equity=%.2f, sizing_basis=%.2f, daily_count=%d/%s)",
+            len(cands), equity, sizing_basis, daily_count, daily_cap,
+        )
+        state["rescreens_today"] = int(state.get("rescreens_today", 0)) + 1
+        state["rescreen_pending"] = False
+        save_state(state, state_path)
+        return 0
+
+    LOG.info(
+        "post_closure_rescreen: selected %d entries: %s",
+        len(entries), [e.ticker for e in entries],
+    )
+    entries = filter_by_intraday_confirmation(
+        entries, cfg, http, api_key,
+        band_override=_post_closure_band(cfg),
+    )
+    LOG.info(
+        "post_closure_rescreen: %d entries survive tightened confirmation",
+        len(entries),
+    )
+
+    submitted = 0
+    for entry in entries:
+        link_id_for_log = f"BOWAKA-{entry.ticker}-{int(time.time())}"
+        try:
+            submit_entry(
+                entry, cfg, http, api_key,
+                state=state, state_path=state_path,
+                link_id_override=link_id_for_log,
+                entry_trigger="post_closure_rescreen",
+            )
+        except httpx.HTTPError as e:
+            LOG.exception(
+                "rescreen entry submit failed for %s: %s", entry.ticker, e,
+            )
+            continue
+        if entry.ticker in (state.get("open_positions") or {}):
+            submitted += 1
+            state["daily_entries_count"] = int(state.get("daily_entries_count", 0)) + 1
+            state["post_closure_entries_today"] = int(
+                state.get("post_closure_entries_today", 0)
+            ) + 1
+            entered = state.setdefault("entered_today", [])
+            if entry.ticker not in entered:
+                entered.append(entry.ticker)
+
+    state["rescreens_today"] = int(state.get("rescreens_today", 0)) + 1
+    state["rescreen_pending"] = False
+    save_state(state, state_path)
+    LOG.info(
+        "post_closure_rescreen complete: %d submitted, daily_entries_count=%d, "
+        "post_closure_entries_today=%d",
+        submitted, state["daily_entries_count"],
+        state["post_closure_entries_today"],
+    )
+    return submitted
 
 
 def run_loop(
@@ -3553,11 +4593,29 @@ def run_loop(
 
     summary_path = _resolve_path(cfg, "daily_summary_path")
 
+    # Bankroll initialization. Runs BEFORE reconcile so that any
+    # recovered fills update the bankroll value the rest of the loop
+    # uses for sizing. A misconfigured cfg.bankroll raises
+    # BankrollConfigError here — fail-loud so the operator fixes the
+    # YAML rather than over-sizing trades with broker equity.
+    try:
+        initialize_bankroll(
+            state, cfg, http_client, api_key,
+            state_path=state_path,
+        )
+    except BankrollConfigError as e:
+        LOG.error("bankroll cfg invalid; refusing to start: %s", e)
+        return 5
+    except Exception as e:
+        LOG.exception("bankroll init failed; refusing to start: %s", e)
+        return 5
+
     # Phase 4: startup reconciliation (no-op when state is empty).
     try:
         reconcile_at_startup(
             state, http_client, api_key,
             state_path=state_path, summary_path=summary_path,
+            cfg=cfg,
         )
     except Exception as e:
         LOG.exception("startup reconciliation failed (continuing): %s", e)
@@ -3622,6 +4680,7 @@ def run_loop(
                             state, http_client, api_key,
                             state_path=state_path,
                             summary_path=summary_path,
+                            cfg=cfg,
                         )
                     except Exception as e:
                         LOG.exception(
@@ -3694,6 +4753,25 @@ def run_loop(
                             )
                         except Exception as e:
                             LOG.exception("time-stop pass error: %s", e)
+                    # Post-closure rescreen: redeploy capital after any
+                    # intraday closure. Debounces multiple per-tick
+                    # closures via state["rescreen_pending"]; gated
+                    # internally by daily_cap, last_entry_time, and
+                    # the intraday_confirmation filter so stale signals
+                    # are rejected before order submission. Runs every
+                    # tick (cheap no-op when the flag is clear), but
+                    # skipped under L2 — kill_l2 cancels OCO and flat-
+                    # tens positions; redeploying would directly
+                    # contradict operator intent.
+                    if kill not in (KillLevel.L2_SOFT, KillLevel.L3_HARD):
+                        try:
+                            run_post_closure_rescreen(
+                                cfg, state, state_path, http_client, api_key,
+                                today_et=today_et, kill_state=kill,
+                                now_utc=now,
+                            )
+                        except Exception as e:
+                            LOG.exception("post_closure_rescreen error: %s", e)
                     # Session-end summary (15:55 ET tick).
                     et_dt = _to_eastern(now)
                     end_h, end_m = (int(x) for x in cfg["session"]["end"].split(":"))

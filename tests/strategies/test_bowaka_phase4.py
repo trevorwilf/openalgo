@@ -137,6 +137,217 @@ def test_reconcile_position_disappeared_externally(
     assert "AAPL" not in state["open_positions"]
     rec = json.loads(summary_path.read_text().strip())
     assert rec["reason"] == "closed_externally"
+    # No tracked child fill present in the mock → $0 stub fallback.
+    assert rec["realized_pnl"] == 0.0
+    assert rec["recovered_from_child_fill"] is False
+
+
+def test_reconcile_position_disappeared_recovers_stop_fill(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """BLDP-style regression: an OCO stop fires overnight while the
+    strategy is offline. By the time we reconcile, the broker no
+    longer reports the position, but the stop child order shows
+    ``filled`` with the real exit price. The closure record must
+    use that real price and the corresponding ``stop_hit`` reason
+    so daily_summary doesn't drift from broker reality by the missed
+    loss. Before this fix the strategy recorded
+    ``reason=closed_externally`` with ``realized_pnl=0.0``."""
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "BLDP": _filled_pos(
+            qty=2089, target_id="T-1", stop_id="S-1",
+            entry_iso="2026-05-07T13:33:54+00:00",
+            entry_price=4.7618,
+        ),
+    }
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+
+    def orders_h(req):
+        # Stop fired overnight at 4.20 → −$1,173.68 vs entry 4.7618.
+        # Target is canceled by OCO peer.
+        if req.url.params.get("status") == "open":
+            return httpx.Response(200, json={"data": {"orders": []}})
+        return httpx.Response(200, json={"data": {"orders": [
+            {"id": "T-1", "status": "canceled", "native_status": "canceled"},
+            {"id": "S-1", "status": "filled", "native_status": "filled",
+             "filled_qty": "2089", "filled_avg_price": "4.20"},
+        ]}})
+
+    routes = {
+        # Broker no longer reports the position.
+        ("GET", "/api/v2/positions"): lambda r: httpx.Response(200, json={"data": {"positions": []}}),
+        ("GET", "/api/v2/orders"): orders_h,
+    }
+    http = strategy_module.make_http_client("http://x", transport=_make_handler(routes))
+    summary = strategy_module.reconcile_at_startup(
+        state, http, "k", state_path=state_path, summary_path=summary_path,
+    )
+    assert "BLDP" in summary["closed_externally"]
+    assert "BLDP" not in state["open_positions"]
+    rec = json.loads(summary_path.read_text().strip())
+    assert rec["reason"] == "stop_hit"
+    assert rec["exit_price"] == pytest.approx(4.20)
+    assert rec["realized_pnl"] == pytest.approx((4.20 - 4.7618) * 2089)
+    assert rec["recovered_from_child_fill"] is True
+
+
+def test_reconcile_position_disappeared_recovers_target_fill(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """OCO take-profit fires overnight (less common — typically only
+    if the bracket is GTC and there's an after-hours print or an
+    early-hours fill). Reason must come out as ``target_hit``."""
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "AAPL": _filled_pos(
+            qty=100, target_id="T-2", stop_id="S-2",
+            entry_iso="2026-05-04T13:30:00+00:00",
+            entry_price=100.0,
+        ),
+    }
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+
+    def orders_h(req):
+        if req.url.params.get("status") == "open":
+            return httpx.Response(200, json={"data": {"orders": []}})
+        return httpx.Response(200, json={"data": {"orders": [
+            {"id": "T-2", "status": "filled", "native_status": "filled",
+             "filled_qty": "100", "filled_avg_price": "115.50"},
+            {"id": "S-2", "status": "canceled", "native_status": "canceled"},
+        ]}})
+
+    routes = {
+        ("GET", "/api/v2/positions"): lambda r: httpx.Response(200, json={"data": {"positions": []}}),
+        ("GET", "/api/v2/orders"): orders_h,
+    }
+    http = strategy_module.make_http_client("http://x", transport=_make_handler(routes))
+    strategy_module.reconcile_at_startup(
+        state, http, "k", state_path=state_path, summary_path=summary_path,
+    )
+    rec = json.loads(summary_path.read_text().strip())
+    assert rec["reason"] == "target_hit"
+    assert rec["exit_price"] == pytest.approx(115.50)
+    assert rec["realized_pnl"] == pytest.approx((115.50 - 100.0) * 100)
+    assert rec["recovered_from_child_fill"] is True
+
+
+def test_reconcile_position_disappeared_recovers_exit_order_fill(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """A signal_fade / time_stop exit submitted before the strategy
+    crashed fills overnight. The position's ``exit_order_id`` tracks
+    that standalone order; reconcile must pick up its fill and
+    preserve the strategy's recorded ``exit_reason``."""
+    state = strategy_module.blank_state()
+    pos = _filled_pos(qty=50, entry_price=20.0)
+    pos["exit_order_id"] = "EX-MOO-1"
+    pos["exit_reason"] = "signal_fade"
+    state["open_positions"] = {"NVDA": pos}
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+
+    def orders_h(req):
+        if req.url.params.get("status") == "open":
+            return httpx.Response(200, json={"data": {"orders": []}})
+        return httpx.Response(200, json={"data": {"orders": [
+            {"id": "EX-MOO-1", "status": "filled", "native_status": "filled",
+             "filled_qty": "50", "filled_avg_price": "18.75"},
+            # Original OCO peers canceled when the helper sell was placed.
+            {"id": "T-1", "status": "canceled", "native_status": "canceled"},
+            {"id": "S-1", "status": "canceled", "native_status": "canceled"},
+        ]}})
+
+    routes = {
+        ("GET", "/api/v2/positions"): lambda r: httpx.Response(200, json={"data": {"positions": []}}),
+        ("GET", "/api/v2/orders"): orders_h,
+    }
+    http = strategy_module.make_http_client("http://x", transport=_make_handler(routes))
+    strategy_module.reconcile_at_startup(
+        state, http, "k", state_path=state_path, summary_path=summary_path,
+    )
+    rec = json.loads(summary_path.read_text().strip())
+    assert rec["reason"] == "signal_fade"
+    assert rec["exit_price"] == pytest.approx(18.75)
+    assert rec["realized_pnl"] == pytest.approx((18.75 - 20.0) * 50)
+    assert rec["recovered_from_child_fill"] is True
+
+
+def test_reconcile_position_disappeared_no_fill_falls_back_to_stub(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Operator-side flatten that bypassed tracked orders (e.g.,
+    manual liquidation through the broker UI). Both OCO children
+    show ``canceled`` and there's no exit_order_id. The strategy
+    can't reconstruct the real fill price, so the $0 stub is the
+    honest record — ``recovered_from_child_fill`` must be False so
+    analytics can filter these out."""
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "TSLA": _filled_pos(qty=20, entry_price=200.0),
+    }
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+
+    def orders_h(req):
+        if req.url.params.get("status") == "open":
+            return httpx.Response(200, json={"data": {"orders": []}})
+        return httpx.Response(200, json={"data": {"orders": [
+            {"id": "T-1", "status": "canceled", "native_status": "canceled"},
+            {"id": "S-1", "status": "canceled", "native_status": "canceled"},
+        ]}})
+
+    routes = {
+        ("GET", "/api/v2/positions"): lambda r: httpx.Response(200, json={"data": {"positions": []}}),
+        ("GET", "/api/v2/orders"): orders_h,
+    }
+    http = strategy_module.make_http_client("http://x", transport=_make_handler(routes))
+    strategy_module.reconcile_at_startup(
+        state, http, "k", state_path=state_path, summary_path=summary_path,
+    )
+    rec = json.loads(summary_path.read_text().strip())
+    assert rec["reason"] == "closed_externally"
+    assert rec["realized_pnl"] == 0.0
+    assert rec["recovered_from_child_fill"] is False
+
+
+def test_reconcile_position_disappeared_prefers_target_over_stop_when_both_filled(
+    strategy_module, cfg_with_paths, tmp_path,
+):
+    """Defensive: OCO semantics guarantee at most one peer fills, but
+    if both somehow show ``filled`` in the broker's order history
+    (race / replay glitch), reconcile picks ``target`` first for a
+    deterministic record."""
+    state = strategy_module.blank_state()
+    state["open_positions"] = {
+        "MSFT": _filled_pos(qty=10, entry_price=50.0),
+    }
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    summary_path = Path(cfg_with_paths["paths"]["daily_summary_path"])
+
+    def orders_h(req):
+        if req.url.params.get("status") == "open":
+            return httpx.Response(200, json={"data": {"orders": []}})
+        return httpx.Response(200, json={"data": {"orders": [
+            {"id": "T-1", "status": "filled", "native_status": "filled",
+             "filled_qty": "10", "filled_avg_price": "55.0"},
+            {"id": "S-1", "status": "filled", "native_status": "filled",
+             "filled_qty": "10", "filled_avg_price": "46.0"},
+        ]}})
+
+    routes = {
+        ("GET", "/api/v2/positions"): lambda r: httpx.Response(200, json={"data": {"positions": []}}),
+        ("GET", "/api/v2/orders"): orders_h,
+    }
+    http = strategy_module.make_http_client("http://x", transport=_make_handler(routes))
+    strategy_module.reconcile_at_startup(
+        state, http, "k", state_path=state_path, summary_path=summary_path,
+    )
+    rec = json.loads(summary_path.read_text().strip())
+    assert rec["reason"] == "target_hit"
+    assert rec["exit_price"] == pytest.approx(55.0)
 
 
 def test_reconcile_qty_mismatch_updates_state(
