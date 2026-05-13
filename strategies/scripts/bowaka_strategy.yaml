@@ -84,6 +84,19 @@ sizing:
   # cumulative buffer on top of the per-trade buffer).
   equal_slice_bankroll_fraction: null
 
+  # Phase 6.1 — risk-per-trade sizing mode.
+  #   "equal_slice" (default): legacy bankroll/N equal-notional logic.
+  #   "risk_per_trade": qty = floor(target_risk_dollars /
+  #                           (close * (stop_pct + slip_pct))).
+  # target_risk_dollars sets the planned per-trade loss in dollars
+  # (Report §7 validation default = $200). max_per_trade_dollars
+  # caps total notional regardless of sizing_mode. min_order_notional
+  # rejects orders smaller than this to avoid micro-fills.
+  sizing_mode: "equal_slice"
+  target_risk_dollars: 200
+  max_per_trade_dollars: null
+  min_order_notional: 500
+
 # Bowaka's working bankroll — the strategy's "envelope" within your
 # broker account. All sizing decisions (per_trade_pct, gross_exposure_
 # pct) compute against this number, NOT the full account equity. The
@@ -150,6 +163,24 @@ risk:
   # disables the cap (back to "max_concurrent_positions" only).
   max_total_entries_per_day: 4        # Report §7 validation default; pre-audit value was 10
 
+  # Phase 6.1 — risk-per-trade additions.
+  # expected_stop_slippage_pct: extra slippage cushion baked into
+  # the per-share loss calc for risk_per_trade sizing. Real fills
+  # tend to land worse than the trigger price; 1.5% covers most
+  # microcap-stop slippage observed in the audit data.
+  expected_stop_slippage_pct: 0.015
+  # adv_tier_caps: tiered ADV-participation caps. Empty list = use
+  # legacy risk.max_position_as_adv_frac. Each tier:
+  #   {max_adv_dollars, reject_if_below?, max_position_as_adv_frac}
+  # ADV is matched against the smallest max_adv_dollars that is
+  # >= the candidate's avg_dollar_volume; reject_if_below=True drops
+  # the candidate entirely. Recommended validation tiers:
+  #   - {max_adv_dollars: 500000, reject_if_below: true, max_position_as_adv_frac: 0.000}
+  #   - {max_adv_dollars: 1000000, max_position_as_adv_frac: 0.005}
+  #   - {max_adv_dollars: 5000000, max_position_as_adv_frac: 0.010}
+  #   - {max_adv_dollars: null, max_position_as_adv_frac: 0.015}
+  adv_tier_caps: []
+
   # Phase 3.4 — circuit breakers. All null = disabled (legacy
   # behavior). Report's recommended validation values are 2 / 2 /
   # 0.010 / 0.025 — pin them in the operator config to activate.
@@ -183,6 +214,19 @@ entry:
   #                       computed off the prior close. Preserved for
   #                       backtest parity / debugging only.
   bracket_pricing_mode: "actual_fill"
+
+  # Phase 6.3 — marketable-limit parent entry.
+  #   "market" (default): legacy MARKET BUY (slippage uncontrolled).
+  #   "marketable_limit": LIMIT BUY at min(ask*(1+slip), close*1.15),
+  #                       times out after N seconds if not filled.
+  # max_entry_slippage_pct caps the per-order slippage; the optional
+  # tiered version overrides per-ADV bucket for thin names.
+  # marketable_limit_timeout_seconds cancels the pending LIMIT and
+  # frees the slot if the broker hasn't filled by then.
+  order_style: "market"
+  max_entry_slippage_pct: 0.005
+  max_entry_slippage_by_adv_tier: []
+  marketable_limit_timeout_seconds: 30
 
   # Item 9 — intraday confirmation gate (Critical #4 in the review).
   # Bowaka's strongest reconstruction is "daily candidate + live

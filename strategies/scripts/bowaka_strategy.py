@@ -1105,6 +1105,117 @@ def compute_qty(
     return int(math.floor(target / close_price))
 
 
+# ---------------------------------------------------------------- Phase 6.2 — risk-per-trade + ADV tier caps
+
+
+def adv_tier_cap(adv: float | None, cfg: dict) -> tuple[bool, float | None]:
+    """Phase 6.2 — return (allowed, max_notional) for ``adv`` against
+    ``cfg.risk.adv_tier_caps``.
+
+    Each tier is matched against the smallest ``max_adv_dollars``
+    bucket that is >= ``adv`` (or the unbounded null tier as the
+    catch-all). When ``reject_if_below`` is True the candidate is
+    dropped entirely (``allowed=False``).
+
+    When the list is empty, return ``(True, None)`` — caller falls
+    back to the legacy ``risk.max_position_as_adv_frac`` path.
+    """
+    tiers = (cfg.get("risk") or {}).get("adv_tier_caps") or []
+    if not tiers or adv is None or adv <= 0:
+        return True, None
+    # Sort tiers so the smallest cap fires first; null max_adv_dollars
+    # sorts last (unbounded tier is the catch-all).
+    def _sort_key(t: dict) -> float:
+        v = t.get("max_adv_dollars")
+        return float(v) if v is not None else float("inf")
+    sorted_tiers = sorted(tiers, key=_sort_key)
+    for t in sorted_tiers:
+        bound = t.get("max_adv_dollars")
+        bound_f = float(bound) if bound is not None else float("inf")
+        if float(adv) <= bound_f:
+            if t.get("reject_if_below"):
+                return False, None
+            frac = float(t.get("max_position_as_adv_frac") or 0.0)
+            return True, float(adv) * frac
+    # Should be unreachable — the sorted last bucket has +inf cap.
+    return True, None
+
+
+def compute_risk_sized_qty(
+    entry_price: float,
+    stop_pct: float,
+    avg_dollar_volume: float | None,
+    cfg: dict,
+) -> int:
+    """Phase 6.2 — qty sized to bound the worst-case planned loss at
+    ``sizing.target_risk_dollars``.
+
+    Math (Report §8.8):
+      loss_per_share = entry_price * (stop_pct + expected_stop_slippage_pct)
+      base_qty       = floor(target_risk_dollars / loss_per_share)
+
+    Then we apply:
+      * ``sizing.max_per_trade_dollars`` (notional cap)
+      * ``risk.adv_tier_caps`` (or legacy ``max_position_as_adv_frac``)
+      * ``sizing.min_order_notional`` (reject too-small orders)
+
+    Returns the integer qty (0 means "skip the entry").
+    """
+    sizing = cfg.get("sizing") or {}
+    risk_cfg = cfg.get("risk") or {}
+    if entry_price <= 0 or stop_pct <= 0:
+        return 0
+    target_risk = float(sizing.get("target_risk_dollars") or 0)
+    if target_risk <= 0:
+        return 0
+    slip = float(risk_cfg.get("expected_stop_slippage_pct") or 0.0)
+    loss_per_share = float(entry_price) * (float(stop_pct) + slip)
+    if loss_per_share <= 0:
+        return 0
+    base_qty = int(math.floor(target_risk / loss_per_share))
+    if base_qty <= 0:
+        return 0
+    notional = base_qty * float(entry_price)
+
+    # Per-trade notional cap.
+    max_per_trade = sizing.get("max_per_trade_dollars")
+    if max_per_trade is not None:
+        cap_notional = float(max_per_trade)
+        if notional > cap_notional:
+            base_qty = int(math.floor(cap_notional / float(entry_price)))
+            notional = base_qty * float(entry_price)
+    if base_qty <= 0:
+        return 0
+
+    # ADV tier cap (tiered) takes precedence over legacy
+    # max_position_as_adv_frac when adv_tier_caps is set.
+    allowed, adv_cap = adv_tier_cap(avg_dollar_volume, cfg)
+    if not allowed:
+        return 0
+    if adv_cap is not None:
+        adv_qty = int(math.floor(float(adv_cap) / float(entry_price)))
+        base_qty = min(base_qty, max(adv_qty, 0))
+    else:
+        # Legacy fallback to max_position_as_adv_frac.
+        legacy_frac = risk_cfg.get("max_position_as_adv_frac")
+        if (
+            legacy_frac is not None
+            and avg_dollar_volume is not None
+            and float(avg_dollar_volume) > 0
+        ):
+            legacy_cap = float(avg_dollar_volume) * float(legacy_frac)
+            legacy_qty = int(math.floor(legacy_cap / float(entry_price)))
+            base_qty = min(base_qty, max(legacy_qty, 0))
+    if base_qty <= 0:
+        return 0
+
+    notional = base_qty * float(entry_price)
+    min_notional = sizing.get("min_order_notional")
+    if min_notional is not None and notional < float(min_notional):
+        return 0
+    return base_qty
+
+
 def _equal_slice_fraction(cfg: dict) -> float:
     """Resolve the equal-slice bankroll fraction.
 
@@ -1406,15 +1517,28 @@ def select_entries(
             break
         adv = cand.features.get("avg_dollar_volume") if cand.features else None
         adv_f = float(adv) if adv is not None else None
-        qty = compute_qty(
-            equity=equity,
-            close_price=cand.close,
-            per_trade_pct=per_trade_pct,
-            max_per_trade_dollars=max_per_trade_abs,
-            avg_dollar_volume=adv_f,
-            max_position_as_adv_frac=max_pos_adv_f,
-            per_trade_dollars_override=per_trade_dollars_override,
-        )
+        # Phase 6.2 — branch on sizing_mode. risk_per_trade caps the
+        # planned dollar loss; equal_slice keeps the legacy
+        # bankroll/N notional math.
+        sizing_mode = (sizing_cfg.get("sizing_mode") or "equal_slice").lower()
+        if sizing_mode == "risk_per_trade":
+            stop_pct_q = float((cfg.get("exits") or {}).get("stop_pct") or 0)
+            qty = compute_risk_sized_qty(
+                entry_price=cand.close,
+                stop_pct=stop_pct_q,
+                avg_dollar_volume=adv_f,
+                cfg=cfg,
+            )
+        else:
+            qty = compute_qty(
+                equity=equity,
+                close_price=cand.close,
+                per_trade_pct=per_trade_pct,
+                max_per_trade_dollars=max_per_trade_abs,
+                avg_dollar_volume=adv_f,
+                max_position_as_adv_frac=max_pos_adv_f,
+                per_trade_dollars_override=per_trade_dollars_override,
+            )
         if qty <= 0:
             _reject("qty_zero", qty=qty)
             continue
@@ -2050,6 +2174,42 @@ def submit_entry(
     """
     mode = _bracket_pricing_mode(cfg)
     if mode == "actual_fill":
+        # Phase 6.3 — dispatch on cfg.entry.order_style.
+        order_style = (
+            (cfg.get("entry") or {}).get("order_style") or "market"
+        ).lower()
+        if order_style == "marketable_limit":
+            quote = _fetch_quote(entry, http, api_key)
+            if quote is None:
+                LOG.warning(
+                    "marketable_limit: no quote for %s — skipping",
+                    entry.ticker,
+                )
+                emit_entry_decision_rejected(
+                    cfg, candidate=entry.candidate, state=state,
+                    reason="marketable_limit_no_quote",
+                    entry_trigger=entry_trigger,
+                    candidate_rank=None,
+                    qty=entry.qty, venue_code=entry.venue_code,
+                )
+                return {"error": {"code": "no_quote"}, "status": 0}
+            limit_price = compute_marketable_buy_limit(entry, quote, cfg)
+            if limit_price is None:
+                emit_entry_decision_rejected(
+                    cfg, candidate=entry.candidate, state=state,
+                    reason="marketable_limit_no_quote",
+                    entry_trigger=entry_trigger,
+                    candidate_rank=None,
+                    qty=entry.qty, venue_code=entry.venue_code,
+                    quote=quote,
+                )
+                return {"error": {"code": "bad_quote"}, "status": 0}
+            return submit_parent_marketable_limit_buy(
+                entry, limit_price, cfg, http, api_key,
+                state=state, state_path=state_path,
+                link_id_override=link_id_override,
+                entry_trigger=entry_trigger,
+            )
         return submit_parent_market_buy(
             entry, cfg, http, api_key,
             state=state, state_path=state_path,
@@ -2144,6 +2304,11 @@ def submit_parent_market_buy(
             "oco_attach_attempts": 0,
             "fallback_stop_order_id": None,
             "protection_violation": False,
+            # Phase 6.5 — planned-risk dollars (closure R-multiple).
+            "planned_risk_dollars": _planned_risk_for_entry(entry, cfg),
+            # Phase 6.3 metadata so analytics can split market vs
+            # marketable_limit fills.
+            "entry_order_style": "market",
         }
         save_state(state, state_path)
         LOG.info("Parent MARKET BUY submitted (actual_fill mode): %s qty=%d parent=%s",
@@ -2179,6 +2344,171 @@ def submit_parent_market_buy(
     LOG.error("Parent MARKET BUY failed for %s: HTTP %d %s",
               entry.ticker, r.status_code, parsed)
     return {"error": err, "status": r.status_code}
+
+
+# ---------------------------------------------------------------- Phase 6.3 — marketable-limit entry
+
+
+def max_entry_slippage_for_candidate(entry: "Entry", cfg: dict) -> float:
+    """Return the slippage cap for ``entry``. Tiered (per ADV) when
+    ``cfg.entry.max_entry_slippage_by_adv_tier`` is set; falls back
+    to the flat ``cfg.entry.max_entry_slippage_pct``."""
+    entry_cfg = cfg.get("entry") or {}
+    tiers = entry_cfg.get("max_entry_slippage_by_adv_tier") or []
+    adv = None
+    if entry.candidate and entry.candidate.features:
+        adv = entry.candidate.features.get("avg_dollar_volume")
+    if tiers and adv is not None:
+        def _key(t: dict) -> float:
+            v = t.get("max_adv_dollars")
+            return float(v) if v is not None else float("inf")
+        for t in sorted(tiers, key=_key):
+            bound = t.get("max_adv_dollars")
+            bound_f = float(bound) if bound is not None else float("inf")
+            if float(adv) <= bound_f:
+                return float(t.get("max_slippage_pct") or 0.0)
+    return float(entry_cfg.get("max_entry_slippage_pct") or 0.0)
+
+
+def compute_marketable_buy_limit(
+    entry: "Entry", quote: dict[str, Any], cfg: dict,
+) -> float | None:
+    """Phase 6.3 — limit price = min(ask*(1+slip), close*(1+max_above)).
+
+    Returns None when the ask is missing/zero (caller skips the
+    entry with reason="marketable_limit_no_quote"). The price-band
+    cap prevents chase prices above the operator's chase ceiling.
+    """
+    try:
+        ask = float(quote.get("ask") or 0)
+    except (TypeError, ValueError):
+        return None
+    if ask <= 0:
+        return None
+    slip = max_entry_slippage_for_candidate(entry, cfg)
+    raw_limit = ask * (1.0 + slip)
+    band = (((cfg.get("entry") or {}).get("intraday_confirmation") or {})
+            .get("price_band") or {})
+    max_above = band.get("max_pct_above_close")
+    if max_above is not None and entry.close_price > 0:
+        chase_cap = entry.close_price * (1.0 + float(max_above))
+        raw_limit = min(raw_limit, chase_cap)
+    return round(raw_limit, 2)
+
+
+def submit_parent_marketable_limit_buy(
+    entry: "Entry",
+    limit_price: float,
+    cfg: dict,
+    http: httpx.Client,
+    api_key: str,
+    *,
+    state: State,
+    state_path: Path,
+    link_id_override: str | None = None,
+    entry_trigger: str = "session_open",
+) -> dict[str, Any]:
+    """Phase 6.3 parent submission: LIMIT BUY (DAY TIF) at
+    ``limit_price``. Position state records ``entry_order_style`` and
+    ``entry_limit_price`` so poll_fills can detect timeout and
+    cancel-free-the-slot when the fill never comes.
+
+    On non-200 the position is NOT stored; the caller re-tries on
+    the next tick (or moves on, depending on broker error code).
+    """
+    venue_code = entry.venue_code or cfg["sizing"]["default_venue_code"]
+    link_id = link_id_override or f"BOWAKA-{entry.ticker}-{int(time.time())}"
+    body = {
+        "apikey": api_key,
+        "instrument": {"venue_code": venue_code,
+                       "canonical_symbol": entry.ticker},
+        "side": "BUY",
+        "order_type": "LIMIT",
+        "price": str(limit_price),
+        "quantity": str(entry.qty),
+        "quantity_unit": "WHOLE",
+        "time_in_force": "DAY",
+        "session": "REGULAR",
+    }
+    r = http.post("/api/v2/orders", json=body, headers=_api_headers(api_key))
+    parsed = r.json() if r.content else {}
+
+    if r.status_code == 200:
+        data = parsed.get("data", {})
+        native = data.get("native_response") or {}
+        parent_id = (
+            native.get("id") or native.get("order_id")
+            or data.get("order_id") or ""
+        )
+        state.setdefault("open_positions", {})[entry.ticker] = {
+            "parent_order_id": parent_id,
+            "child_order_ids": {"target": "", "stop": ""},
+            "qty": entry.qty,
+            "entry_price": None,
+            "entry_timestamp": datetime.now(timezone.utc).isoformat(),
+            "entry_features": entry.candidate.features,
+            "status": "pending_fill",
+            "link_id": link_id,
+            "venue_code": venue_code,
+            "exchange": entry.candidate.exchange,
+            "bracket_pricing_mode": "actual_fill",
+            "target_pct": float(cfg["exits"]["target_pct"]),
+            "stop_pct": float(cfg["exits"]["stop_pct"]),
+            "candidate_close": entry.close_price,
+            "signal_strength": entry.candidate.signal_strength,
+            "equity_at_entry": entry.equity_at_entry,
+            "entry_trigger": entry_trigger,
+            "peak_since_entry": None,
+            "trough_since_entry": None,
+            # Phase 5.2 protection fields (mirror submit_parent_market_buy).
+            "parent_filled_at": None,
+            "protection_status": "none",
+            "protection_deadline_at": None,
+            "oco_attach_attempts": 0,
+            "fallback_stop_order_id": None,
+            "protection_violation": False,
+            # Phase 6.3 marketable-limit metadata.
+            "entry_order_style": "marketable_limit",
+            "entry_limit_price": float(limit_price),
+            # Phase 6.5 planned-risk for R-multiple.
+            "planned_risk_dollars": _planned_risk_for_entry(entry, cfg),
+        }
+        save_state(state, state_path)
+        LOG.info(
+            "Parent LIMIT BUY (marketable_limit) submitted: %s qty=%d "
+            "limit=%.4f parent=%s",
+            entry.ticker, entry.qty, limit_price, parent_id,
+        )
+        emit_parent_submitted(
+            cfg, link_id=link_id, ticker=entry.ticker,
+            parent_id=parent_id, qty=entry.qty, venue_code=venue_code,
+            http_status=r.status_code,
+        )
+        return parsed
+
+    err = (parsed.get("error") or {}) if isinstance(parsed, dict) else {}
+    if r.status_code == 422:
+        state.setdefault("halt_skip_today", []).append(entry.ticker)
+        save_state(state, state_path)
+    LOG.error(
+        "Parent LIMIT BUY (marketable_limit) failed for %s: HTTP %d %s",
+        entry.ticker, r.status_code, parsed,
+    )
+    return {"error": err, "status": r.status_code}
+
+
+def _planned_risk_for_entry(entry: "Entry", cfg: dict) -> float | None:
+    """Planned dollar risk for the order — Phase 6.5 plumbs this into
+    ledger closures for proper R-multiple computation."""
+    sizing = cfg.get("sizing") or {}
+    mode = (sizing.get("sizing_mode") or "equal_slice").lower()
+    if mode == "risk_per_trade":
+        return float(sizing.get("target_risk_dollars") or 0) or None
+    # equal_slice mode uses stop_pct-derived planned risk.
+    stop_pct = float((cfg.get("exits") or {}).get("stop_pct") or 0)
+    if stop_pct <= 0 or entry.qty <= 0 or entry.close_price <= 0:
+        return None
+    return float(entry.close_price) * stop_pct * float(entry.qty)
 
 
 def submit_oco_children(
@@ -2781,6 +3111,62 @@ def poll_fills(
                 dirty = True
                 events.append(ev)
                 emit_order_event(cfg, pos=pos, role="exit", ev=ev)
+
+    # Phase 6.3 — marketable-limit timeout. Walk pending_fill
+    # positions whose entry_order_style is marketable_limit; cancel
+    # the order and free the slot when timeout has elapsed without a
+    # fill.
+    if cfg is not None:
+        timeout_s = float(
+            (cfg.get("entry") or {}).get("marketable_limit_timeout_seconds")
+            or 0
+        )
+        if timeout_s > 0:
+            now = datetime.now(timezone.utc)
+            for ticker, pos in list(open_positions.items()):
+                if pos.get("status") != "pending_fill":
+                    continue
+                if pos.get("entry_order_style") != "marketable_limit":
+                    continue
+                ts = pos.get("entry_timestamp")
+                if not ts:
+                    continue
+                try:
+                    sub_dt = datetime.fromisoformat(
+                        ts.replace("Z", "+00:00")
+                    )
+                except Exception:
+                    continue
+                if sub_dt.tzinfo is None:
+                    sub_dt = sub_dt.replace(tzinfo=timezone.utc)
+                if (now - sub_dt).total_seconds() < timeout_s:
+                    continue
+                parent_id = pos.get("parent_order_id")
+                if parent_id:
+                    try:
+                        cancel_order(parent_id, http, api_key)
+                    except Exception as e:
+                        LOG.exception(
+                            "marketable_limit_timeout cancel failed for %s: %s",
+                            ticker, e,
+                        )
+                emit_ledger_event(
+                    cfg, event_type="missed_trade",
+                    trade_id=pos.get("link_id"),
+                    ticker=ticker,
+                    payload={
+                        "reason": "marketable_limit_timeout",
+                        "entry_limit_price": pos.get("entry_limit_price"),
+                        "entry_timestamp": ts,
+                        "elapsed_seconds": (now - sub_dt).total_seconds(),
+                    },
+                )
+                open_positions.pop(ticker, None)
+                dirty = True
+                LOG.warning(
+                    "marketable_limit_timeout: %s (limit=%.4f) — order canceled, slot freed",
+                    ticker, float(pos.get("entry_limit_price") or 0),
+                )
 
     if dirty:
         save_state(state, state_path)
@@ -4403,19 +4789,24 @@ def close_position(
     # full record so recompute_daily_summary_from_ledger can rebuild
     # the daily summary from this stream alone.
     #
-    # R-multiple uses planned_risk = entry_price * stop_pct * qty
-    # (Phase 1 spec). Phase 6 will replace stop_pct-derived planned
-    # risk with the actual ``planned_risk_dollars`` recorded at sizing.
-    stop_pct_v = pos.get("stop_pct")
-    planned_risk = None
+    # R-multiple. Phase 6.5: prefer the position's recorded
+    # planned_risk_dollars (set at sizing time — equals target_risk_
+    # dollars for risk_per_trade mode, entry*stop_pct*qty for
+    # equal_slice mode). Fall back to the Phase 1 stop_pct
+    # computation for legacy positions that lack the field.
+    planned_risk = pos.get("planned_risk_dollars")
+    if planned_risk is None:
+        stop_pct_v = pos.get("stop_pct")
+        try:
+            if stop_pct_v is not None and entry_price > 0 and qty:
+                planned_risk = abs(float(entry_price) * float(stop_pct_v) * float(qty))
+        except Exception:
+            planned_risk = None
     r_multiple = None
     try:
-        if stop_pct_v is not None and entry_price > 0 and qty:
-            planned_risk = abs(float(entry_price) * float(stop_pct_v) * float(qty))
-            if planned_risk > 0:
-                r_multiple = realized / planned_risk
+        if planned_risk is not None and float(planned_risk) > 0:
+            r_multiple = realized / float(planned_risk)
     except Exception:
-        planned_risk = None
         r_multiple = None
     # session_date for the ledger uses the exit's ET-local date, NOT
     # the entry date — closure_event aggregations are keyed on the
