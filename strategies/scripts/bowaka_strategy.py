@@ -572,6 +572,16 @@ class Candidate:
     venue_code: str | None = None
     exchange: str | None = None
     features: dict[str, Any] = field(default_factory=dict)
+    # Phase 2.5 — instrument classification carried in from the
+    # prefilter's schema-v2 candidate file. ``instrument_class``
+    # defaults to None so legacy v1 candidate files (no class) still
+    # load; ``eligible_for_bowaka_equity_bucket`` defaults to True
+    # for the same reason. The strategy's select_entries enforces a
+    # belt-and-suspenders check against this so a leveraged ETP that
+    # somehow makes it through the prefilter (stale candidate file,
+    # config relaxation) does not reach submit_entry.
+    instrument_class: str | None = None
+    eligible_for_bowaka_equity_bucket: bool = True
 
 
 def _trading_days_between(d1_iso: str, d2_iso: str) -> int:
@@ -664,6 +674,10 @@ def load_candidates(
 
     out: list[Candidate] = []
     for row in payload.get("candidates", []):
+        # Phase 2.5: hydrate instrument-class fields when present.
+        # Missing fields default to safe values (None / True) so
+        # pre-v2 candidate files still load — the select_entries
+        # gate treats those as operating equity by convention.
         out.append(Candidate(
             ticker=row["ticker"],
             close=float(row["close"]),
@@ -675,6 +689,10 @@ def load_candidates(
                 "close_location", "ema_distance", "ema_slope",
                 "avg_dollar_volume",
             )},
+            instrument_class=row.get("instrument_class") or None,
+            eligible_for_bowaka_equity_bucket=bool(
+                row.get("eligible_for_bowaka_equity_bucket", True)
+            ),
         ))
     out.sort(key=lambda c: c.signal_strength, reverse=True)
     return out
@@ -1311,6 +1329,15 @@ def select_entries(
             continue
         if cand.ticker in entered_today:
             _reject("already_entered_today")
+            continue
+        # Phase 2.5 — strategy-side belt-and-suspenders. The prefilter
+        # already drops leveraged ETPs / ETNs when its
+        # instrument_rules.<bucket>.action is "exclude", but stale
+        # candidate files or future relaxation must not let one slip
+        # through. ``None`` (legacy v1 candidate file) is treated as
+        # operating_equity by convention so we don't break old runs.
+        if cand.instrument_class is not None and cand.instrument_class != "operating_equity":
+            _reject("excluded_instrument_class")
             continue
         if open_count + len(selected) >= max_concurrent:
             # Concurrent-cap is a slate-truncation reason; emit for
