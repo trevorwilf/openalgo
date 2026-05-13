@@ -39,6 +39,16 @@ universe:
   avg_dollar_volume_min: 1000000     # Report §7 validation default; pre-audit value was 250000
   avg_dollar_volume_max: null # null = no upper cap
 
+  # Phase 2.4 — exchange / structure exclusions. ``allowed_exchanges``
+  # already excludes OTC venues; ``exclude_otc`` is a redundancy
+  # assertion that raises if an OTC name slips through (defense in
+  # depth). The leveraged / inverse / ETN flags delegate to
+  # ``instrument_rules.<bucket>.action`` below.
+  exclude_otc: true
+  exclude_leveraged_etp: true
+  exclude_inverse_etp: true
+  exclude_etn: true
+
 bars:
   lookback_calendar_days: 45  # enough for ≥20 trading days of indicators
   batch_size: 100             # symbols per Alpaca bars request
@@ -57,6 +67,40 @@ signals:
   close_location_min: 0.60    # close in upper 40% of today's range
   ema_distance_min: 0.0       # close above EMA
   ema_slope_min: 0.0          # EMA rising
+  # Phase 2.1 — max gates. Disabled by default; the operator's
+  # calibrated config should pin them to (e.g.) 5.0 / 2.25 / 0.25
+  # per Report §6 / §7 to drop blow-off / exhaustion entries.
+  rvol_max: null
+  range_expansion_max: null
+  gap_pct_max: null
+
+# Phase 2.2 — bounded signal_strength score. ``bounded: false`` keeps
+# legacy behavior (parity with the pre-audit formula); ``bounded:
+# true`` clips each addend at the configured cap and subtracts a
+# penalty for gaps above ``gap_penalty_above``. Operators flip to
+# ``true`` AFTER they have a baseline; the bounded score reduces the
+# unbounded-rvol dominance that the audit flagged.
+score:
+  bounded: false
+  rvol_score_cap: 5.0
+  range_score_cap: 2.5
+  ema_distance_score_cap: 0.40
+  ema_slope_score_cap: 0.25
+  gap_penalty_above: 0.25
+
+# Phase 2.3 — instrument classification.
+instrument_rules:
+  leveraged_etp:
+    action: "exclude"        # exclude | separate_sleeve | allow
+  inverse_etp:
+    action: "exclude"
+  etn:
+    action: "exclude"
+  ticker_blocklist: ["TSLL", "CONL", "SMCX"]
+  name_keywords:
+    leveraged: ["2X", "3X", "BULL", "BEAR", "DAILY", "LEVERAGED"]
+    inverse: ["INVERSE", "SHORT", "BEAR"]
+    etn: ["ETN"]
 
 output:
   candidates_path: "data/in_play_candidates.json"
