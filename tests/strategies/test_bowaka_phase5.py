@@ -776,6 +776,42 @@ def test_session_summary_includes_by_trigger_and_counters(
          "entry_trigger": "post_closure_rescreen"},
     ]
     summary_path.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+    # Phase 1.6: write_session_summary now reads the canonical trade
+    # ledger (sibling file). Seed equivalent events so the assertions
+    # below continue to reflect the same scenario.
+    import uuid
+    ledger_path = summary_path.parent / "trade_ledger.jsonl"
+    ledger_events = [
+        # Parent fills (session_open) — A and B
+        {"event_type": "order_fill", "session_date": today, "trade_id": "BOWAKA-A-1",
+         "ticker": "A", "role": "parent",
+         "payload": {"entry_trigger": "session_open"}},
+        {"event_type": "order_fill", "session_date": today, "trade_id": "BOWAKA-B-1",
+         "ticker": "B", "role": "parent",
+         "payload": {"entry_trigger": "session_open"}},
+        # Parent fill (rescreen) — C
+        {"event_type": "order_fill", "session_date": today, "trade_id": "BOWAKA-C-1",
+         "ticker": "C", "role": "parent",
+         "payload": {"entry_trigger": "post_closure_rescreen"}},
+        # Closures
+        {"event_type": "closure", "session_date": today, "trade_id": "BOWAKA-A-1",
+         "ticker": "A",
+         "payload": {"realized_pnl": 250.0, "reason": "target_hit",
+                     "entry_trigger": "session_open"}},
+        {"event_type": "closure", "session_date": today, "trade_id": "BOWAKA-C-1",
+         "ticker": "C",
+         "payload": {"realized_pnl": -75.0, "reason": "stop_hit",
+                     "entry_trigger": "post_closure_rescreen"}},
+    ]
+    with open(ledger_path, "a", encoding="utf-8") as f:
+        for raw in ledger_events:
+            ev = {
+                "schema_version": 1, "event_id": uuid.uuid4().hex,
+                "ts": today + "T13:30:00+00:00",
+                **raw,
+            }
+            f.write(json.dumps(ev) + "\n")
+
     state = strategy_module.blank_state()
     state["rescreens_today"] = 2
     state["post_closure_entries_today"] = 1

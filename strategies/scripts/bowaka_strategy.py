@@ -27,9 +27,11 @@ import json
 import logging
 import math
 import os
+import re
 import signal
 import sys
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, time as _dtime, timedelta, timezone
 from enum import Enum
@@ -43,6 +45,107 @@ import pandas_market_calendars as mcal
 import yaml
 
 LOG = logging.getLogger("bowaka_strategy")
+
+
+# ---------------------------------------------------------------- Phase 1.1 — secret redaction
+#
+# Every log line passes through ``redact_secrets`` via the
+# ``_RedactingFilter`` attached in ``setup_logging``. Patterns cover
+# the three places API keys / bearer tokens can leak into log text:
+#
+#   1. Query strings:        ``apikey=ABC`` / ``api_key=ABC``
+#   2. Authorization header: ``Authorization: Bearer ABC``
+#   3. JSON-as-text bodies:  ``"apikey": "ABC"`` / ``"api_key": "ABC"``
+#   4. X-API-KEY header:     ``X-API-KEY: ABC`` / ``X-APIKEY: ABC``
+#
+# Each match is rewritten with the literal placeholder ``<REDACTED>``
+# so the surrounding structure is preserved (useful for postmortem)
+# but the secret material is unrecoverable.
+SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # Query-string-style: ?apikey=ABC or &api_key=ABC. The token
+    # character class matches typical API-key alphabets (alnum + . _ -)
+    # but not the separator (& or whitespace) so we stop at the
+    # parameter boundary.
+    (re.compile(r"(?i)(\bapi[_-]?key)=([A-Za-z0-9._\-]+)"),
+     r"\1=<REDACTED>"),
+    # Authorization: Bearer <token>
+    (re.compile(r"(?i)(Authorization:\s*Bearer)\s+([A-Za-z0-9._\-]+)"),
+     r"\1 <REDACTED>"),
+    # JSON-as-text: "apikey": "ABC"  /  'api_key': 'ABC'
+    (re.compile(r"""(?i)(["']api[_-]?key["']\s*:\s*)["']([^"']+)["']"""),
+     r'\1"<REDACTED>"'),
+    # X-API-KEY (and X-APIKEY) header lines
+    (re.compile(r"(?i)(X-API-?KEY:\s*)([A-Za-z0-9._\-]+)"),
+     r"\1<REDACTED>"),
+]
+
+
+def redact_secrets(text: str) -> str:
+    """Apply every ``SECRET_PATTERNS`` substitution to ``text``.
+
+    Idempotent — running it twice on the same string is a no-op.
+    Returns the input unchanged when it is not a string (defensive
+    for non-string LogRecord ``msg`` values).
+    """
+    if not isinstance(text, str):
+        return text
+    out = text
+    for pat, repl in SECRET_PATTERNS:
+        out = pat.sub(repl, out)
+    return out
+
+
+class _RedactingFilter(logging.Filter):
+    """Logging filter that runs every record through ``redact_secrets``.
+
+    Applied to BOTH the message template and any positional / keyword
+    args, because the LogRecord's final-formatted message is built
+    from ``msg % args`` at handler-emit time. Filtering at ``filter()``
+    runs before that interpolation, so we have to redact the args
+    individually — otherwise a call like
+    ``LOG.info("url=%s", "https://x?apikey=ABC")`` would emit the
+    secret intact.
+
+    Exception tracebacks (``record.exc_info``) need special handling:
+    the formatter formats them at handler-emit time, after the filter
+    chain. We pre-format the traceback here, redact it, and cache the
+    result on ``record.exc_text`` so the formatter uses our version
+    instead of re-formatting from ``exc_info``.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:  # type: ignore[override]
+        try:
+            if isinstance(record.msg, str):
+                record.msg = redact_secrets(record.msg)
+            if record.args:
+                if isinstance(record.args, tuple):
+                    record.args = tuple(
+                        redact_secrets(a) if isinstance(a, str) else a
+                        for a in record.args
+                    )
+                elif isinstance(record.args, dict):
+                    record.args = {
+                        k: (redact_secrets(v) if isinstance(v, str) else v)
+                        for k, v in record.args.items()
+                    }
+            # Pre-format and redact the traceback so the handler's
+            # formatter uses our redacted exc_text rather than
+            # re-formatting raw exc_info at emit time.
+            if record.exc_info and not record.exc_text:
+                import traceback
+                tb_text = "".join(
+                    traceback.format_exception(*record.exc_info)
+                )
+                record.exc_text = redact_secrets(tb_text).rstrip()
+            elif record.exc_text:
+                record.exc_text = redact_secrets(record.exc_text)
+            if getattr(record, "stack_info", None):
+                record.stack_info = redact_secrets(record.stack_info)
+        except Exception:
+            # Filter must not raise — better to log unredacted than
+            # to drop a critical log line.
+            pass
+        return True
 
 # ---------------------------------------------------------------- state schema
 
@@ -202,12 +305,24 @@ def setup_logging(cfg: dict) -> None:
     if path := log_cfg.get("file"):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         handlers.append(_LineBufferedFileHandler(path))
+    # Phase 1.1: attach the redaction filter to every handler so no
+    # log line (console or file) writes a raw API key / bearer token.
+    redactor = _RedactingFilter()
+    for h in handlers:
+        h.addFilter(redactor)
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
         handlers=handlers,
         force=True,
     )
+    # basicConfig with force=True replaces root handlers but does NOT
+    # re-attach our filter to the root logger's *new* handlers if
+    # something later calls basicConfig again. Be defensive: attach
+    # the filter to the root logger itself too — that catches the
+    # ``logger.handle()`` path regardless of which handler ends up
+    # emitting the record.
+    logging.getLogger().addFilter(redactor)
 
 
 # Item 8 — gate-drift handshake. The reviewer's exact ask:
@@ -427,6 +542,24 @@ class CandidatesHashMismatch(CandidatesError):
     pass
 
 
+class CandidatesFeedMismatch(CandidatesError):
+    """Phase 1.3: candidate file's ``data_feed`` does not match the
+    operator-pinned ``prefilter_handshake.expected_data_feed``.
+
+    Prevents the strategy from trading on candidates generated against
+    the wrong tape (e.g. IEX-derived signals when an operator just
+    flipped the YAML to SIP but did not regenerate the candidate
+    file)."""
+
+
+class CandidatesSchemaMismatch(CandidatesError):
+    """Phase 1.3: candidate file's ``schema_version`` does not match
+    the operator-pinned ``prefilter_handshake.expected_schema_version``.
+
+    Catches stale candidate files from a pre-Phase-1.2 prefilter
+    where the v2 provenance fields are missing."""
+
+
 @dataclass
 class Candidate:
     ticker: str
@@ -463,6 +596,8 @@ def load_candidates(
     max_age_trading_days: int,
     expected_config_hash: str | None,
     today_et: date,
+    expected_data_feed: str | None = None,
+    expected_schema_version: int | None = None,
 ) -> list[Candidate]:
     """Load + validate the prefilter's candidates JSON.
 
@@ -470,6 +605,19 @@ def load_candidates(
     days behind ``today_et`` (NYSE calendar). Validates ``config_hash``
     matches ``expected_config_hash`` when pinned. Returns the
     candidates list sorted by ``signal_strength`` descending.
+
+    Phase 1.3 adds two fail-closed gates:
+
+    * ``expected_data_feed`` — when set (typically ``"iex"`` or ``"sip"``)
+      the payload's ``data_feed`` must match exactly. Mismatch raises
+      :class:`CandidatesFeedMismatch` so the strategy refuses to trade
+      on signals built against the wrong tape.
+    * ``expected_schema_version`` — when set, the payload's
+      ``schema_version`` must match. Mismatch raises
+      :class:`CandidatesSchemaMismatch`.
+
+    Both new gates are no-ops when ``None`` (default), preserving
+    legacy behavior for operators who have not yet pinned the YAML.
     """
     p = Path(path)
     if not p.exists():
@@ -478,10 +626,31 @@ def load_candidates(
         payload = json.load(f)
 
     if expected_config_hash is not None:
+        # v2 contract puts the full sha256 in ``config_hash`` and keeps
+        # the legacy 8-hex form in ``config_hash_short``. Match either
+        # so operators can pin whichever form they currently track.
         seen = payload.get("config_hash")
-        if seen != expected_config_hash:
+        seen_short = payload.get("config_hash_short")
+        if seen != expected_config_hash and seen_short != expected_config_hash:
             raise CandidatesHashMismatch(
-                f"config_hash mismatch: got {seen!r}, expected {expected_config_hash!r}"
+                f"config_hash mismatch: got {seen!r} / short={seen_short!r}, "
+                f"expected {expected_config_hash!r}"
+            )
+
+    if expected_schema_version is not None:
+        seen_schema = payload.get("schema_version")
+        if seen_schema != expected_schema_version:
+            raise CandidatesSchemaMismatch(
+                f"schema_version mismatch: got {seen_schema!r}, "
+                f"expected {expected_schema_version!r}"
+            )
+
+    if expected_data_feed is not None:
+        seen_feed = payload.get("data_feed")
+        if seen_feed != expected_data_feed:
+            raise CandidatesFeedMismatch(
+                f"data_feed mismatch: got {seen_feed!r}, "
+                f"expected {expected_data_feed!r}"
             )
 
     as_of_iso = payload.get("as_of_date")
@@ -543,9 +712,10 @@ def fetch_equity(http: httpx.Client, api_key: str) -> float:
     to ``cash`` so India brokers (which have no equity field in the
     balance response) still produce a usable number for sizing.
     """
-    r = http.get("/api/v2/balances",
-                 headers=_api_headers(api_key),
-                 params={"apikey": api_key})
+    # Phase 1.1: header-only auth on GET. The v2 lane reads X-API-KEY
+    # (see restx_api/v2/_auth.py); the redundant ?apikey= query string
+    # used to land the secret in nginx / proxy access logs.
+    r = http.get("/api/v2/balances", headers=_api_headers(api_key))
     r.raise_for_status()
     body = r.json().get("data") or {}
     bal = body.get("balance") or body.get("balances") or {}
@@ -565,9 +735,8 @@ def fetch_cash(http: httpx.Client, api_key: str) -> float:
     include open-position market value, double-counting the bankroll
     against itself).
     """
-    r = http.get("/api/v2/balances",
-                 headers=_api_headers(api_key),
-                 params={"apikey": api_key})
+    # Phase 1.1: header-only auth on GET (see fetch_equity comment).
+    r = http.get("/api/v2/balances", headers=_api_headers(api_key))
     r.raise_for_status()
     body = r.json().get("data") or {}
     bal = body.get("balance") or body.get("balances") or {}
@@ -1049,13 +1218,43 @@ def select_entries(
     ``equity`` is a per-day slice), the cap uses this number instead,
     decoupling per-trade size from the cumulative-exposure limit.
     """
-    if state.get("daily_pnl_tripped"):
-        return []
-    if kill_state in (KillLevel.L1_NEW, KillLevel.L2_SOFT, KillLevel.L3_HARD):
-        return []
-
     sizing_cfg = cfg["sizing"]
     risk_cfg = cfg["risk"]
+    # Phase 1.4: slate-wide blocks emit ONE synthetic entry_decision
+    # event (per the audit prompt) rather than fanning out across
+    # every candidate. The rationale is captured in ``reason`` and
+    # the slate size in the payload.
+    if state.get("daily_pnl_tripped"):
+        if candidates:
+            emit_entry_decision_rejected(
+                cfg, candidate=candidates[0], state=state,
+                reason="daily_pnl_tripped",
+                entry_trigger=entry_trigger,
+                candidate_rank=0,
+            )
+        return []
+    if kill_state in (KillLevel.L1_NEW, KillLevel.L2_SOFT, KillLevel.L3_HARD):
+        if candidates:
+            emit_entry_decision_rejected(
+                cfg, candidate=candidates[0], state=state,
+                reason="kill_switch",
+                entry_trigger=entry_trigger,
+                candidate_rank=0,
+            )
+        return []
+    # Phase 3 will populate ``block_new_entries_today`` via the
+    # circuit-breaker code; the gate below treats that flag as
+    # slate-wide too.
+    if state.get("block_new_entries_today"):
+        if candidates:
+            emit_entry_decision_rejected(
+                cfg, candidate=candidates[0], state=state,
+                reason="blocked_by_daily_risk",
+                entry_trigger=entry_trigger,
+                candidate_rank=0,
+            )
+        return []
+
     max_concurrent = int(sizing_cfg["max_concurrent_positions"])
     per_trade_pct = float(sizing_cfg["per_trade_pct"])
     max_per_trade_abs = risk_cfg.get("max_per_trade_dollars")
@@ -1087,19 +1286,73 @@ def select_entries(
         state, cfg, fallback_equity=equity,
     )
 
-    for cand in candidates:
+    daily_cap_v = risk_cfg.get("max_total_entries_per_day")
+    daily_cap_int = int(daily_cap_v) if daily_cap_v is not None else None
+    daily_count_v = int(state.get("daily_entries_count", 0))
+
+    for rank, cand in enumerate(candidates, start=1):
+        # Phase 1.4: helper closure for rejection emission with shared
+        # candidate-rank threading.
+        def _reject(reason: str, qty: int | None = None) -> None:
+            emit_entry_decision_rejected(
+                cfg, candidate=cand, state=state,
+                reason=reason,
+                entry_trigger=entry_trigger,
+                candidate_rank=rank,
+                qty=qty,
+                venue_code=(cand.venue_code or sizing_cfg.get("default_venue_code")),
+            )
+
         if cand.ticker in halt_skip:
+            _reject("halt_skip")
             continue
         if cand.ticker in open_positions:
+            _reject("already_held")
             continue
         if cand.ticker in entered_today:
+            _reject("already_entered_today")
             continue
         if open_count + len(selected) >= max_concurrent:
+            # Concurrent-cap is a slate-truncation reason; emit for
+            # this candidate and every remaining one so total emissions
+            # == total candidates considered (audit-prompt §1.4).
+            _reject("concurrent_cap")
+            for tail_rank, tail in enumerate(candidates[rank:], start=rank + 1):
+                emit_entry_decision_rejected(
+                    cfg, candidate=tail, state=state,
+                    reason="concurrent_cap",
+                    entry_trigger=entry_trigger,
+                    candidate_rank=tail_rank,
+                    venue_code=(tail.venue_code or sizing_cfg.get("default_venue_code")),
+                )
             break
         if (
             remaining_entries_budget is not None
             and len(selected) >= int(remaining_entries_budget)
         ):
+            _reject("daily_entry_cap")
+            for tail_rank, tail in enumerate(candidates[rank:], start=rank + 1):
+                emit_entry_decision_rejected(
+                    cfg, candidate=tail, state=state,
+                    reason="daily_entry_cap",
+                    entry_trigger=entry_trigger,
+                    candidate_rank=tail_rank,
+                    venue_code=(tail.venue_code or sizing_cfg.get("default_venue_code")),
+                )
+            break
+        if (
+            daily_cap_int is not None
+            and (daily_count_v + len(selected)) >= daily_cap_int
+        ):
+            _reject("daily_entry_cap")
+            for tail_rank, tail in enumerate(candidates[rank:], start=rank + 1):
+                emit_entry_decision_rejected(
+                    cfg, candidate=tail, state=state,
+                    reason="daily_entry_cap",
+                    entry_trigger=entry_trigger,
+                    candidate_rank=tail_rank,
+                    venue_code=(tail.venue_code or sizing_cfg.get("default_venue_code")),
+                )
             break
         adv = cand.features.get("avg_dollar_volume") if cand.features else None
         adv_f = float(adv) if adv is not None else None
@@ -1113,9 +1366,11 @@ def select_entries(
             per_trade_dollars_override=per_trade_dollars_override,
         )
         if qty <= 0:
+            _reject("qty_zero", qty=qty)
             continue
         notional = qty * cand.close
         if gross_cap > 0 and (running_gross + notional) > gross_cap:
+            _reject("gross_cap", qty=qty)
             continue
         running_gross += notional
         # Per-candidate venue routing. Falls back to the strategy's
@@ -1276,6 +1531,31 @@ def _confirm_entry(
     return True, None
 
 
+def _reason_label_for_confirmation_fail(raw: str | None) -> str:
+    """Map :func:`_confirm_entry`'s human-readable reason into the
+    canonical Phase 1.4 reason label set.
+
+    The raw strings carry inline thresholds (e.g. ``"spread>0.0200"``)
+    for log readability — they're not stable for analytics. The
+    canonical labels are stable.
+    """
+    if not raw:
+        return "bad_quote"
+    if raw == "no_quote":
+        return "no_quote"
+    if raw == "bad_bid_ask" or raw == "bad_quote_timestamp":
+        return "bad_quote"
+    if raw.startswith("spread"):
+        return "spread_too_wide"
+    if raw.startswith("quote_age"):
+        return "quote_stale"
+    if raw.startswith("chase"):
+        return "chase"
+    if raw.startswith("failure"):
+        return "failure_band"
+    return "bad_quote"
+
+
 def filter_by_intraday_confirmation(
     entries: list[Entry],
     cfg: dict,
@@ -1284,6 +1564,8 @@ def filter_by_intraday_confirmation(
     *,
     now_utc: datetime | None = None,
     band_override: dict | None = None,
+    state: State | None = None,
+    entry_trigger: str = "session_open",
 ) -> list[Entry]:
     """Item 9: gate each entry on a fresh quote. Skips a name when
     spread is too wide, the quote is stale, or the live price is
@@ -1300,6 +1582,10 @@ def filter_by_intraday_confirmation(
     timestamp, or has bad bid/ask values causes the candidate to be
     rejected (not silently passed). Operators relying on this gate
     need it to err on the side of skipping the trade.
+
+    Phase 1.4: every rejection emits a universal ``entry_decision``
+    event keyed to the canonical reason label set
+    (:data:`ENTRY_DECISION_REASONS`).
     """
     ic = _intraday_confirmation_cfg(cfg)
     if not ic.get("enabled"):
@@ -1311,23 +1597,40 @@ def filter_by_intraday_confirmation(
         ic["price_band"] = band_override
     now_utc = now_utc or datetime.now(timezone.utc)
     out: list[Entry] = []
-    for entry in entries:
+    for rank, entry in enumerate(entries, start=1):
         quote = _fetch_quote(entry, http, api_key)
         if quote is None:
             LOG.info(
                 "intraday_confirmation: %s — no quote available, skipping",
                 entry.ticker,
             )
+            if state is not None:
+                emit_entry_decision_rejected(
+                    cfg, candidate=entry.candidate, state=state,
+                    reason="no_quote",
+                    entry_trigger=entry_trigger,
+                    candidate_rank=rank,
+                    qty=entry.qty, venue_code=entry.venue_code,
+                )
             continue
-        passed, reason = _confirm_entry(entry, ic, quote, now_utc=now_utc)
+        passed, raw_reason = _confirm_entry(entry, ic, quote, now_utc=now_utc)
         if passed:
             out.append(entry)
         else:
             LOG.info(
                 "intraday_confirmation: %s rejected (%s) bid=%s ask=%s",
-                entry.ticker, reason,
+                entry.ticker, raw_reason,
                 quote.get("bid"), quote.get("ask"),
             )
+            if state is not None:
+                emit_entry_decision_rejected(
+                    cfg, candidate=entry.candidate, state=state,
+                    reason=_reason_label_for_confirmation_fail(raw_reason),
+                    entry_trigger=entry_trigger,
+                    candidate_rank=rank,
+                    qty=entry.qty, venue_code=entry.venue_code,
+                    quote=quote,
+                )
     return out
 
 
@@ -1891,10 +2194,11 @@ def cancel_order(order_id: str, http: httpx.Client, api_key: str) -> dict[str, A
     """DELETE /api/v2/orders/<id>. Idempotent on 404 / already-closed."""
     if not order_id:
         return {"status": "noop", "reason": "no order_id"}
+    # Phase 1.1: header-only auth on DELETE (cancel). The redundant
+    # query apikey used to land in proxy access logs.
     r = http.request(
         "DELETE", f"/api/v2/orders/{order_id}",
         headers=_api_headers(api_key),
-        params={"apikey": api_key},
     )
     parsed = r.json() if r.content else {}
     if r.status_code == 200:
@@ -1972,9 +2276,10 @@ def poll_fills(
     if not state.get("open_positions") and not state.get("pending_signal_fade_exits"):
         return []
 
+    # Phase 1.1: header-only auth on GET; keep ``status=all`` query.
     r = http.get("/api/v2/orders",
                  headers=_api_headers(api_key),
-                 params={"apikey": api_key, "status": "all"})
+                 params={"status": "all"})
     r.raise_for_status()
     body = r.json().get("data") or {}
     rows = body.get("orders") or []
@@ -2649,6 +2954,111 @@ def _trade_log_path(cfg: dict, link_id: str) -> Path | None:
     return summary_path.parent / "trades" / f"{link_id}.jsonl"
 
 
+# ---- Phase 1.5: immutable trade ledger ----
+#
+# A single append-only JSONL file at
+#   <daily_summary_path.parent>/trade_ledger.jsonl
+# carries the canonical sequence of trade events. Each event is
+# stamped with a fresh ``event_id`` (uuid4 hex) and ``schema_version``.
+# Corrections never modify earlier records: a follow-up event with
+# ``event_type="correction"`` is appended instead.
+#
+# Event types currently emitted:
+#   * ``entry_decision``    — per-candidate accept / reject record
+#                              (twin of the rich per-trade emission).
+#   * ``order_submitted``   — parent and bracket-leg submissions.
+#   * ``order_fill``        — parent / target / stop fills.
+#   * ``closure``           — position closed (any reason).
+#   * ``protection_event``  — Phase 5 (reserved; emitter wired here).
+#
+# The daily summary file (``daily_summary.jsonl``) is reconstructed
+# from the ledger via :func:`recompute_daily_summary_from_ledger`.
+
+LEDGER_SCHEMA_VERSION: int = 1
+
+
+def _ledger_path(cfg: dict) -> Path:
+    """Path to ``trade_ledger.jsonl`` — sibling of daily_summary.
+
+    Resolution: ``paths.trade_ledger_path`` when explicitly set,
+    otherwise ``<daily_summary_path.parent>/trade_ledger.jsonl``.
+    Operators that want to keep the ledger off the prod log volume
+    can override the path key.
+    """
+    explicit = (cfg.get("paths") or {}).get("trade_ledger_path")
+    if explicit:
+        p = Path(explicit)
+        if not p.is_absolute():
+            p = Path(__file__).resolve().parent / p
+        return p
+    summary_path = _resolve_path(cfg, "daily_summary_path")
+    return summary_path.parent / "trade_ledger.jsonl"
+
+
+def _ledger_session_date(now_utc: datetime | None = None) -> str:
+    """ET-local ISO date for the ledger event's ``session_date``."""
+    now = now_utc or datetime.now(timezone.utc)
+    return _to_eastern(now).date().isoformat()
+
+
+def emit_ledger_event(
+    cfg: dict | None,
+    *,
+    event_type: str,
+    trade_id: str | None,
+    ticker: str | None,
+    payload: dict[str, Any],
+    session_date: str | None = None,
+    role: str | None = None,
+) -> dict[str, Any] | None:
+    """Append a single record to the canonical trade ledger.
+
+    Returns the appended event dict (handy for tests / reconciliation).
+    Best-effort — a write failure is logged but does NOT propagate.
+    ``cfg=None`` (or any cfg without a ``paths.daily_summary_path``)
+    is a no-op (mirrors :func:`_append_trade_log`).
+
+    The ``trade_id`` is typically the position's ``link_id`` — that's
+    the join key for ``build_canonical_trade_table`` in Phase 7's
+    analysis rewrite. ``role`` is set on order-related events
+    (``parent`` / ``target`` / ``stop``) so reports can split by leg.
+    """
+    if cfg is None or not cfg.get("paths"):
+        # No paths.daily_summary_path means no ledger anchor — this
+        # is the "reconcile_at_startup with cfg=None" case in older
+        # tests. Drop the event quietly rather than crashing.
+        return None
+    try:
+        path = _ledger_path(cfg)
+    except Exception as e:
+        LOG.warning(
+            "ledger path unresolvable (event_type=%s): %s",
+            event_type, e,
+        )
+        return None
+    event = {
+        "schema_version": LEDGER_SCHEMA_VERSION,
+        "event_id": uuid.uuid4().hex,
+        "event_type": event_type,
+        "ts": _now_utc_iso(),
+        "session_date": session_date or _ledger_session_date(),
+        "trade_id": trade_id,
+        "ticker": ticker,
+        "role": role,
+        "payload": payload,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event, default=str) + "\n")
+            f.flush()
+    except Exception as e:
+        LOG.warning("ledger append failed (event_type=%s, trade_id=%s): %s",
+                    event_type, trade_id, e)
+        return None
+    return event
+
+
 def _append_trade_log(cfg: dict | None, link_id: str | None, record: dict[str, Any]) -> None:
     """Append a single record to the per-trade jsonl. Best-effort —
     a write failure does NOT propagate; logging is observability,
@@ -2685,6 +3095,43 @@ def _safe_float(v: Any) -> float | None:
 # ---- emit_* helpers: each call writes one record to the per-trade jsonl
 
 
+# Phase 1.4: canonical machine-readable reason labels for the
+# universal entry_decision emission. Every rejection point in
+# select_entries / filter_by_intraday_confirmation / submit_entry must
+# pick one of these. Adding a new label is allowed; renaming an
+# existing one is breaking for downstream analytics.
+ENTRY_DECISION_REASONS: set[str] = {
+    # Accept path
+    "accepted",
+    # Pre-selection gates (select_entries)
+    "already_held",
+    "already_entered_today",
+    "halt_skip",
+    "concurrent_cap",
+    "daily_entry_cap",
+    "qty_zero",
+    "gross_cap",
+    # Pre-selection slate-wide blocks
+    "kill_switch",
+    "daily_pnl_tripped",
+    "blocked_by_daily_risk",        # Phase 3
+    # Confirmation / quote gates (filter_by_intraday_confirmation)
+    "spread_too_wide",
+    "quote_stale",
+    "bad_quote",
+    "chase",
+    "failure_band",
+    "no_quote",
+    # Phase 2
+    "excluded_instrument_class",
+    # Phase 4 (opening-range / VWAP)
+    "opening_range_failed",
+    # Phase 6 (marketable limits)
+    "marketable_limit_no_quote",
+    "marketable_limit_timeout",
+}
+
+
 def emit_entry_decision(
     cfg: dict,
     *,
@@ -2698,14 +3145,20 @@ def emit_entry_decision(
     target_dollars: float,
     adv_cap_dollars: float | None,
     intraday_confirmation_passed: bool | None,
+    decision: str = "accepted",
+    reason: str = "accepted",
+    entry_trigger: str = "session_open",
+    candidate_rank: int | None = None,
+    quote: dict[str, Any] | None = None,
 ) -> None:
     """At submit time: capture every variable the analyst would want
     to know about why we picked this name at this moment.
 
-    Per-gate breakdown for signal_gates so a quant can bucket entries
-    by which gate was the marginal pass. Sizing rationale flags the
-    binding cap (per_trade_pct vs max_per_trade_dollars vs adv_cap).
-    Selection slot index lets you study slate-position vs realized PnL.
+    Phase 1.4 extension — ``decision`` / ``reason`` / ``entry_trigger``
+    / ``candidate_rank`` make this the universal sink: every candidate
+    considered emits exactly one record (accepted or rejected). The
+    ``quote`` field is populated for confirmation-time rejections so
+    analysts can study why a candidate failed.
     """
     cand = entry.candidate
     feats = dict(cand.features or {})
@@ -2743,6 +3196,11 @@ def emit_entry_decision(
         "link_id": link_id,
         "venue_code": entry.venue_code,
         "exchange": cand.exchange,
+        # Phase 1.4 universal coverage.
+        "decision": decision,
+        "reason": reason,
+        "entry_trigger": entry_trigger,
+        "candidate_rank": candidate_rank,
         "candidate": {
             "close": entry.close_price,
             "signal_strength": cand.signal_strength,
@@ -2781,14 +3239,94 @@ def emit_entry_decision(
             "daily_loss_pct": _safe_float(risk_cfg.get("daily_loss_pct")),
             "daily_pnl_baseline_equity": _safe_float(state.get("daily_pnl_baseline_equity")),
             "daily_pnl_tripped": bool(state.get("daily_pnl_tripped", False)),
+            "block_new_entries_today": bool(state.get("block_new_entries_today", False)),
+            "new_entries_blocked_reason": state.get("new_entries_blocked_reason"),
         },
         "intraday_confirmation": {
             "enabled": bool((entry_cfg.get("intraday_confirmation") or {}).get("enabled")),
             "passed": intraday_confirmation_passed,
         },
+        "quote": quote,
         "config_hash": config_hash(cfg),
     }
     _append_trade_log(cfg, link_id, rec)
+    # Phase 1.5: mirror to the canonical ledger so reject-path
+    # analytics (Phase 7) can see every candidate considered.
+    emit_ledger_event(
+        cfg, event_type="entry_decision", trade_id=link_id, ticker=entry.ticker,
+        payload=rec,
+    )
+
+
+def emit_entry_decision_rejected(
+    cfg: dict | None,
+    *,
+    candidate: "Candidate",
+    state: State,
+    decision: str = "rejected",
+    reason: str,
+    entry_trigger: str = "session_open",
+    candidate_rank: int | None,
+    qty: int | None = None,
+    venue_code: str | None = None,
+    quote: dict[str, Any] | None = None,
+) -> None:
+    """Phase 1.4: lightweight rejected-path emission used by
+    :func:`select_entries` and :func:`filter_by_intraday_confirmation`
+    when there is no resolved Entry object yet (or the rejection
+    happened on the entry pre-sizing). Emits the same record_type as
+    the accepted path with the documented universal fields plus
+    whatever context is available.
+
+    No link_id is generated for rejected candidates — keyed only by
+    ``ticker`` + ``candidate_rank`` + ``ts``. The per-trade jsonl
+    is NOT written for rejections (the file name is link_id-derived,
+    and rejected candidates never get one); the ledger is the
+    canonical sink for these.
+    """
+    if cfg is None:
+        return
+    feats = dict(candidate.features or {})
+    sizing_cfg = cfg.get("sizing", {}) or {}
+    risk_cfg = cfg.get("risk", {}) or {}
+    rec = {
+        "record_type": "entry_decision",
+        "ts": _now_utc_iso(),
+        "ticker": candidate.ticker,
+        "link_id": None,
+        "venue_code": venue_code or candidate.venue_code,
+        "exchange": candidate.exchange,
+        "decision": decision,
+        "reason": reason,
+        "entry_trigger": entry_trigger,
+        "candidate_rank": candidate_rank,
+        "candidate": {
+            "close": candidate.close,
+            "signal_strength": candidate.signal_strength,
+            "features": feats,
+        },
+        "sizing": {
+            "qty": qty,
+            "candidate_close": candidate.close,
+            "per_trade_pct": _safe_float(sizing_cfg.get("per_trade_pct")),
+            "max_per_trade_dollars": _safe_float(risk_cfg.get("max_per_trade_dollars")),
+            "max_position_as_adv_frac": _safe_float(risk_cfg.get("max_position_as_adv_frac")),
+            "avg_dollar_volume": _safe_float(feats.get("avg_dollar_volume")),
+        },
+        "risk": {
+            "daily_pnl_tripped": bool(state.get("daily_pnl_tripped", False)),
+            "block_new_entries_today": bool(state.get("block_new_entries_today", False)),
+            "new_entries_blocked_reason": state.get("new_entries_blocked_reason"),
+        },
+        "quote": quote,
+        "config_hash": config_hash(cfg),
+    }
+    # No link_id — rejected events go to the ledger only.
+    emit_ledger_event(
+        cfg, event_type="entry_decision",
+        trade_id=None, ticker=candidate.ticker,
+        payload=rec,
+    )
 
 
 def emit_parent_submitted(
@@ -2803,6 +3341,15 @@ def emit_parent_submitted(
         "qty": qty, "venue_code": venue_code,
         "http_status": http_status,
     })
+    # Phase 1.5: canonical ledger event.
+    emit_ledger_event(
+        cfg, event_type="order_submitted", trade_id=link_id, ticker=ticker,
+        role="parent",
+        payload={
+            "parent_order_id": parent_id, "qty": qty,
+            "venue_code": venue_code, "http_status": http_status,
+        },
+    )
 
 
 def emit_entry_fill(
@@ -2838,6 +3385,22 @@ def emit_entry_fill(
             ev.filled_qty > 0 and ev.filled_qty < int(pos.get("qty") or 0)
         ),
     })
+    # Phase 1.5: canonical ledger event for the parent fill.
+    emit_ledger_event(
+        cfg, event_type="order_fill", trade_id=link_id, ticker=ev.ticker,
+        role="parent",
+        payload={
+            "parent_order_id": ev.order_id,
+            "filled_qty": ev.filled_qty,
+            "filled_avg_price": fill_price,
+            "candidate_close": candidate_close,
+            "slippage_vs_candidate_close_pct": slippage_pct,
+            "fill_latency_seconds": fill_latency_s,
+            "partial_fill": (
+                ev.filled_qty > 0 and ev.filled_qty < int(pos.get("qty") or 0)
+            ),
+        },
+    )
 
 
 def emit_bracket_attached(
@@ -2846,10 +3409,11 @@ def emit_bracket_attached(
 ) -> None:
     link_id = pos.get("link_id") or ""
     fill_price = _safe_float(pos.get("entry_price"))
+    ticker_guess = link_id.split("-")[1] if "-" in link_id else "?"
     _append_trade_log(cfg, link_id, {
         "record_type": "bracket_attached",
         "ts": _now_utc_iso(),
-        "ticker": link_id.split("-")[1] if "-" in link_id else "?",
+        "ticker": ticker_guess,
         "link_id": link_id,
         "target_order_id": target_id, "stop_order_id": stop_id,
         "target_price": target_price, "stop_price": stop_price,
@@ -2867,6 +3431,26 @@ def emit_bracket_attached(
             else None
         ),
     })
+    # Phase 1.5: emit one ledger event per OCO leg so reports can
+    # split the bracket pair by role.
+    emit_ledger_event(
+        cfg, event_type="order_submitted", trade_id=link_id, ticker=ticker_guess,
+        role="target",
+        payload={
+            "order_id": target_id, "price": target_price,
+            "fill_price": fill_price,
+            "target_pct": _safe_float(pos.get("target_pct")),
+        },
+    )
+    emit_ledger_event(
+        cfg, event_type="order_submitted", trade_id=link_id, ticker=ticker_guess,
+        role="stop",
+        payload={
+            "order_id": stop_id, "price": stop_price,
+            "fill_price": fill_price,
+            "stop_pct": _safe_float(pos.get("stop_pct")),
+        },
+    )
 
 
 def emit_order_event(
@@ -3271,6 +3855,41 @@ def close_position(
     # Per-trade rich log: write the exit record under the same
     # link_id BEFORE we drop pos from state.
     emit_exit(cfg, pos=pos, closure_record=record)
+    # Phase 1.5: canonical ledger event. The closure carries the
+    # full record so recompute_daily_summary_from_ledger can rebuild
+    # the daily summary from this stream alone.
+    #
+    # R-multiple uses planned_risk = entry_price * stop_pct * qty
+    # (Phase 1 spec). Phase 6 will replace stop_pct-derived planned
+    # risk with the actual ``planned_risk_dollars`` recorded at sizing.
+    stop_pct_v = pos.get("stop_pct")
+    planned_risk = None
+    r_multiple = None
+    try:
+        if stop_pct_v is not None and entry_price > 0 and qty:
+            planned_risk = abs(float(entry_price) * float(stop_pct_v) * float(qty))
+            if planned_risk > 0:
+                r_multiple = realized / planned_risk
+    except Exception:
+        planned_risk = None
+        r_multiple = None
+    # session_date for the ledger uses the exit's ET-local date, NOT
+    # the entry date — closure_event aggregations are keyed on the
+    # day the realized pnl posts.
+    try:
+        sess_date = _to_eastern(
+            datetime.now(timezone.utc)
+        ).date().isoformat()
+    except Exception:
+        sess_date = None
+    ledger_payload = dict(record)
+    ledger_payload["planned_risk_dollars"] = planned_risk
+    ledger_payload["R_multiple"] = r_multiple
+    emit_ledger_event(
+        cfg, event_type="closure", trade_id=pos.get("link_id"), ticker=ticker,
+        session_date=sess_date,
+        payload=ledger_payload,
+    )
     # Bankroll update happens BEFORE state["open_positions"].pop +
     # save_state so the bankroll mutation is part of the same atomic
     # write. apply_realized_pnl_to_bankroll is a no-op when the
@@ -3382,6 +4001,17 @@ def process_fill_events_for_closures(
             # so this is a no-op, but the structure is forgiving.
         if ev.role == "target" and ev.status in {"FILLED"}:
             price = ev.filled_avg_price or pos.get("target_price") or 0.0
+            # Phase 1.5: ledger event for the target leg fill (before
+            # close_position emits the closure event so the chronology
+            # in the ledger reflects broker order).
+            emit_ledger_event(
+                cfg, event_type="order_fill",
+                trade_id=pos.get("link_id"), ticker=ev.ticker, role="target",
+                payload={
+                    "order_id": ev.order_id, "filled_qty": ev.filled_qty,
+                    "filled_avg_price": _safe_float(ev.filled_avg_price),
+                },
+            )
             out.append(close_position(
                 ev.ticker, state, cfg,
                 state_path=state_path, summary_path=summary_path,
@@ -3390,6 +4020,14 @@ def process_fill_events_for_closures(
             state["rescreen_pending"] = True
         elif ev.role == "stop" and ev.status in {"FILLED"}:
             price = ev.filled_avg_price or pos.get("stop_price") or 0.0
+            emit_ledger_event(
+                cfg, event_type="order_fill",
+                trade_id=pos.get("link_id"), ticker=ev.ticker, role="stop",
+                payload={
+                    "order_id": ev.order_id, "filled_qty": ev.filled_qty,
+                    "filled_avg_price": _safe_float(ev.filled_avg_price),
+                },
+            )
             out.append(close_position(
                 ev.ticker, state, cfg,
                 state_path=state_path, summary_path=summary_path,
@@ -3399,6 +4037,15 @@ def process_fill_events_for_closures(
         elif ev.role == "exit" and ev.status in {"FILLED"}:
             reason = pos.get("exit_reason") or "time_stop"
             price = ev.filled_avg_price or pos.get("exit_fill_price") or 0.0
+            emit_ledger_event(
+                cfg, event_type="order_fill",
+                trade_id=pos.get("link_id"), ticker=ev.ticker, role="exit",
+                payload={
+                    "order_id": ev.order_id, "filled_qty": ev.filled_qty,
+                    "filled_avg_price": _safe_float(ev.filled_avg_price),
+                    "exit_reason": reason,
+                },
+            )
             out.append(close_position(
                 ev.ticker, state, cfg,
                 state_path=state_path, summary_path=summary_path,
@@ -3465,17 +4112,17 @@ def _is_halt_signal(row: dict[str, Any]) -> bool:
 
 
 def fetch_open_orders(http: httpx.Client, api_key: str, status="open") -> list[dict]:
+    # Phase 1.1: header-only auth on GET; keep ``status`` query.
     r = http.get("/api/v2/orders",
                  headers=_api_headers(api_key),
-                 params={"apikey": api_key, "status": status})
+                 params={"status": status})
     r.raise_for_status()
     return r.json().get("data", {}).get("orders", []) or []
 
 
 def fetch_positions(http: httpx.Client, api_key: str) -> list[dict]:
-    r = http.get("/api/v2/positions",
-                 headers=_api_headers(api_key),
-                 params={"apikey": api_key})
+    # Phase 1.1: header-only auth on GET (no query needed).
+    r = http.get("/api/v2/positions", headers=_api_headers(api_key))
     r.raise_for_status()
     return r.json().get("data", {}).get("positions", []) or []
 
@@ -3700,6 +4347,39 @@ def reconcile_at_startup(
                 "recovered_from_child_fill": fill is not None,
             }
             append_closure_record(summary_path, record)
+            # Phase 1.5: mirror the closure into the canonical ledger
+            # so reconcile-recovered fills are visible alongside live
+            # closures. R-multiple computed against the same planned-
+            # risk basis as close_position so reports compare apples-
+            # to-apples.
+            _stop_pct_rec = pos.get("stop_pct")
+            _planned_risk_rec = None
+            _r_mult_rec = None
+            try:
+                if _stop_pct_rec is not None and entry_price > 0 and qty:
+                    _planned_risk_rec = abs(
+                        float(entry_price) * float(_stop_pct_rec) * float(qty)
+                    )
+                    if _planned_risk_rec > 0:
+                        _r_mult_rec = realized / _planned_risk_rec
+            except Exception:
+                _planned_risk_rec = None
+                _r_mult_rec = None
+            try:
+                _sess_rec = _to_eastern(
+                    datetime.now(timezone.utc)
+                ).date().isoformat()
+            except Exception:
+                _sess_rec = None
+            _ledger_payload_rec = dict(record)
+            _ledger_payload_rec["planned_risk_dollars"] = _planned_risk_rec
+            _ledger_payload_rec["R_multiple"] = _r_mult_rec
+            emit_ledger_event(
+                cfg or {}, event_type="closure",
+                trade_id=pos.get("link_id"), ticker=ticker,
+                session_date=_sess_rec,
+                payload=_ledger_payload_rec,
+            )
             # Recovered fills update the bankroll just like a normal
             # closure path. The $0 stub is a no-op (no real P&L
             # signal), so skip the bankroll update there.
@@ -3938,6 +4618,109 @@ def execute_kill_l3(
 
 
 # ---------------------------------------------------------------- daily summary
+#
+# Phase 1.6: the daily session summary is derived from the canonical
+# trade ledger (``trade_ledger.jsonl``) rather than computed from
+# in-memory state or the daily_summary.jsonl ``opened`` / ``closure``
+# records. The ledger is append-only and immutable; the summary is a
+# projection over it. Reading the summary from the ledger lets
+# ``--reconcile-summary`` rebuild a botched day's record after the
+# fact without re-running the session.
+
+
+def recompute_daily_summary_from_ledger(
+    ledger_path: Path, session_date: str,
+) -> dict[str, Any]:
+    """Project the trade ledger into a session-summary dict for one date.
+
+    Aggregates every ``event_type == "closure"`` whose ``session_date``
+    matches the requested date. ``correction`` events with the same
+    ``trade_id`` override the original closure (last write wins);
+    callers append a correction event rather than mutating the
+    original. ``opened`` is counted from ``order_fill`` events with
+    ``role == "parent"`` and a matching ``session_date``.
+
+    Returns the session_summary record (without ``record_type``;
+    callers stamp that on write).
+    """
+    by_reason: dict[str, int] = {}
+    by_trigger: dict[str, dict[str, Any]] = {}
+    total_pnl = 0.0
+    # Closures keyed by trade_id so ``correction`` events can replace
+    # the original (last write wins).
+    closures_by_trade: dict[str, dict[str, Any]] = {}
+    # Parent fills keyed by trade_id so a trade with multiple partial
+    # parent fills only counts as one ``opened``.
+    opened_trades: set[str] = set()
+    opened_triggers: dict[str, str] = {}
+    event_count = 0
+
+    if ledger_path.exists():
+        with open(ledger_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                if ev.get("session_date") != session_date:
+                    continue
+                event_count += 1
+                etype = ev.get("event_type")
+                payload = ev.get("payload") or {}
+                trade_id = ev.get("trade_id") or ""
+                if etype == "order_fill" and ev.get("role") == "parent":
+                    if trade_id:
+                        opened_trades.add(trade_id)
+                        trig = (payload.get("entry_trigger")
+                                or "session_open")
+                        opened_triggers[trade_id] = trig
+                    continue
+                if etype in {"closure", "correction"} and trade_id:
+                    # Correction events fully replace the prior closure
+                    # for this trade_id. The payload of a correction is
+                    # the corrected closure record shape.
+                    closures_by_trade[trade_id] = payload
+
+    # Materialize counts from the deduplicated dicts.
+    count_closed = len(closures_by_trade)
+    for trade_id, payload in closures_by_trade.items():
+        pnl = float(payload.get("realized_pnl") or 0.0)
+        total_pnl += pnl
+        r = payload.get("reason") or "unknown"
+        by_reason[r] = by_reason.get(r, 0) + 1
+        trig = (
+            payload.get("entry_trigger")
+            or opened_triggers.get(trade_id)
+            or "session_open"
+        )
+        bucket = by_trigger.setdefault(
+            trig, {"opened": 0, "closed": 0, "realized_pnl": 0.0},
+        )
+        bucket["closed"] += 1
+        bucket["realized_pnl"] += pnl
+
+    # opened tally — also fold opened trades into by_trigger so the
+    # opened columns exist even when the trade has not yet closed.
+    for trade_id in opened_trades:
+        trig = opened_triggers.get(trade_id, "session_open")
+        bucket = by_trigger.setdefault(
+            trig, {"opened": 0, "closed": 0, "realized_pnl": 0.0},
+        )
+        bucket["opened"] += 1
+
+    return {
+        "session_date": session_date,
+        "count_opened": len(opened_trades),
+        "count_closed": count_closed,
+        "total_realized_pnl": total_pnl,
+        "by_reason": by_reason,
+        "by_trigger": by_trigger,
+        "derived_from_ledger": True,
+        "ledger_event_count_for_date": event_count,
+    }
 
 
 def write_session_summary(
@@ -3949,92 +4732,19 @@ def write_session_summary(
     today_iso: str,
 ) -> dict[str, Any] | None:
     """At session end (15:55 ET), write a session_summary record once
-    per day. Counts opened, closed, total realized pnl, exits-by-reason
-    from today's jsonl. ``summary_written_for_date`` dedupes."""
+    per day. Phase 1.6: numbers come from the canonical trade ledger
+    via :func:`recompute_daily_summary_from_ledger`, not from in-memory
+    state or by re-parsing the daily_summary.jsonl. The session-state
+    counters (``rescreens_today``, ``post_closure_entries_today``)
+    remain in-memory because they're operational metadata, not P&L.
+    """
     if state.get("summary_written_for_date") == today_iso:
         return None
-    if not summary_path.exists():
-        # Even with no closures, write the summary so the operator can
-        # see "session opened, no trades" days unambiguously.
-        record = {
-            "record_type": "session_summary",
-            "session_date": today_iso,
-            "count_opened": 0,
-            "count_closed": 0,
-            "total_realized_pnl": 0.0,
-            "by_reason": {},
-            "by_trigger": {},
-            "rescreens_today": int(state.get("rescreens_today", 0)),
-            "post_closure_entries_today": int(
-                state.get("post_closure_entries_today", 0)
-            ),
-        }
-        append_closure_record(summary_path, record)
-        state["summary_written_for_date"] = today_iso
-        save_state(state, state_path)
-        return record
-
-    by_reason: dict[str, int] = {}
-    total_pnl = 0.0
-    count_closed = 0
-    # Item 8 (#8): count entries that opened TODAY by walking the
-    # ``opened`` records process_fill_events_for_closures wrote when
-    # parents transitioned to "filled". This counts intraday round-
-    # trips (which the old len(open_positions) missed) and excludes
-    # carryover positions (which the old count over-counted).
-    count_opened = 0
-    # by_trigger: per-entry-trigger breakdown. Lets the operator A/B
-    # the post-closure rescreen policy vs the open-tick policy after a
-    # week of live data without having to re-derive it from raw jsonl.
-    by_trigger: dict[str, dict[str, Any]] = {}
-
-    def _trigger_bucket(name: str) -> dict[str, Any]:
-        return by_trigger.setdefault(name, {
-            "opened": 0, "closed": 0, "realized_pnl": 0.0,
-        })
-
-    with open(summary_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except ValueError:
-                continue
-            rt = rec.get("record_type")
-            if rt == "opened":
-                ts = rec.get("entry_timestamp") or ""
-                if today_iso in ts:
-                    count_opened += 1
-                    _trigger_bucket(
-                        rec.get("entry_trigger") or "session_open"
-                    )["opened"] += 1
-                continue
-            if rt != "closure":
-                continue
-            ts = rec.get("exit_timestamp") or rec.get("entry_timestamp") or ""
-            if today_iso not in ts:
-                continue
-            count_closed += 1
-            pnl = float(rec.get("realized_pnl") or 0.0)
-            total_pnl += pnl
-            r = rec.get("reason") or "unknown"
-            by_reason[r] = by_reason.get(r, 0) + 1
-            bucket = _trigger_bucket(
-                rec.get("entry_trigger") or "session_open"
-            )
-            bucket["closed"] += 1
-            bucket["realized_pnl"] += pnl
-
+    ledger_path = _ledger_path(cfg)
+    base = recompute_daily_summary_from_ledger(ledger_path, today_iso)
     record = {
         "record_type": "session_summary",
-        "session_date": today_iso,
-        "count_opened": count_opened,
-        "count_closed": count_closed,
-        "total_realized_pnl": total_pnl,
-        "by_reason": by_reason,
-        "by_trigger": by_trigger,
+        **base,
         "rescreens_today": int(state.get("rescreens_today", 0)),
         "post_closure_entries_today": int(
             state.get("post_closure_entries_today", 0)
@@ -4043,8 +4753,59 @@ def write_session_summary(
     append_closure_record(summary_path, record)
     state["summary_written_for_date"] = today_iso
     save_state(state, state_path)
-    LOG.info("session summary: opened=%d closed=%d pnl=%.2f reasons=%s",
-             count_opened, count_closed, total_pnl, by_reason)
+    LOG.info(
+        "session summary (from ledger): opened=%d closed=%d pnl=%.2f reasons=%s "
+        "(ledger_events_for_date=%d)",
+        record["count_opened"], record["count_closed"],
+        record["total_realized_pnl"], record["by_reason"],
+        record["ledger_event_count_for_date"],
+    )
+    return record
+
+
+def reconcile_summary_for_date(
+    cfg: dict, summary_path: Path, session_date: str,
+) -> dict[str, Any]:
+    """Rebuild the session_summary line for ``session_date`` from the
+    ledger and append it as a correction.
+
+    Doesn't mutate prior summary lines — appends a fresh one with
+    ``correction_version: N+1`` where N is the count of prior
+    session_summary records seen for this date in the file. Useful
+    after-the-fact when an operator has appended ``correction`` events
+    to the ledger to fix a closure miss.
+
+    Returns the appended record.
+    """
+    ledger_path = _ledger_path(cfg)
+    base = recompute_daily_summary_from_ledger(ledger_path, session_date)
+    prior = 0
+    if summary_path.exists():
+        with open(summary_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if (r.get("record_type") == "session_summary"
+                        and r.get("session_date") == session_date):
+                    prior += 1
+    record = {
+        "record_type": "session_summary",
+        **base,
+        "correction_version": prior + 1,
+    }
+    append_closure_record(summary_path, record)
+    LOG.info(
+        "reconciled session summary for %s (correction_version=%d, "
+        "opened=%d, closed=%d, pnl=%.2f)",
+        session_date, record["correction_version"],
+        record["count_opened"], record["count_closed"],
+        record["total_realized_pnl"],
+    )
     return record
 
 
@@ -4110,11 +4871,14 @@ def run_session_entry_pass(
     candidates_path = _resolve_path(cfg, "candidates_path")
     handshake = cfg.get("prefilter_handshake", {}) or {}
     try:
+        # Phase 1.3: plumb feed + schema gates through.
         cands = load_candidates(
             candidates_path,
             max_age_trading_days=int(handshake.get("max_age_trading_days", 1)),
             expected_config_hash=handshake.get("expected_config_hash"),
             today_et=today_et,
+            expected_data_feed=handshake.get("expected_data_feed"),
+            expected_schema_version=handshake.get("expected_schema_version"),
         )
     except CandidatesError as e:
         LOG.error("candidates load failed (will retry next tick): %s", e)
@@ -4164,8 +4928,12 @@ def run_session_entry_pass(
              [e.ticker for e in entries])
 
     # Item 9: live-quote gate per ticker. When disabled this is a
-    # pass-through.
-    entries = filter_by_intraday_confirmation(entries, cfg, http, api_key)
+    # pass-through. Phase 1.4: thread state + entry_trigger so the
+    # filter can emit universal entry_decision events for rejections.
+    entries = filter_by_intraday_confirmation(
+        entries, cfg, http, api_key,
+        state=state, entry_trigger="session_open",
+    )
     LOG.info("After intraday confirmation: %d entries", len(entries))
 
     if dry_run:
@@ -4458,11 +5226,15 @@ def run_post_closure_rescreen(
     # flag and log loudly; operator action required to refresh.
     handshake = cfg.get("prefilter_handshake", {}) or {}
     try:
+        # Phase 1.3: rescreen reload honors the same feed + schema
+        # gates as the open-tick pass.
         cands = load_candidates(
             _resolve_path(cfg, "candidates_path"),
             max_age_trading_days=int(handshake.get("max_age_trading_days", 1)),
             expected_config_hash=handshake.get("expected_config_hash"),
             today_et=today_et,
+            expected_data_feed=handshake.get("expected_data_feed"),
+            expected_schema_version=handshake.get("expected_schema_version"),
         )
     except CandidatesError as e:
         LOG.warning("post_closure_rescreen: candidate reload failed: %s", e)
@@ -4509,6 +5281,9 @@ def run_post_closure_rescreen(
     entries = filter_by_intraday_confirmation(
         entries, cfg, http, api_key,
         band_override=_post_closure_band(cfg),
+        # Phase 1.4: rescreen-path rejections also emit universal
+        # entry_decision events.
+        state=state, entry_trigger="post_closure_rescreen",
     )
     LOG.info(
         "post_closure_rescreen: %d entries survive tightened confirmation",
@@ -4852,12 +5627,47 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run one main-loop tick then exit (tests)",
     )
+    parser.add_argument(
+        "--reconcile-summary",
+        metavar="YYYY-MM-DD",
+        default=None,
+        help=(
+            "Phase 1.6: rebuild the session_summary line for the given "
+            "ET date from the canonical trade ledger and append it as a "
+            "correction (does not run the main loop)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
     setup_logging(cfg)
     cfg_hash = config_hash(cfg)
     LOG.info("Starting bowaka strategy (config_hash=%s)", cfg_hash)
+
+    # Phase 1.6 — one-shot reconcile path. Skips handshake / API-key
+    # check because the ledger + summary files are local artifacts
+    # and don't need broker connectivity.
+    if args.reconcile_summary:
+        try:
+            summary_path = _resolve_path(cfg, "daily_summary_path")
+        except KeyError:
+            LOG.error("--reconcile-summary requires paths.daily_summary_path")
+            return 6
+        try:
+            rec = reconcile_summary_for_date(cfg, summary_path, args.reconcile_summary)
+        except Exception as e:
+            LOG.exception("--reconcile-summary failed: %s", e)
+            return 7
+        LOG.info(
+            "reconcile-summary appended: %s (correction_version=%d, "
+            "opened=%d, closed=%d, pnl=%.2f)",
+            rec.get("session_date"),
+            rec.get("correction_version", 1),
+            rec.get("count_opened", 0),
+            rec.get("count_closed", 0),
+            rec.get("total_realized_pnl", 0.0),
+        )
+        return 0
 
     # Item 8 (handshake): cross-check signal_gates + indicators against
     # the prefilter yaml so the EOD signal-fade exits never use

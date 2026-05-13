@@ -969,6 +969,34 @@ def test_kill_switch_l3_main_loop_returns_99(
 # ---------------------------------------------------------------- daily summary
 
 
+def _write_ledger_event(summary_path: Path, *, event_type: str,
+                        session_date: str, trade_id: str, ticker: str,
+                        payload: dict, role: str | None = None,
+                        event_id: str | None = None,
+                        ts: str | None = None) -> None:
+    """Phase 1.6: helper that writes a raw ledger event next to the
+    daily-summary file. Mirrors :func:`bowaka_strategy.emit_ledger_event`
+    so tests can pre-seed the ledger without instantiating the strategy
+    module's logger / cfg machinery.
+    """
+    import uuid
+    ledger_path = summary_path.parent / "trade_ledger.jsonl"
+    ev = {
+        "schema_version": 1,
+        "event_id": event_id or uuid.uuid4().hex,
+        "event_type": event_type,
+        "ts": ts or (session_date + "T13:30:00+00:00"),
+        "session_date": session_date,
+        "trade_id": trade_id,
+        "ticker": ticker,
+        "role": role,
+        "payload": payload,
+    }
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(ledger_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(ev) + "\n")
+
+
 def test_daily_summary_written_at_session_end(
     strategy_module, cfg_with_paths, tmp_path,
 ):
@@ -993,6 +1021,18 @@ def test_daily_summary_written_at_session_end(
     ]:
         with open(summary_path, "a") as f:
             f.write(json.dumps(rec) + "\n")
+    # Phase 1.6: also seed the canonical trade ledger — Phase 1 made
+    # this the source of truth for write_session_summary.
+    _write_ledger_event(
+        summary_path, event_type="closure", session_date=today_iso,
+        trade_id="BOWAKA-AAPL-1", ticker="AAPL",
+        payload={"realized_pnl": 150.0, "reason": "target_hit"},
+    )
+    _write_ledger_event(
+        summary_path, event_type="closure", session_date=today_iso,
+        trade_id="BOWAKA-MSFT-1", ticker="MSFT",
+        payload={"realized_pnl": -40.0, "reason": "stop_hit"},
+    )
 
     rec = strategy_module.write_session_summary(
         state, cfg_with_paths,
@@ -1047,6 +1087,23 @@ def test_daily_summary_count_opened_walks_jsonl_entries(
     ]:
         with open(summary_path, "a") as f:
             f.write(json.dumps(rec) + "\n")
+    # Phase 1.6: seed the canonical ledger with the same scenario.
+    # Three parent fills on today_iso (AAPL/MSFT/GOOG) plus one
+    # MSFT closure; OLD's parent fill belongs to yesterday and is
+    # NOT seeded with today's session_date.
+    for tkr in ("AAPL", "MSFT", "GOOG"):
+        _write_ledger_event(
+            summary_path, event_type="order_fill", session_date=today_iso,
+            trade_id=f"BOWAKA-{tkr}-1", ticker=tkr, role="parent",
+            payload={"filled_avg_price": 100.0, "filled_qty": 10,
+                     "entry_trigger": "session_open"},
+        )
+    _write_ledger_event(
+        summary_path, event_type="closure", session_date=today_iso,
+        trade_id="BOWAKA-MSFT-1", ticker="MSFT",
+        payload={"realized_pnl": 150.0, "reason": "target_hit",
+                 "entry_trigger": "session_open"},
+    )
 
     rec = strategy_module.write_session_summary(
         state, cfg_with_paths,

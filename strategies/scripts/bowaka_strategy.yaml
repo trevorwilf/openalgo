@@ -28,6 +28,16 @@ session:
 prefilter_handshake:
   expected_config_hash: null   # null = accept any; pin to a value to enforce
   max_age_trading_days: 1
+  # Phase 1.3 — fail-closed handshake gates. Null = disabled (legacy
+  # behavior, accept any). Pin ``expected_data_feed`` to ``"iex"`` or
+  # ``"sip"`` to refuse trading on signals built against the wrong
+  # tape (e.g. operator flipped the prefilter YAML to SIP but the
+  # candidate file was still IEX-derived). Pin
+  # ``expected_schema_version`` to 2 to require the v2 candidate
+  # schema; set 1 (or leave null) for legacy candidate files until
+  # the prefilter is rerun.
+  expected_data_feed: null
+  expected_schema_version: 2
 
 broker:
   base_url_env: "HOST_SERVER"
