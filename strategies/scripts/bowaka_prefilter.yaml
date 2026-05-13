@@ -36,7 +36,7 @@ universe:
   # Universe gates — applied to today's bar before signal gates
   price_min: 1.0              # filter out true penny territory
   price_max: 20.0             # keep small/mid bias
-  avg_dollar_volume_min: 1000000     # Report §7 validation default; pre-audit value was 250000
+  avg_dollar_volume_min: 200000     # Report §7 validation default; pre-audit value was 250000
   avg_dollar_volume_max: null # null = no upper cap
 
   # Phase 2.4 — exchange / structure exclusions. ``allowed_exchanges``
