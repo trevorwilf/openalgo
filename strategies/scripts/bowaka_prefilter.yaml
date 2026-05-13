@@ -1,3 +1,12 @@
+# ──────────────────────────────────────────────────────────────────
+# Validation regime: numeric defaults in this file reflect the
+# Bowaka Consolidated Quant + Engineering Report (May 2026), §7.
+# These are paper-validation values, NOT pre-audit production
+# values. Reverting any of them must be a documented, deliberate
+# operator action — the limits exist because the audit established
+# the pre-audit regime had no proven positive expectancy.
+# ──────────────────────────────────────────────────────────────────
+
 # bowaka_prefilter.yaml — config for the daily US microcap prefilter.
 #
 # All threshold values here are starting guesses derived from the
@@ -27,7 +36,7 @@ universe:
   # Universe gates — applied to today's bar before signal gates
   price_min: 1.0              # filter out true penny territory
   price_max: 20.0             # keep small/mid bias
-  avg_dollar_volume_min: 250000
+  avg_dollar_volume_min: 1000000     # Report §7 validation default; pre-audit value was 250000
   avg_dollar_volume_max: null # null = no upper cap
 
 bars:
