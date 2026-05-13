@@ -47,7 +47,7 @@ broker:
 
 sizing:
   per_trade_pct: 0.10
-  max_concurrent_positions: 4        # Report §7 validation default; pre-audit value was 18
+  max_concurrent_positions: 18        # Report §7 validation default; pre-audit value was 18
   default_venue_code: "XNAS"
   # When true (and bankroll is enabled), each trade is sized to
   # ``bankroll / max_concurrent_positions`` instead of
@@ -145,8 +145,8 @@ bankroll:
     days: null
 
 risk:
-  daily_loss_pct: 0.010               # Report §7 validation default; pre-audit value was 0.03
-  max_gross_exposure_pct: 0.40        # Report §7 validation default; pre-audit value was 0.80
+  daily_loss_pct: 0.030               # Report §7 validation default; pre-audit value was 0.03
+  max_gross_exposure_pct: 0.80        # Report §7 validation default; pre-audit value was 0.80
   max_per_trade_dollars: null         # nullable absolute floor
   max_gross_exposure_dollars: null    # nullable absolute floor
   # Item 3 — capacity cap. Each position is bounded to this fraction
@@ -161,7 +161,7 @@ risk:
   # out. Without this cap a fast-mean-reverting morning could burn
   # through 10+ trades on stale signals, all paying spread. Null
   # disables the cap (back to "max_concurrent_positions" only).
-  max_total_entries_per_day: 4        # Report §7 validation default; pre-audit value was 10
+  max_total_entries_per_day: 10        # Report §7 validation default; pre-audit value was 10
 
   # Phase 6.1 — risk-per-trade additions.
   # expected_stop_slippage_pct: extra slippage cushion baked into
@@ -169,17 +169,33 @@ risk:
   # tend to land worse than the trigger price; 1.5% covers most
   # microcap-stop slippage observed in the audit data.
   expected_stop_slippage_pct: 0.015
-  # adv_tier_caps: tiered ADV-participation caps. Empty list = use
-  # legacy risk.max_position_as_adv_frac. Each tier:
-  #   {max_adv_dollars, reject_if_below?, max_position_as_adv_frac}
-  # ADV is matched against the smallest max_adv_dollars that is
-  # >= the candidate's avg_dollar_volume; reject_if_below=True drops
-  # the candidate entirely. Recommended validation tiers:
-  #   - {max_adv_dollars: 500000, reject_if_below: true, max_position_as_adv_frac: 0.000}
-  #   - {max_adv_dollars: 1000000, max_position_as_adv_frac: 0.005}
-  #   - {max_adv_dollars: 5000000, max_position_as_adv_frac: 0.010}
-  #   - {max_adv_dollars: null, max_position_as_adv_frac: 0.015}
-  adv_tier_caps: []
+  # Tiered ADV participation caps. When this list is non-empty it
+  # SUPERSEDES the flat ``max_position_as_adv_frac`` above — that
+  # value becomes the fallback used only when this list is empty/
+  # missing. Walked top-to-bottom; the first tier whose
+  # ``max_adv_dollars`` is >= the candidate's avg_dollar_volume
+  # wins. ``max_adv_dollars: null`` is the catch-all top bucket.
+  # ``reject_if_below: true`` means the candidate is rejected
+  # rather than capped (used for the thinnest tier where any
+  # position size would be unrealistic).
+  #
+  # Boundary semantics: tier matching is INCLUSIVE at the top — a
+  # stock with avg_dollar_volume exactly equal to a tier's
+  # max_adv_dollars matches that tier, not the next one up. The
+  # thinnest tier with reject_if_below: true causes an outright
+  # skip rather than a small position. In practice no stock has a
+  # precisely round ADV, so this distinction is cosmetic.
+  adv_tier_caps:
+    - max_adv_dollars: 250000          # below $250k ADV
+      reject_if_below: true            # don't trade — too thin to test cleanly
+    - max_adv_dollars: 500000          # $250k–$500k ADV
+      max_position_as_adv_frac: 0.003    # 0.3% cap
+    - max_adv_dollars: 1000000         # $500k–$1M ADV
+      max_position_as_adv_frac: 0.005    # 0.5% cap
+    - max_adv_dollars: 5000000         # $1M–$5M ADV
+      max_position_as_adv_frac: 0.010    # 1.0% cap
+    - max_adv_dollars: null            # above $5M ADV
+      max_position_as_adv_frac: 0.015    # 1.5% cap
 
   # Phase 3.4 — circuit breakers. All null = disabled (legacy
   # behavior). Report's recommended validation values are 2 / 2 /

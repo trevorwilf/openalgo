@@ -32,9 +32,12 @@ def _cfg_with_tiers(tiers: list[dict]) -> dict:
 
 
 def test_adv_tier_cap_empty_returns_no_cap(strategy_module):
+    """Empty tier list + no flat fallback = ``(True, 0.0)``: allowed
+    with no cap. Updated for the ADV-tier-caps feature contract
+    (was: ``cap is None``)."""
     allowed, cap = strategy_module.adv_tier_cap(1_000_000.0, _cfg_with_tiers([]))
     assert allowed is True
-    assert cap is None
+    assert cap == 0.0
 
 
 def test_adv_tier_cap_reject_below(strategy_module):
@@ -100,10 +103,16 @@ def test_compute_risk_sized_qty_basic(strategy_module):
     """target_risk=200, entry=10, stop=0.08, slip=0.015 →
        loss_per_share = 10*(0.08+0.015) = 0.95
        qty = floor(200/0.95) = 210
+
+    Note: the ADV-tier-caps feature makes ``adv_tier_cap`` reject
+    candidates with missing ADV. Pass a permissive ADV here so the
+    ADV cap does not bind and the risk-based qty is the answer.
     """
     cfg = _risk_cfg()
     qty = strategy_module.compute_risk_sized_qty(
-        entry_price=10.0, stop_pct=0.08, avg_dollar_volume=None, cfg=cfg,
+        entry_price=10.0, stop_pct=0.08,
+        avg_dollar_volume=1_000_000_000.0,    # huge ADV, no binding cap
+        cfg=cfg,
     )
     assert qty == 210
 
@@ -113,7 +122,9 @@ def test_compute_risk_sized_qty_max_per_trade_dollars_caps(strategy_module):
     cfg = _risk_cfg()
     cfg["sizing"]["max_per_trade_dollars"] = 1000
     qty = strategy_module.compute_risk_sized_qty(
-        entry_price=10.0, stop_pct=0.08, avg_dollar_volume=None, cfg=cfg,
+        entry_price=10.0, stop_pct=0.08,
+        avg_dollar_volume=1_000_000_000.0,
+        cfg=cfg,
     )
     assert qty == 100
 
@@ -149,7 +160,9 @@ def test_compute_risk_sized_qty_min_order_notional_rejects(strategy_module):
     cfg["sizing"]["min_order_notional"] = 500
     # loss_per_share=0.95 → qty=floor(5/0.95)=5 → notional=50 < 500
     qty = strategy_module.compute_risk_sized_qty(
-        entry_price=10.0, stop_pct=0.08, avg_dollar_volume=None, cfg=cfg,
+        entry_price=10.0, stop_pct=0.08,
+        avg_dollar_volume=1_000_000_000.0,    # permissive ADV
+        cfg=cfg,
     )
     assert qty == 0
 

@@ -157,9 +157,17 @@ def test_select_entries_skips_entered_today(strategy_module, cfg_rescreen):
 
 def test_select_entries_respects_remaining_budget(strategy_module, cfg_rescreen):
     """The rescreen passes ``remaining_entries_budget`` so the slate is
-    capped against the daily total-entry budget."""
+    capped against the daily total-entry budget.
+
+    Note: the ADV-tier-caps feature rejects candidates without an
+    ``avg_dollar_volume`` feature; this test stamps a permissive ADV
+    onto each candidate so the budget cap is the binding gate."""
     state = strategy_module.blank_state()
-    cands = [strategy_module.Candidate(f"T{i}", 10.0, 9.0 - i * 0.1) for i in range(5)]
+    _adv = {"avg_dollar_volume": 1_000_000_000.0}
+    cands = [
+        strategy_module.Candidate(f"T{i}", 10.0, 9.0 - i * 0.1, features=dict(_adv))
+        for i in range(5)
+    ]
     selected = strategy_module.select_entries(
         cands, state, equity=100_000.0, latest_prices={},
         cfg=cfg_rescreen, kill_state=strategy_module.KillLevel.NONE,
