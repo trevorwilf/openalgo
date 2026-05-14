@@ -43,6 +43,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
     fonts-liberation && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 0a – supercronic. Cron daemon designed for containers (single Go
+#      binary, logs to stdout, handles SIGTERM cleanly). Used by the
+#      bowaka-prefilter service in docker-compose.bowaka.yml to fire
+#      run_bowaka_prefilter.sh at the scheduled times. Harmless for
+#      the openalgo / bowaka-strategy services that don't invoke it.
+#      Pinned to v0.2.29 (April 2024). Multi-arch via TARGETARCH so
+#      this image still builds on arm64 hosts (e.g., Graviton, Apple
+#      Silicon); falls back to amd64 if TARGETARCH isn't set.
+ARG TARGETARCH
+RUN set -eux; \
+    arch="${TARGETARCH:-amd64}"; \
+    case "$arch" in \
+        amd64) supercronic_arch=amd64 ;; \
+        arm64) supercronic_arch=arm64 ;; \
+        *) echo "supercronic install: unsupported arch '$arch'" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /usr/local/bin/supercronic \
+        "https://github.com/aptible/supercronic/releases/download/v0.2.29/supercronic-linux-${supercronic_arch}"; \
+    chmod +x /usr/local/bin/supercronic
+
 # 1 – user & workdir
 RUN useradd --create-home appuser
 WORKDIR /app

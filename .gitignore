@@ -133,12 +133,13 @@ strategies/scripts/*
 !strategies/scripts/_watchdog_openalgo.cmd
 !strategies/scripts/BowakaPrefilter.xml
 !strategies/scripts/install_bowaka_task.cmd
-# Linux launchers (.sh / cron)
+# Linux launchers (.sh / cron / supercronic)
 !strategies/scripts/run_bowaka_prefilter.sh
 !strategies/scripts/_run_bowaka_strategy_oneshot.sh
 !strategies/scripts/_watchdog_bowaka_strategy.sh
 !strategies/scripts/_watchdog_openalgo.sh
 !strategies/scripts/bowaka_prefilter.cron
+!strategies/scripts/prefilter.supercronic
 !strategies/scripts/install_bowaka_cron.sh
 strategies/scripts/data/state.json
 strategies/scripts/data/state.json.tmp
