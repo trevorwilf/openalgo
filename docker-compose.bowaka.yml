@@ -1,0 +1,139 @@
+# ============================================================
+# docker-compose.bowaka.yml
+#
+# Production Linux deploy for the bowaka strategy + prefilter.
+# Compose includes the openalgo Flask runtime + two bowaka
+# services that share the same image (single Dockerfile build,
+# three roles).
+#
+# Usage:
+#   1. Copy .env.example -> .env (at repo root) and fill in the
+#      required secrets. Minimum required keys:
+#         APP_KEY                — secrets.token_hex(32)
+#         API_KEY_PEPPER         — secrets.token_hex(32)
+#         BROKER_API_KEY         — your Alpaca paper/live key id
+#         BROKER_API_SECRET      — your Alpaca paper/live secret
+#         OPENALGO_API_KEY       — generated at the /apikey page
+#                                  AFTER first openalgo boot
+#         ALPACA_API_KEY_ID      — (optional; defaults to BROKER_API_KEY)
+#         ALPACA_API_SECRET_KEY  — (optional; defaults to BROKER_API_SECRET)
+#   2. First-time boot — bring openalgo up alone so you can log
+#      in via the UI and generate OPENALGO_API_KEY:
+#         docker compose -f docker-compose.bowaka.yml up -d openalgo
+#         # ...visit http://localhost:5000/apikey, copy the key
+#         # ...write it into .env as OPENALGO_API_KEY=<value>
+#   3. Bring up bowaka + prefilter:
+#         docker compose -f docker-compose.bowaka.yml up -d
+#   4. Verify:
+#         docker compose -f docker-compose.bowaka.yml ps
+#         docker compose -f docker-compose.bowaka.yml logs -f bowaka-strategy
+#         docker compose -f docker-compose.bowaka.yml logs -f bowaka-prefilter
+#
+# Why three services share one image:
+#   - The existing Dockerfile already installs everything bowaka
+#     needs (uv, alpaca-py, pandas, pandas_market_calendars, httpx,
+#     supercronic). Three smaller images would be wasteful.
+#   - Each service's `command:` selects its role at runtime.
+#   - The `bowaka-state` named volume is mounted into BOTH bowaka
+#     services so the prefilter's candidate file lands where the
+#     strategy reads it (both at /app/strategies/scripts/data).
+# ============================================================
+
+services:
+  openalgo:
+    build: .
+    image: openalgo:latest
+    restart: unless-stopped
+    environment:
+      # ``:?msg`` shorthand: compose refuses to start if APP_KEY is
+      # unset / empty, with the message after the ``?``. Generate the
+      # two secrets with: python -c "import secrets;print(secrets.token_hex(32))"
+      APP_KEY: "${APP_KEY:?APP_KEY required (secrets.token_hex(32))}"
+      API_KEY_PEPPER: "${API_KEY_PEPPER:?API_KEY_PEPPER required (secrets.token_hex(32))}"
+      BROKER_API_KEY: "${BROKER_API_KEY}"
+      BROKER_API_SECRET: "${BROKER_API_SECRET}"
+      BROKER_API_KEY_MARKET: ${BROKER_API_KEY_MARKET:-}
+      BROKER_API_SECRET_MARKET: ${BROKER_API_SECRET_MARKET:-}
+      HOST_SERVER: ${HOST_SERVER:-http://127.0.0.1:5000}
+      REDIRECT_URL: ${REDIRECT_URL:-http://127.0.0.1:5000/callback}
+      VALID_BROKERS: ${VALID_BROKERS:-alpaca}
+      DATABASE_URL: sqlite:////app/db/openalgo.db
+      FLASK_DEBUG: "False"
+      TZ: UTC
+    volumes:
+      - openalgo-db:/app/db
+      - openalgo-log:/app/log
+      - openalgo-keys:/app/keys
+    ports:
+      - "${OPENALGO_PORT:-5000}:5000"
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://127.0.0.1:5000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+
+  bowaka-strategy:
+    build: .
+    image: openalgo:latest
+    restart: unless-stopped
+    depends_on:
+      openalgo:
+        condition: service_healthy
+    environment:
+      OPENALGO_API_KEY: "${OPENALGO_API_KEY:?OPENALGO_API_KEY required (generate at openalgo /apikey first)}"
+      HOST_SERVER: http://openalgo:5000
+      OPENALGO_STRATEGY_EXCHANGE: CRYPTO
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
+      TZ: UTC
+    volumes:
+      - bowaka-state:/app/strategies/scripts/data
+      - bowaka-log:/app/strategies/scripts/logs
+    # The strategy daemon. SIGTERM handled by bowaka_strategy.py's
+    # signal handler — flushes ledger + state.json then exits.
+    # stop_grace_period > the strategy's loop_interval (5s) so the
+    # in-flight tick gets to drain.
+    command: >
+      uv run python strategies/scripts/bowaka_strategy.py
+      --config strategies/scripts/bowaka_strategy.yaml
+    stop_grace_period: 30s
+
+  bowaka-prefilter:
+    build: .
+    image: openalgo:latest
+    restart: unless-stopped
+    environment:
+      # Alpaca data plane. The prefilter's run_bowaka_prefilter.sh
+      # accepts env vars OR falls back to the .env file. In a Docker
+      # context we provide env vars directly and skip the .env file
+      # (no .env mount; cleaner secret handling via container env).
+      ALPACA_API_KEY_ID: ${ALPACA_API_KEY_ID:-${BROKER_API_KEY}}
+      ALPACA_API_SECRET_KEY: ${ALPACA_API_SECRET_KEY:-${BROKER_API_SECRET}}
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
+      # Container TZ stays UTC — the cron schedule's per-line TZ=
+      # prefix in prefilter.supercronic anchors each fire-time to
+      # America/Denver.
+      TZ: UTC
+    volumes:
+      - bowaka-state:/app/strategies/scripts/data
+      - bowaka-log:/app/strategies/scripts/logs
+    # supercronic reads prefilter.supercronic and fires
+    # run_bowaka_prefilter.sh on the schedule. Stays in foreground
+    # so the container's restart policy actually means something.
+    command: ["/usr/local/bin/supercronic", "/app/strategies/scripts/prefilter.supercronic"]
+    stop_grace_period: 30s
+
+volumes:
+  openalgo-db:
+    name: openalgo-db
+  openalgo-log:
+    name: openalgo-log
+  openalgo-keys:
+    name: openalgo-keys
+  bowaka-state:
+    name: bowaka-state
+  bowaka-log:
+    name: bowaka-log

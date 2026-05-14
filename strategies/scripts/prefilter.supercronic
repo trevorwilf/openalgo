@@ -1,0 +1,21 @@
+# ============================================================
+# prefilter.supercronic — schedule consumed by supercronic
+#  (https://github.com/aptible/supercronic) inside the
+#  bowaka-prefilter Docker container.
+#
+# Format is standard cron-5 (no user field, since supercronic
+# runs as the container's USER directly). Per-line ``TZ=`` is
+# a supercronic extension that lets each schedule resolve in
+# America/Denver regardless of the container's TZ env (which
+# the openalgo Dockerfile pins to UTC).
+#
+# 02:00 MT trigger with hourly retries through 06:00 MT
+# (5 attempts total = 4-hour recovery window). The
+# ``run_bowaka_prefilter.sh`` script is idempotent: a retry
+# is a no-op when network was healthy on the first attempt
+# because the prefilter only overwrites the candidate file
+# when bars fetch successfully. When the network is broken
+# at 02:00 (today's actual failure mode), supercronic fires
+# again at 03:00 / 04:00 / 05:00 / 06:00 — first success wins.
+# ============================================================
+TZ=America/Denver 0 2,3,4,5,6 * * 1-5  /app/strategies/scripts/run_bowaka_prefilter.sh

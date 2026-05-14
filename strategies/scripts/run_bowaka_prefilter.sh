@@ -47,10 +47,6 @@ if [ -z "${PYTHON_EXE:-}" ]; then
 fi
 
 # === Sanity checks ===
-if [ ! -f "$ENV_FILE" ]; then
-    echo "ERROR: .env not found at $ENV_FILE" 1>&2
-    exit 11
-fi
 if [ ! -x "$PYTHON_EXE" ]; then
     echo "ERROR: python not found at $PYTHON_EXE" 1>&2
     echo "       Run \`uv sync\` from $OPENALGO_ROOT to create the venv," 1>&2
@@ -62,13 +58,16 @@ if [ ! -f "$BOWAKA_DIR/bowaka_prefilter.py" ]; then
     exit 11
 fi
 
-# === Parse .env for Alpaca credentials ===
-# Fallback cascade matches run_bowaka_prefilter.bat: try the
-# most-specific key first, fall back through legacy aliases.
-# Each grep returns the value AFTER `=` for a top-level KEY=VAL
-# line (commented lines and indented assignments are ignored).
+# === Resolve Alpaca credentials ===
+# Priority order:
+#   1. Env vars already set in the current shell (Docker/k8s pattern)
+#   2. Parse the .env file with a fallback cascade through legacy alias
+#      keys (bare-metal / cron pattern)
+# Either source is acceptable; we only require the .env file when env
+# vars are missing.
 extract_env_value() {
     local key="$1"
+    [ -f "$ENV_FILE" ] || { echo ""; return 0; }
     # Match lines starting with optional whitespace, the key, optional
     # whitespace, =, optional whitespace, optional matching quotes,
     # then capture the rest. Strip trailing whitespace + matching quote.
@@ -87,18 +86,20 @@ ALPACA_API_SECRET_KEY="${ALPACA_API_SECRET_KEY:-$(extract_env_value ALPACA_API_S
 [ -n "$ALPACA_API_SECRET_KEY" ] || ALPACA_API_SECRET_KEY="$(extract_env_value BROKER_API_SECRET)"
 
 if [ -z "$ALPACA_API_KEY_ID" ]; then
-    echo "ERROR: No Alpaca API key found in $ENV_FILE" 1>&2
-    echo "Looked for: ALPACA_API_KEY_ID, ALPACA_API_KEY, BROKER_API_KEY" 1>&2
+    echo "ERROR: No Alpaca API key in env or $ENV_FILE" 1>&2
+    echo "Set ALPACA_API_KEY_ID in env (Docker/k8s), or in .env under one of:" 1>&2
+    echo "  ALPACA_API_KEY_ID, ALPACA_API_KEY, BROKER_API_KEY" 1>&2
     exit 12
 fi
 if [ -z "$ALPACA_API_SECRET_KEY" ]; then
-    echo "ERROR: No Alpaca API secret found in $ENV_FILE" 1>&2
-    echo "Looked for: ALPACA_API_SECRET_KEY, ALPACA_API_SECRET, BROKER_API_SECRET" 1>&2
+    echo "ERROR: No Alpaca API secret in env or $ENV_FILE" 1>&2
+    echo "Set ALPACA_API_SECRET_KEY in env (Docker/k8s), or in .env under one of:" 1>&2
+    echo "  ALPACA_API_SECRET_KEY, ALPACA_API_SECRET, BROKER_API_SECRET" 1>&2
     exit 13
 fi
 
 # Mask key for logging — show first 4 chars only
-echo "Loaded Alpaca credentials from .env (key starts with ${ALPACA_API_KEY_ID:0:4}...)"
+echo "Loaded Alpaca credentials (key starts with ${ALPACA_API_KEY_ID:0:4}...)"
 
 # === Run ===
 # Force UTF-8 on stdout so log messages with non-ASCII characters

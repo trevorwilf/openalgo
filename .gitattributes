@@ -10,6 +10,19 @@
 *.bash       text eol=lf
 *.cron       text eol=lf
 *.cfg        text eol=lf
+*.supercronic text eol=lf
+
+# Docker-related text MUST be LF. Linux Docker reads these files from the
+# build context; CRLF in a Dockerfile RUN line or compose YAML
+# environment value can hide as a literal carriage return in a string
+# and break the container at runtime (most visibly: shell scripts that
+# get embedded as compose ``command:`` strings).
+Dockerfile        text eol=lf
+Dockerfile.*      text eol=lf
+*.dockerfile      text eol=lf
+docker-compose*.yml text eol=lf
+*.yml             text eol=lf
+*.yaml            text eol=lf
 
 # Force CRLF on Windows-only batch scripts. cmd.exe is tolerant either way,
 # but the repo convention should match what the OS actually emits.

@@ -379,3 +379,76 @@ Atomic write: `state.json.tmp` → fsync → rename. The orphan `.tmp` is harmle
 - **YAML bankroll change has no effect** — the bankroll persists across restarts. Change `cfg.bankroll.reset_token` to a new string to force a re-seed, then restart.
 - **Rescreen never fires after closures** — check that `cfg.entry.post_closure_rescreen.enabled` is `true`, you're inside the entry window (before `last_entry_time` ET), `state.daily_entries_count` is under `cfg.risk.max_total_entries_per_day`, and no kill switch is active. Each gate logs the rejection reason.
 - **Per-trade sizes look wrong (too big / too small)** — check `state.bankroll.current_dollars`, `cfg.sizing.equal_slice_per_position`, and `cfg.sizing.equal_slice_bankroll_fraction` (or its auto-coupled value `cfg.risk.max_gross_exposure_pct`). The startup log line `Loaded N candidates ... sizing_basis=X.XX, gross_basis=Y.YY` confirms both.
+
+## Deploy modes
+
+Bowaka runs identically on Windows, bare-metal Linux/macOS, and Linux Docker. Pick the launcher set that matches your environment:
+
+### Windows (interactive / Task Scheduler)
+
+| Workload | Wrapper | Notes |
+|---|---|---|
+| Run prefilter once | `strategies/scripts/run_bowaka_prefilter.bat` | Parses `.env` for Alpaca creds |
+| Run strategy once | `strategies/scripts/_run_bowaka_strategy_oneshot.cmd` *(local, not in repo)* | Hardcodes `OPENALGO_API_KEY` for convenience |
+| Strategy watchdog (auto-restart) | `strategies/scripts/_watchdog_bowaka_strategy.cmd` | Requires `OPENALGO_API_KEY` in env |
+| OpenAlgo watchdog (auto-restart) | `strategies/scripts/_watchdog_openalgo.cmd` | Wraps `uv run app.py` |
+| Scheduled prefilter | `strategies/scripts/BowakaPrefilter.xml` | 02:00 MT Mon–Fri, retry every 15 min × 16 attempts (4-hour recovery) |
+| Install Task Scheduler entry | `strategies/scripts/install_bowaka_task.cmd` | Right-click → Run as administrator |
+
+### Bare-metal Linux / macOS / WSL / Git Bash
+
+| Workload | Wrapper | Notes |
+|---|---|---|
+| Run prefilter once | `strategies/scripts/run_bowaka_prefilter.sh` | Reads Alpaca creds from env or `.env` (env wins) |
+| Run strategy once | `strategies/scripts/_run_bowaka_strategy_oneshot.sh` | No hardcoded secrets; requires `OPENALGO_API_KEY` env |
+| Strategy watchdog (auto-restart) | `strategies/scripts/_watchdog_bowaka_strategy.sh` | Forwards SIGTERM/SIGINT to the child process |
+| OpenAlgo watchdog (auto-restart) | `strategies/scripts/_watchdog_openalgo.sh` | Wraps `uv run app.py` by default; set `OPENALGO_CMD` for gunicorn in prod |
+| Scheduled prefilter | `strategies/scripts/bowaka_prefilter.cron` | 02:00 MT Mon–Fri with hourly retries through 06:00 MT |
+| Install cron entry | `sudo strategies/scripts/install_bowaka_cron.sh` | Installs `/etc/cron.d/bowaka_prefilter` |
+
+The `.sh` wrappers auto-detect the venv's python (Linux/macOS uses `.venv/bin/python`; Windows uses `.venv/Scripts/python.exe`) so the same script works under bare-metal Linux, Linux Docker, AND Git Bash / WSL on a Windows dev machine.
+
+### Linux Docker (production)
+
+The repo ships a `docker-compose.bowaka.yml` overlay that brings up three services from the same image:
+
+| Service | Role | Image |
+|---|---|---|
+| `openalgo` | Flask runtime | `openalgo:latest` (built from root `Dockerfile`) |
+| `bowaka-strategy` | Strategy daemon | Same image, different `command:` |
+| `bowaka-prefilter` | Scheduled prefilter via `supercronic` | Same image, runs `prefilter.supercronic` |
+
+First-time setup:
+
+```bash
+# 1. Generate APP_KEY + API_KEY_PEPPER and put them (plus your broker
+#    creds) in .env at the repo root.
+python -c "import secrets;print('APP_KEY='+secrets.token_hex(32))"
+python -c "import secrets;print('API_KEY_PEPPER='+secrets.token_hex(32))"
+
+# 2. Boot openalgo alone first.
+docker compose -f docker-compose.bowaka.yml up -d openalgo
+
+# 3. Open http://localhost:5000/apikey, generate the OpenAlgo API key,
+#    then add OPENALGO_API_KEY=<value> to .env.
+
+# 4. Bring up the bowaka services.
+docker compose -f docker-compose.bowaka.yml up -d
+
+# 5. Verify.
+docker compose -f docker-compose.bowaka.yml ps
+docker compose -f docker-compose.bowaka.yml logs -f bowaka-strategy
+docker compose -f docker-compose.bowaka.yml logs -f bowaka-prefilter
+```
+
+Notable design choices in the compose file:
+
+- **Single image, three roles.** The Dockerfile installs everything all three need (`uv`, `alpaca-py`, `pandas`, `pandas_market_calendars`, `httpx`, `supercronic`). Each service overrides `command:` to select its role. Smaller total image footprint than three separate images.
+- **Shared `bowaka-state` named volume.** Both `bowaka-strategy` and `bowaka-prefilter` mount `bowaka-state` at `/app/strategies/scripts/data` so the prefilter's freshly-written `in_play_candidates.json` is visible to the strategy on its next tick. State (`state.json`, `trade_ledger.jsonl`, `daily_summary.jsonl`, per-trade jsonls) lives there too.
+- **`healthcheck:` on `openalgo` + `depends_on: condition: service_healthy` on `bowaka-strategy`.** Bowaka waits until OpenAlgo is responding on `/` before it tries its first `/api/v2/balances` call.
+- **`stop_grace_period: 30s`** on the strategy service. Bowaka's main loop ticks every 5s and writes state on each tick; 30s gives a SIGTERM enough headroom to flush the ledger and exit cleanly before Docker SIGKILLs it.
+- **`supercronic` instead of system cron** in the prefilter container. Single Go binary, logs cron output to the container's stdout (so `docker compose logs bowaka-prefilter` shows the prefilter's actual output), handles signals correctly, no PID 1 / init issues. The schedule (`prefilter.supercronic`) uses a per-line `TZ=America/Denver` prefix so the cron times resolve against MT regardless of the container's `TZ=UTC` env.
+- **No `.env` file inside the container.** The Dockerfile creates an empty `/app/.env` for OpenAlgo's Railway-pattern auto-generation. Bowaka's wrappers read secrets directly from container env vars (the prefilter `.sh` accepts env-first, falls back to `.env` only when env is unset). Cleaner for Docker secrets / k8s secret-as-env-var.
+- **No hardcoded `OPENALGO_API_KEY`.** Required in `.env` (or as a Docker secret) — compose uses the `:?error message` shorthand so the stack refuses to start with a clear error rather than running with an empty key.
+
+For Kubernetes the same image works as a `Deployment` + a `CronJob` for the prefilter — replace supercronic with k8s's native CronJob and you get retry semantics for free.
