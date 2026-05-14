@@ -1,0 +1,32 @@
+# Default: let Git auto-detect text vs binary, but normalize text to LF
+# in the repo. Windows checkouts get CRLF on text files (via core.autocrlf),
+# but the canonical repo content stays LF. Critical for shell / cron / Linux
+# entrypoint scripts that fail-to-execute when committed with CRLF.
+* text=auto
+
+# Force LF on every flavor of shell-executed text. CRLF on a .sh file in
+# Linux/Docker produces ``/usr/bin/env: 'bash\r': No such file or directory``.
+*.sh         text eol=lf
+*.bash       text eol=lf
+*.cron       text eol=lf
+*.cfg        text eol=lf
+
+# Force CRLF on Windows-only batch scripts. cmd.exe is tolerant either way,
+# but the repo convention should match what the OS actually emits.
+*.bat        text eol=crlf
+*.cmd        text eol=crlf
+
+# Task Scheduler XMLs are UTF-16-LE with BOM (Windows schtasks emits and
+# expects exactly this encoding). Treat them as binary so Git neither
+# normalizes EOLs nor mangles the BOM.
+strategies/scripts/BowakaPrefilter.xml  binary
+*.task.xml                              binary
+
+# Mark known-binary so Git doesn't try to diff or normalize them.
+*.db         binary
+*.duckdb     binary
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.pdf        binary
+*.parquet    binary

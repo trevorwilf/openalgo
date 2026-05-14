@@ -1,0 +1,42 @@
+# ============================================================
+# bowaka_prefilter.cron — Linux equivalent of BowakaPrefilter.xml
+#
+# Fires at 2:00 AM Mountain Time on weekdays (well before the
+# 09:30 ET NYSE open). On failure, retries hourly at 03:00, 04:00,
+# 05:00, and 06:00 MT — total 5 attempts spanning a ~4-hour
+# recovery window. The retry runs are short-circuited (cheaply)
+# if a fresh candidate file is already present for today's
+# session_date (the prefilter overwrites only on success, so the
+# guard checks the JSON's as_of_date).
+#
+# To install:
+#   1. Edit ``CRON_TZ``, ``OPENALGO_ROOT``, and ``BOWAKA_USER`` if
+#      your project lives elsewhere or runs under a different user.
+#   2. Copy or symlink this file to /etc/cron.d/bowaka_prefilter
+#      (system-wide) — Linux ignores user-mode cron files outside
+#      that path.
+#   3. ``sudo chmod 0644 /etc/cron.d/bowaka_prefilter`` (cron
+#      refuses world-writable files).
+#   4. ``sudo systemctl reload cron`` (or restart, depending on
+#      distro). On macOS use ``crontab -e`` from the user shell
+#      instead — /etc/cron.d/ is Linux-only.
+#
+# For Docker / Kubernetes, use ``supercronic`` or a CronJob
+# manifest instead — /etc/cron.d/ is not in scope for containers.
+# ============================================================
+
+# All times below resolved against this zone (not the system TZ).
+# Standard IANA names: America/Denver = US Mountain (DST aware).
+CRON_TZ=America/Denver
+
+# Adjust to your install + user. The bash wrapper resolves all
+# other paths from $OPENALGO_ROOT.
+OPENALGO_ROOT=/opt/openalgo
+BOWAKA_USER=openalgo
+
+# Bowaka prefilter — 02:00 MT Mon-Fri, with retries at 03, 04, 05, 06 MT.
+# The wrapper exits 0 on success (overwrites in_play_candidates.json with
+# today's as_of_date) or non-zero on failure (does NOT overwrite). The
+# ``flock -n`` guard prevents overlapping runs if a retry starts before
+# the previous one finishes.
+0 2,3,4,5,6 * * 1-5  ${BOWAKA_USER}  /usr/bin/flock -n /tmp/bowaka_prefilter.lock ${OPENALGO_ROOT}/strategies/scripts/run_bowaka_prefilter.sh >> ${OPENALGO_ROOT}/strategies/scripts/logs/bowaka_prefilter_cron.log 2>&1

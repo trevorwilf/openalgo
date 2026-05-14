@@ -4,7 +4,10 @@ REM run_bowaka_prefilter.bat
 REM
 REM Reads Alpaca credentials from OpenAlgo's .env file and runs
 REM the Bowaka prefilter. Invoked by the BowakaPrefilter
-REM scheduled task at 3:00 PM Mountain Time on weekdays.
+REM scheduled task at 2:00 AM Mountain Time on weekdays (well
+REM before the 09:30 ET NYSE open). On failure the task retries
+REM every 15 minutes for up to 16 attempts = 4-hour recovery
+REM window — see strategies/scripts/BowakaPrefilter.xml.
 REM
 REM Expected .env keys (priority order, first match wins):
 REM     ALPACA_API_KEY_ID      / ALPACA_API_SECRET_KEY
