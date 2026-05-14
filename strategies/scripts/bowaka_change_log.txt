@@ -1,0 +1,615 @@
+Bowaka — Strategy Change Log
+============================
+
+Purpose
+-------
+This file is the human-readable timeline of Bowaka strategy / prefilter /
+analysis edits. When a trade or daily summary looks anomalous, cross-
+reference its session date here to understand what code and config were
+active on that day. Entries are oldest first.
+
+All times are local (-0600). Each entry is: ISO timestamp | short SHA
+| subject | trading-behavior context.
+
+Files in scope:
+  strategies/scripts/bowaka_strategy.py
+  strategies/scripts/bowaka_strategy.yaml
+  strategies/scripts/bowaka_prefilter.py
+  strategies/scripts/bowaka_prefilter.yaml
+  strategies/scripts/bowaka_analysis.py
+  strategies/scripts/bowaka_strategy_README.md
+  tests/strategies/test_bowaka_*.py
+
+To extend: run
+  git log --reverse --date=iso --pretty=format:"%ad|%h|%s" --all -i --grep=bowaka
+and append any new entries with a one-line behavior summary.
+
+
+================================================================
+2026-05-05 — Initial build (Phases 1–4)
+================================================================
+
+2026-05-05 23:25:38 | 563f04a3 | Phase 1: bowaka strategy skeleton
+  - First commit. CLI bootstrap, config loader, logging, state I/O,
+    NYSE session window check, kill-switch detection (KILL_NEW.flag /
+    KILL_SOFT.flag / KILL_HARD.flag), no-op main loop. No orders fire.
+  - Behavior: any trade attributed to bowaka on or before this date is
+    impossible — the daemon was a stub.
+
+2026-05-05 23:32:56 | 028621a5 | Phase 2: candidates + entry pipeline
+  - Adds load_candidates (reads prefilter JSON, validates as_of_date
+    and config_hash), select_entries (signal-strength sorted slate,
+    bounded by max_concurrent_positions and gross-exposure cap),
+    submit_otoco (OTOCO bracket via /api/v2/orders/combo at prior
+    close × (1±target_pct/stop_pct)), halt_skip enforcement.
+  - Behavior: first day live order flow could fire. Bracket prices
+    derive from candidate.close (yesterday's close) — gappy opens
+    can produce target BELOW fill.
+
+2026-05-05 23:40:16 | 2bebdddb | Phase 3: time-stop, signal-fade, closures
+  - Adds run_time_stop_pass (force-close at max_hold_days trading
+    days), run_signal_fade_pass at 16:05 ET (recompute features on
+    today's bar, MOO sell when gate fails), close_position (realized
+    PnL + JSONL closure record).
+  - Behavior: positions now have a max hold window. Trades exiting
+    at 16:05 ET as "signal_fade" started here.
+
+2026-05-05 23:46:15 | f24dc798 | Phase 4: risk gates, reconcile, L2/L3 kill, summary
+  - Adds daily_pnl_baseline equity tracking + daily_loss_pct trip,
+    reconcile_at_startup, execute_kill_l2 (cancel + flatten all) and
+    execute_kill_l3 (best-effort + exit 99), write_session_summary at
+    15:55 ET. fetch_equity / fetch_cash / fetch_positions plumbed.
+  - Behavior: first day the daily-loss circuit breaker can fire and
+    halt new entries. Restart-after-crash reconciliation begins.
+
+
+================================================================
+2026-05-06 — Hardening day (8 fixes + 2 features)
+================================================================
+
+2026-05-06 11:34:01 | add25188 | fix(bowaka): prefilter bat + env-handling + Unicode logging
+  - Windows .bat wrapper for the prefilter; env handling for
+    ALPACA_API_KEY_ID / ALPACA_API_SECRET_KEY; ASCII-safe log lines
+    on Windows console (cp1252 codepage couldn't print "—" cleanly).
+  - Behavior: no order-flow change. Operator-side reliability.
+
+2026-05-06 20:52:24 | 0bf2f626 | fix(bowaka): L2 keeps pending state on cancel failure
+  - L2 kill no longer drops a pending position from state when the
+    broker cancel fails. Position is kept with status="cancel_failed"
+    + cancel_failures list so the next reconcile surfaces it.
+  - Behavior: closes a small window where a live broker order could
+    be stranded with no local tracking after a partial L2 kill.
+
+2026-05-06 20:59:15 | 4d9c033c | fix(bowaka): per-candidate venue_code routing
+  - Drops the XNAS hardcode. Every candidate now carries its own
+    venue_code (XNAS / XNYS / ARCX / BATS) derived from the Alpaca
+    listing exchange. /api/v2 instrument resolution gets the right
+    MIC, so non-NASDAQ tickers stop 422-failing on submit.
+  - Behavior: from this commit, NYSE / AMEX / ARCA names can be
+    traded. Before: silently dropped at order time.
+
+2026-05-06 21:01:36 | d39f5839 | feat(bowaka): ADV-fraction position-size cap
+  - Adds risk.max_position_as_adv_frac: 0.03 — caps each position at
+    3% of the candidate's avg_dollar_volume. Stops a $1M account at
+    10% per-trade from putting $100k into a $250k-ADV name.
+  - Behavior: positions in low-liquidity names get smaller starting
+    this date. A LARGE position in a microcap from this date forward
+    was either an operator-disabled cap or a much larger ADV than the
+    candidate file reflected.
+
+2026-05-06 21:13:58 | 1ed282ed | feat(bowaka): bracket prices off actual fill
+  - New default: cfg.entry.bracket_pricing_mode="actual_fill". Submit
+    the parent MARKET BUY first, wait for filled_avg_price, THEN
+    attach the OCO bracket. The legacy mode ("candidate_close",
+    yesterday's close) is preserved for backtest parity only.
+  - Behavior: post-this-date target/stop levels are derived from the
+    REAL fill price, not yesterday's close. Gappy opens stop
+    producing immediate-target / target-below-fill rejections.
+
+2026-05-06 21:15:34 | 697431d2 | fix(bowaka): don't lock the day's entry pass on candidate load failure
+  - Item-5 fix. Candidate validation now runs BEFORE
+    reset_for_new_session writes today's session_date. A morning
+    glitch (NFS lag, Alpaca data not ready) no longer permanently
+    locks the day's entry pass — next tick retries.
+  - Behavior: from this date a 9:30 AM data hiccup defers, doesn't
+    skip, the entry pass.
+
+2026-05-06 21:17:22 | a6c3110f | fix(bowaka): reconcile_at_startup walks broker even when state is empty
+  - Item-6 fix. Even with an empty local state.json, the reconciler
+    still fetches broker positions so an untracked position (e.g.,
+    operator moved state.json, redeployed) surfaces as "untracked".
+  - Behavior: from this date, post-deployment startups produce loud
+    warnings instead of silently ignoring live broker positions.
+
+2026-05-06 21:19:07 | 089cd28b | fix(bowaka): validate sell HTTP status before marking position 'exiting'
+  - Item-7 fix. trigger_time_stop now reads the market-sell HTTP
+    status; non-200 responses leave the position in status="filled"
+    so the next pass retries. Previously a 4xx/5xx silently set
+    status="exiting" with a blank exit_order_id, stranding the
+    position forever.
+  - Behavior: prior to this date, a single time-stop submission
+    failure could orphan a filled position. Post: retries until
+    success or operator intervention.
+
+2026-05-06 21:26:23 | f46c2bf5 | fix(bowaka): QoL bundle
+  - Item-8 bundle (5 fixes):
+    * L3 also cancels pending parent / child orders (was only
+      iterating filled positions — asymmetric with L2).
+    * poll_fills uses canonical-or-native FILLED check for target /
+      stop children (was missing fills from translators that only
+      populate canonical_status).
+    * write_session_summary count_opened walks the "opened" jsonl
+      records instead of len(open_positions) — intraday round-trips
+      now count, carryover positions don't.
+    * prefilter as_of_date now derives from the latest bar timestamp
+      (was the wall-clock run date — would mark holiday-run files as
+      "fresh" when bars were from yesterday).
+    * Cross-check signal_gates + indicators between strategy and
+      prefilter YAMLs at startup; HandshakeMismatch on drift.
+  - Behavior: from this date, count_opened is reliable; signal-fade
+    can't use thresholds the prefilter never applied; stale
+    candidate files raise loud errors instead of silently trading
+    yesterday's signals.
+
+2026-05-06 21:32:19 | 0e8a56aa | feat(bowaka): SIP feed + opt-in intraday confirmation gate
+  - Adds cfg.entry.intraday_confirmation block: live-quote gate at
+    +5 min after open with max_spread_pct=2%, max_quote_age=60s,
+    price_band [-15%, +30%] vs candidate.close. Prefilter feed
+    switches to "sip" (was IEX).
+  - Behavior: starting this date the entry pass refuses to fire on
+    stale or wide-spread quotes, and rescreens use a tighter band.
+
+2026-05-06 21:50:30 | 139209d6 | fix(bowaka): revert prefilter feed to IEX
+  - SIP rejected by the Alpaca free paper subscription
+    ("subscription does not permit querying recent SIP data").
+    Reverts feed to "iex" with a comment explaining the SIP upgrade
+    path.
+  - Behavior: from 21:32 to 21:50 on 2026-05-06 the prefilter would
+    have failed every batch. Reverted before any production run.
+    RVOL / range_expansion / avg_dollar_volume are computed on the
+    IEX partial tape until the SIP subscription lands.
+
+2026-05-06 21:52:41 | b9f3532f | feat(bowaka): watchdog wrappers
+  - PowerShell + .bat wrappers that restart the strategy on crash,
+    capture stdout/stderr, and respect the kill flags.
+  - Behavior: no order-flow change. Reliability win for unattended
+    all-day operation.
+
+
+================================================================
+2026-05-07 — Analytic logging + OCO carryover
+================================================================
+
+2026-05-07 17:20:47 | fc989ceb | feat(bowaka): analytic logging — why / how / end
+  - Per-position state gains signal_strength, candidate_close,
+    target_pct, stop_pct, target_price, stop_price, bracket_pricing_
+    mode, equity_at_entry, peak_since_entry, trough_since_entry.
+    daily_summary closure records gain hold_trading_days,
+    entry_to_exit_pct, mfe_dollar / mae_dollar / mfe_pct / mae_pct.
+  - Behavior: order flow unchanged. From this date forward, every
+    closure record carries enough context to bucket trades by
+    signal regime, gap-at-open, hold-duration etc.
+
+2026-05-07 17:37:04 | 2046936f | fix(bowaka): re-bracket actual_fill positions whose OCO expired
+  - Reconcile-at-startup now clears child_order_ids for
+    actual_fill-mode positions whose OCO children went terminal
+    (canceled / expired / replaced / done_for_day) between
+    sessions. submit_pending_oco_children re-attaches a fresh
+    bracket on the next tick. Also fixes the OCO id parser to
+    fall back to the response's top-level id for the take-profit
+    leg when the LIMIT leg isn't surfaced explicitly.
+  - Behavior: from this date a position carried overnight under
+    DAY-TIF OCO (which auto-cancels at 16:00 ET) gets a fresh
+    bracket the next morning instead of sitting naked.
+
+
+================================================================
+2026-05-08 — Per-trade rich logging, OCO GTC, analysis toolkit
+================================================================
+
+2026-05-08 11:41:28 | 63f767ab | feat(bowaka): per-trade rich JSONL
+  - New per-link_id files at data/trades/<link_id>.jsonl carrying:
+    entry_decision (full sizing / gates / risk snapshot at submit),
+    parent_submitted, entry_fill (slippage + latency), bracket_
+    attached (target/stop ids + verification), intraday_tick
+    (every 60s — quote, P&L, MFE/MAE, distance to target/stop,
+    time-in-trade), order_event, exit. Logged at INFO level.
+  - Behavior: order flow unchanged. From this date every trade has
+    a full lifecycle artifact for offline analysis.
+
+2026-05-08 11:44:13 | 82ee6b86 | fix(bowaka): unique client_order_id on each OCO submission
+  - OCO link_id now suffixed with unix seconds on every retry so
+    Alpaca's "40010001 client_order_id must be unique" rejection
+    stops blocking next-day re-bracket attempts.
+  - Behavior: post-this-date, OCO re-attach on overnight-expired
+    positions actually works. Before: re-attach got rejected and
+    the position sat unbracketed all day.
+
+2026-05-08 18:11:01 | 25eb39a7 | feat(bowaka): trade-log analysis toolkit
+  - bowaka_analysis.py — load per-trade JSONLs into pandas, compute
+    slot-index alpha, gate marginal-pass, exit-reason breakdown,
+    MFE/MAE distribution, slippage summary, drawdown-before-stop,
+    runup-before-target, hold-duration profile, gap-at-open vs
+    realized P&L. CLI prints headline tables.
+  - Behavior: no order-flow change. Offline reporting capability.
+
+2026-05-08 18:39:39 | 71b8d1e4 | fix(bowaka): GTC OCO + daily reconcile — close overnight gap
+  - cfg.exits.oco_time_in_force default flips from "DAY" to "GTC".
+    The OCO bracket now survives 16:00 ET expiry, so a position
+    carried overnight is no longer naked between close and the
+    next-morning reconcile. Also adds an EXTRA reconcile on the
+    first tick of each new session (belt-and-suspenders for
+    DAY-TIF callers).
+  - Behavior: BLDP 2026-05-08 lost ~$300+ to overnight slippage
+    BEFORE this commit (stop fired @ $4.20 vs entry $4.7618 with
+    the bracket auto-expired). Subsequent overnight holds use a
+    GTC bracket and avoid that window.
+
+2026-05-08 19:20:17 | 8489e3d6 | fix(bowaka): line-buffered log file
+  - FileHandler now opens with buffering=1 so each log line hits
+    disk immediately. stdout reconfigured for line buffering too.
+  - Behavior: no order-flow change. Live-ops visibility win.
+
+2026-05-08 19:24:07 | 9f46b4cb | fix(bowaka): watchdog cmd robustness — ASCII-only, label-based retry dispatch
+  - Watchdog batch script swapped to ASCII-only output + label-based
+    retry dispatch (cp1252 codepage couldn't print certain chars
+    cleanly; old goto labels were brittle on retry).
+  - Behavior: no order-flow change. Unattended-restart reliability.
+
+
+================================================================
+2026-05-12 — Bowaka Audit Remediation (8 phases) + ADV tier caps
+================================================================
+
+The May 12 work implements the Bowaka Consolidated Quant + Engineering
+Report (May 2026). Bowaka is now at "Gate 0 / Gate 1 paper-ready" per
+Report §12. Live trading is still out of scope until the operator
+flips the disabled-by-default features.
+
+2026-05-12 19:19:44 | 45eaede1 | chore(bowaka): pre-audit working-tree baseline
+  - Captures the pre-audit dev state (bankroll envelope,
+    daily_allocation, intraday_confirmation, OCO carryover, per-
+    candidate venue routing, ADV-fraction cap, analytic logging,
+    GTC OCO, watchdog) as a stable baseline for the audit phases.
+    No new behavior beyond what was already on disk.
+  - Behavior: snapshot only.
+
+2026-05-12 19:26:01 | 1fee7273 | Phase 0: Report §7 validation YAML defaults
+  - YAML edits only:
+    risk.daily_loss_pct               0.03  -> 0.010
+    risk.max_gross_exposure_pct       0.80  -> 0.40
+    risk.max_total_entries_per_day    10    -> 4
+    sizing.max_concurrent_positions   18    -> 4
+    prefilter universe.avg_dollar_volume_min   250000 -> 1000000
+  - Behavior: from this commit, the strategy under default config
+    deploys MUCH less capital and trips its daily-loss circuit
+    breaker on a smaller drawdown. Validation-regime numbers — the
+    operator may revert per-knob to a tuned production value.
+
+2026-05-12 19:47:38 | c5812f3f | Phase 1: safety & data integrity
+  - Six sub-tasks (all are behavior-affecting):
+    1.1 Log redaction — API keys / Bearer tokens / X-API-KEY headers
+        rewritten as "<REDACTED>" in every log handler AND on
+        exception tracebacks. Header-only auth on GET/DELETE
+        balances/orders/positions calls — the ?apikey= query string
+        is dropped (it used to land secrets in proxy access logs).
+    1.2 Candidate JSON schema v2 — adds schema_version: 2, strategy,
+        provider, data_feed, bar_timeframe, full sha256 config_hash
+        (legacy 8-hex preserved as config_hash_short), universe_hash,
+        latest_bar_timestamp.
+    1.3 Strategy fail-closed on feed / schema mismatch — new
+        CandidatesFeedMismatch / CandidatesSchemaMismatch
+        exceptions; prefilter_handshake.expected_data_feed and
+        expected_schema_version honor null=disabled.
+    1.4 Universal entry_decision telemetry — EVERY considered
+        candidate now emits exactly one entry_decision event
+        (accepted or rejected) with canonical reasons:
+        accepted / already_held / already_entered_today / halt_skip
+        / concurrent_cap / daily_entry_cap / qty_zero / gross_cap
+        / kill_switch / daily_pnl_tripped / spread_too_wide /
+        quote_stale / bad_quote / chase / failure_band / no_quote.
+    1.5 Immutable trade ledger at data/trade_ledger.jsonl — append-
+        only canonical event stream (entry_decision /
+        order_submitted / order_fill / closure / protection_event /
+        liquidity_status / missed_trade). uuid event_id + schema_
+        version stamp on every record.
+    1.6 Daily summary derived from ledger —
+        recompute_daily_summary_from_ledger projects the ledger
+        into a session-summary dict; write_session_summary derives
+        from this rather than in-memory state. New
+        --reconcile-summary <YYYY-MM-DD> CLI appends a correction
+        line without overwriting prior records.
+    1.7 .gitignore — data/trade_ledger.jsonl and .bak* excluded.
+  - Behavior: order flow same shape; closures get richer telemetry
+    AND a canonical ledger. From this date, daily_summary.jsonl
+    numbers are projections of the ledger, not state-derived. Any
+    closure missing a ledger event after this date indicates a
+    bug.
+
+2026-05-12 19:54:22 | 598cf3b6 | Phase 2: prefilter gates + instrument classification
+  - 2.1 Prefilter max gates: signals.rvol_max,
+        range_expansion_max, gap_pct_max (null by default — operator
+        pins them to drop blow-off / exhaustion / gap-and-fade).
+  - 2.2 Bounded signal_strength score in compute_signal_strength().
+        score.bounded=false (default) preserves the legacy unbounded
+        formula. score.bounded=true clips each component at its cap
+        and subtracts a gap_penalty_above penalty.
+  - 2.3 classify_instrument(symbol, asset_meta, cfg) — returns
+        instrument_class (operating_equity | leveraged_etp |
+        inverse_etp | etn | etf) + eligible_for_bowaka_equity_bucket
+        flag. Drives action: "exclude" of leveraged ETPs / ETNs in
+        apply_filters. The dropped rows still appear in the
+        diagnostic CSV with an excluded_reason column.
+  - 2.4 Universe exclude_otc invariant (raises if any non-allowed
+        listing exchange sneaks into the cached universe).
+  - 2.5 Strategy-side defense: select_entries rejects any candidate
+        whose instrument_class is anything other than
+        operating_equity. Legacy v1 candidate files (no class field)
+        default to None / True and pass through.
+  - Behavior: from this date, any candidate JSON that includes
+    leveraged ETPs / ETNs / inverse ETPs will see those names
+    dropped at the strategy gate. Tests show TSLL, CONL, SMCX,
+    SQQQ, TQQQ are all excluded by name keyword or blocklist.
+
+2026-05-12 20:02:16 | 7ec3f9ff | Phase 3: rescreen + risk circuit breakers
+  - 3.1 cfg.entry.post_closure_rescreen.enabled flipped from true
+        to FALSE by default. Re-enable requires the operator to set
+        only_after_reasons (fail-closed list) and the related caps.
+  - 3.2 should_set_rescreen_pending() — every direct
+        state["rescreen_pending"] = True now goes through this
+        helper. Returns False unless enabled AND the closure reason
+        is in only_after_reasons AND the optional caps
+        (require_day_pnl_nonnegative / max_stopouts_today /
+        max_entries_per_day) all pass.
+  - 3.3 New session-state fields: daily_stopouts_count,
+        consecutive_stopouts_count, block_new_entries_today,
+        new_entries_blocked_reason, daily_realized_pnl_strategy,
+        daily_realized_pnl_bankroll_pct.
+  - 3.4 New cfg.risk knobs: max_stopouts_per_day,
+        stop_trading_after_consecutive_stopouts, daily_loss_basis,
+        strategy_slice_loss_pct (all null = disabled).
+  - 3.5 update_daily_closure_risk_state() — increments counters on
+        stop_hit; resets streak on target_hit/time_stop/signal_fade/
+        closed_externally; trips block_new_entries_today on any of:
+        max_stopouts_per_day, consecutive_stopouts,
+        daily_pnl_tripped (mirrored), strategy_slice_loss.
+  - 3.6 Slate-wide block check at top of select_entries AND
+        run_post_closure_rescreen. Blocked session emits one
+        synthetic entry_decision with reason="blocked_by_daily_risk"
+        (NOT one per candidate).
+  - 3.7 Block flags survive save_state / load_state mid-session.
+        Only reset_for_new_session (new ET date) clears them.
+  - Behavior: from this date, the legacy "every closure resets
+    rescreen_pending" behavior is OFF by default. A position that
+    stops out no longer triggers an immediate re-buy on the same
+    name. Operator must explicitly enable rescreens with allow-
+    listed reasons.
+
+2026-05-12 20:08:45 | c7fc6e90 | Phase 4: opening-range VWAP + tighter quote checks
+  - 4.1 cfg.entry.intraday_confirmation tightened (validation defaults):
+        window_minutes:           5     -> 15
+        max_spread_pct:           0.02  -> 0.01
+        max_quote_age_seconds:    60    -> 15
+        price_band.max_pct_above_close:    0.30  -> 0.15
+        price_band.min_pct_below_close:   -0.15 -> -0.02
+  - 4.2 require_stable_quote_checks (default 3) — a candidate must
+        pass the quote gates on N successive ticks before admit.
+        Failed tick resets the streak. Pre-threshold passes drop
+        the entry from the slate without emitting a rejection
+        decision (next tick retries).
+  - 4.3 Opening-range / VWAP confirmation block. Disabled by
+        default. When enabled: build a per-ticker OR context from
+        the first window_minutes (15) of 1-minute bars; require
+        mid above VWAP / above session open / above prior close;
+        OR-bar close_location >= 0.60; breakout above (or near) the
+        OR high with near_high_tolerance_pct; opening_rvol_min >=
+        1.25 against a session-share approximation
+        (opening_volume_session_share=0.08 of daily avg).
+  - 4.4 prior_opening_vol_mean approximated as avg_volume * 0.08
+        (microstructure baseline ~8% of session volume in first 15
+        min) until SIP minute history is calibrated.
+  - 4.5 fetch_or_compute_opening_range_context cached per-ticker
+        within a single filter_by_intraday_confirmation pass.
+  - Behavior: from this date, the entry pass requires THREE
+    successive clean quotes (default) and only after 15 minutes of
+    session settled noise. Spreads above 1% reject. Live mid > 15%
+    above yesterday's close rejects. From this date forward, fewer
+    morning entries fire and the ones that do are on tighter
+    quotes.
+
+2026-05-12 20:16:53 | 70980fa6 | Phase 5: protected-position invariant + stop-manager scaffolding
+  - 5.1 cfg.exits.protected_position block (enabled=true default —
+        correctness invariant, not a tuning knob). Once a parent
+        fills, the OCO bracket attach has max_unprotected_seconds
+        (10) to confirm. Beyond that the strategy escalates.
+  - 5.2 New position fields: parent_filled_at, protection_status,
+        protection_deadline_at, oco_attach_attempts,
+        fallback_stop_order_id, protection_violation.
+  - 5.6 enforce_protected_position_invariant ladder:
+        1. Retry submit_oco_children up to max_oco_attach_attempts.
+        2. Submit fallback STOP (or STOP_LIMIT) via /api/v2/orders.
+        3. trigger_time_stop with reason="protection_violation_
+           flatten" + flip block_new_entries_today (when
+           block_entries_on_violation=true, default).
+        Every escalation emits a protection_event to both the per-
+        trade jsonl and the canonical Phase 1.5 ledger.
+  - 5.7 Wired to run every intraday tick AFTER poll_fills + OCO
+        attach AND BEFORE entry passes — a violation blocks same-
+        tick new entries.
+  - 5.8 cfg.exits.stop_manager (DISABLED by default). When enabled:
+        per-tick consult desired_stop_from_mfe(pos, cfg) against
+        configurable rules (default: at +5% MFE → break-even, +8%
+        → +3%, +12% → +6%). Stops NEVER move down. Replacement
+        failure preserves prior child IDs.
+  - Behavior: from this date a filled bowaka position that fails
+    to attach its OCO within 10s gets a fallback stop or is
+    flattened with a daily-block. Stops can't move down. The
+    stop-manager is OFF by default — when operator enables it,
+    trailing-stop behavior begins.
+
+2026-05-12 20:24:56 | ad6ab0ec | Phase 6: risk-per-trade sizing + ADV tier caps (audit) + marketable-limit
+  - 6.1 cfg.sizing additions: sizing_mode (equal_slice |
+        risk_per_trade), target_risk_dollars (default $200),
+        max_per_trade_dollars, min_order_notional. cfg.risk
+        additions: expected_stop_slippage_pct (1.5%),
+        adv_tier_caps (empty list initially — populated by the
+        later "feat: ADV-tier position caps" commit).
+  - 6.2 adv_tier_cap helper (first version) + compute_risk_sized_
+        qty(entry, stop_pct, adv, cfg) = floor(target_risk /
+        (entry*(stop_pct+slip_pct))) capped by max_per_trade_
+        dollars and ADV tier. select_entries branches on
+        sizing_mode at the per-candidate sizing step.
+  - 6.3 Marketable-limit entry: cfg.entry.order_style
+        (market | marketable_limit). compute_marketable_buy_limit
+        = min(ask*(1+slip), close*(1+max_above)). Returns None on
+        missing ask. submit_parent_marketable_limit_buy posts
+        LIMIT (DAY TIF). Position state carries entry_order_style
+        and entry_limit_price.
+  - 6.3 marketable_limit_timeout: pending_fill positions older
+        than timeout_seconds (default 30) are cancelled, slot
+        freed, ledger missed_trade event emitted.
+  - 6.5 R-multiple in ledger closures uses the position's stored
+        planned_risk_dollars instead of stop_pct*qty math.
+  - Behavior: from this date the operator can flip to risk-per-
+    trade sizing (one knob: target_risk_dollars=$200 per trade)
+    or marketable-limit entries. Both are OFF by default —
+    legacy equal_slice + MARKET behavior is preserved unless
+    flipped.
+
+2026-05-12 20:32:17 | 21fc6ee1 | Phase 7: liquidity monitor + analysis rewrite on ledger
+  - 7.1 cfg.liquidity_monitor (DISABLED by default):
+        tick_interval_seconds: 30
+        stale_quote_seconds: 30, severe_stale_quote_seconds: 60
+        spread_warning_pct: 0.03, spread_severe_pct: 0.05
+        consecutive_warning_ticks: 3
+        action_on_severe_if_profitable: none | tighten_stop |
+            exit_partial (last two scaffolded, raise NotImplemented).
+  - 7.2 Position fields: liquidity_warning_count,
+        liquidity_severe_count, last_liquidity_status,
+        max_spread_pct_seen, max_quote_age_seconds_seen.
+  - 7.3 run_liquidity_monitor_pass classifies each filled position
+        (stale > severe > warning > ok), updates counters, emits a
+        liquidity_status event to per-trade jsonl + canonical
+        ledger.
+  - 7.4 bowaka_analysis ledger-based reports:
+        build_canonical_trade_table joins ledger events by
+        trade_id; corrections overlay closures (last-write-wins).
+        New report sections: by entry_trigger, by instrument_class,
+        by ADV tier (5 buckets), by spread bucket, MFE/MAE
+        distribution, stop slippage, ex-top-winners, rescreen
+        ablation.
+  - 7.5 --reconcile CLI rebuilds daily_summary projections from
+        the ledger and diffs against on-disk records; exits
+        non-zero on mismatch.
+  - Behavior: from this date the analyst's source of truth is the
+    canonical ledger, not daily_summary.jsonl. New per-position
+    telemetry stream begins.
+
+
+================================================================
+2026-05-12 (later) — Standalone ADV-tier position caps feature
+================================================================
+
+2026-05-12 22:07:12 | bfd496c1 | feat: ADV-tier position caps
+  - Replaces the flat risk.max_position_as_adv_frac: 0.03 cap with
+    a populated tiered policy in cfg.risk.adv_tier_caps. Strategy
+    YAML now ships:
+      < $250k ADV    → reject_if_below: true (skip the candidate)
+      $250k–$500k    → 0.3% of ADV
+      $500k–$1M      → 0.5% of ADV
+      $1M–$5M        → 1.0% of ADV
+      > $5M (null)   → 1.5% of ADV
+  - Helper contract: adv_tier_cap(avg_dollar_volume, cfg) ->
+    (allowed: bool, max_position_dollars: float).
+      (False, 0.0)  = reject (missing ADV, or thinnest tier matched)
+      (True, 0.0)   = no policy in effect → no clamp
+      (True, $$)    = clamp to this dollar cap
+    Tier walking is top-to-bottom (YAML order). Empty tier list
+    falls back to the flat max_position_as_adv_frac for back-
+    compat. Inclusive ``<=`` boundary at each tier.
+  - select_entries integration: helper consulted per-candidate
+    right after the same-day-re-entry / max-concurrent / budget
+    gates. Rejected entries emit a Phase 1.4 entry_decision with
+    reason="adv_tier_reject" (new canonical label). Otherwise the
+    dollar cap converts back to a per-candidate fraction threaded
+    into compute_qty's existing max_position_as_adv_frac parameter
+    (no signature change).
+  - compute_risk_sized_qty updated to match the new contract
+    (legacy fallback branch removed — adv_tier_cap subsumes it).
+  - Existing Phase 6 audit test + pre-existing phase{2,5,6} sizing
+    tests updated to stamp a permissive avg_dollar_volume on
+    synthetic candidates so the new "no ADV → reject" gate doesn't
+    break unrelated test logic.
+  - Behavior: from this commit, ANY bowaka candidate without an
+    avg_dollar_volume value in its features is rejected outright.
+    Real candidates from the prefilter always carry one, so this
+    is a strictness-not-regression change. Trades on names under
+    $250k ADV stop firing entirely. Position sizes on names
+    between $250k and $5M ADV are SMALLER than under the legacy
+    flat 3% cap. Position sizes on names above $5M are CAPPED at
+    1.5% of ADV (was 3% under the flat policy).
+
+2026-05-12 22:08:20 | 3d3a6d42 | changed prefilter
+  - Operator-only YAML edit:
+    prefilter universe.avg_dollar_volume_min   1000000 -> 200000
+  - Behavior: from this commit the prefilter admits thinner names
+    into the universe (down to $200k ADV). The new ADV tier caps
+    (the immediately preceding commit) then either reject those
+    below $250k or size them very small (0.3% of ADV in the
+    $250k–$500k bucket, max $1,500 per trade at the boundary).
+
+
+================================================================
+Active runtime knobs that drive trading behavior
+================================================================
+
+These flags / cfg keys are the ones most likely to be the cause of a
+behavior delta on a specific date. Check the YAML on the session date
+in question; the audit defaults are listed first, with what an
+operator might flip them to.
+
+  cfg.entry.bracket_pricing_mode      "actual_fill"  (legacy: "candidate_close")
+  cfg.entry.order_style               "market"       (Phase 6: "marketable_limit")
+  cfg.entry.intraday_confirmation.enabled                   true
+  cfg.entry.intraday_confirmation.require_stable_quote_checks  3
+  cfg.entry.intraday_confirmation.opening_range.enabled     false  (Phase 4 — operator flip)
+  cfg.entry.post_closure_rescreen.enabled                   false  (was true pre-audit)
+  cfg.entry.post_closure_rescreen.only_after_reasons        null   (operator allow-list)
+  cfg.exits.oco_time_in_force         "GTC"   (was "DAY" pre-2026-05-08)
+  cfg.exits.protected_position.enabled                      true   (correctness invariant)
+  cfg.exits.stop_manager.enabled                            false  (Phase 5 — operator flip)
+  cfg.exits.signal_fade_enabled                             true
+  cfg.risk.max_stopouts_per_day                             null   (audit recommended: 2)
+  cfg.risk.stop_trading_after_consecutive_stopouts          null   (audit recommended: 2)
+  cfg.risk.strategy_slice_loss_pct                          null   (audit recommended: 0.025)
+  cfg.risk.adv_tier_caps                                    populated 5-tier (2026-05-12 22:07)
+  cfg.risk.max_position_as_adv_frac                         0.03   (legacy fallback)
+  cfg.sizing.sizing_mode              "equal_slice"  (Phase 6: "risk_per_trade")
+  cfg.sizing.equal_slice_per_position                       true
+  cfg.sizing.equal_slice_bankroll_fraction                  null   (auto-couples to gross cap)
+  cfg.bankroll.daily_allocation.enabled                     true
+  cfg.liquidity_monitor.enabled                             false  (Phase 7 — operator flip)
+  cfg.prefilter.alpaca.feed           "iex"  (SIP pending operator subscription)
+  cfg.prefilter.signals.rvol_max / range_expansion_max / gap_pct_max   null  (operator pin)
+  cfg.prefilter.score.bounded                               false  (Phase 2 — operator flip)
+  cfg.prefilter.instrument_rules.<bucket>.action            "exclude"  (Phase 2)
+
+
+================================================================
+How to extend this log
+================================================================
+
+When a new bowaka-touching commit lands:
+
+  git log --reverse --date=iso --pretty=format:"%ad|%h|%s" --all \
+    -i --grep=bowaka  <last-log-tip>..HEAD
+
+Append a section dated by the commit's author date with:
+  - timestamp + short SHA + subject
+  - 1–3 bullets on what changed at the YAML / function level
+  - one "Behavior:" line stating how a trade run on that date would
+    differ from a trade run the day before.
+
+Keep entries oldest-first. Group commits from the same day under one
+date heading. The "Active runtime knobs" table at the bottom should
+be regenerated whenever a new operator-tunable flag is added.
