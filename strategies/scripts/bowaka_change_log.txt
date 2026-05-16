@@ -628,7 +628,7 @@ flips the disabled-by-default features.
 
 
 ================================================================
-2026-05-16 — Quant + Engineering audit remediation (Phase 1–3)
+2026-05-16 — Quant + Engineering audit remediation (Phase 1–4)
 ================================================================
 
 2026-05-16 (uncommitted) | feature/bowaka-paper-epoch-ledger-separation
@@ -729,6 +729,47 @@ flips the disabled-by-default features.
         position regardless of broker echo behavior. Two close
         attempts for the same position + reason on the same day
         submit at most one market sell. No alpha changes.
+
+2026-05-16 (uncommitted) | feature/bowaka-signal-fade-hold-thesis-redesign
+        | feat(bowaka): hold-thesis signal-fade with atomic
+          marketable-limit exit + 16:05 telemetry
+      * Added VALID_EXIT_COMBINATIONS allow-list + the
+        _validate_exit_combination guard. submit_market_sell now
+        rejects MARKET+OPG before any HTTP I/O (the 2026-05-15
+        bug class). submit_marketable_limit_sell mirrors the buy-
+        side helper for the new exit path.
+      * compute_fade_score(features, cfg) -> (score, gates)
+        produces a [0, 1] score from cfg.signal_gates breakdown.
+        fade_score_to_band maps to {hold|soft|hard|critical} via
+        cfg.exits.signal_fade.score_thresholds (defaults: 0.34 /
+        0.50 / 0.67).
+      * run_signal_fade_pass takes a ``mode`` parameter:
+          - ``mode="exit"`` at 15:45 ET — band in exit_on
+            (default hard/critical) submits a marketable-limit
+            DAY SELL through replace_protection_with_exit. The
+            replacement is atomic: OCO children stay live until
+            the broker accepts the new exit.
+          - ``mode="telemetry"`` at 16:05 ET — emits
+            signal_fade_score + signal_fade_telemetry events for
+            counterfactual study. Never submits an order, even
+            when exits.signal_fade.enabled is false.
+        Dedupe markers are per-mode
+        (signal_fade_evaluated_for_date_exit /
+         signal_fade_evaluated_for_date_telemetry).
+      * trigger_time_stop asserts time_in_force in {DAY, GTC}.
+        The OPG code path is gone from the signal-fade exits.
+      * YAML: new exits.signal_fade block ships
+        ``enabled: false`` until the counterfactual study confirms
+        the thresholds (Phase 7). Telemetry pass runs even when
+        disabled so the study has data.
+      Behavior: when signal_fade.enabled is true and the 15:45
+        score lands in hard/critical, the position exits via a
+        marketable-limit DAY SELL crossing 50 bps below the
+        inside bid; the OCO children are cancelled only after
+        the broker accepts the replacement. Single-gate failures
+        (score ≈ 0.17) no longer trigger an exit; the new contract
+        requires 3+ of 6 gates to fail. No exits at 16:05 ET; that
+        slot is logging only.
 
 
 ================================================================
