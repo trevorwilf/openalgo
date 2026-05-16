@@ -378,7 +378,35 @@ exits:
   stop_pct: 0.08
   target_pct: 0.15
   max_hold_days: 3
-  signal_fade_enabled: true
+  # Phase 4.3 (2026-05-16) — hold-thesis signal-fade redesign. The
+  # legacy 16:05 MARKET+OPG path is gone; the new design runs a
+  # hold-thesis fade score at 15:45 and routes hard/critical bands
+  # through an atomic marketable-limit SELL with DAY TIF. The 16:05
+  # pass becomes telemetry-only (never submits an order) so the
+  # counterfactual study can compare both windows.
+  #
+  # DISABLED by default after the 2026-05-15 incident. Re-enable
+  # only after a counterfactual study (Phase 7) confirms the score
+  # thresholds. Telemetry mode at telemetry_time still emits events
+  # even when enabled=false, so the counterfactual study has data.
+  signal_fade:
+    enabled: false
+    eval_time: "15:45"        # primary exit-evaluation time
+    telemetry_time: "16:05"   # secondary log-only run
+    score_thresholds:
+      soft: 0.34              # 1-2 of 6 gates fail
+      hard: 0.50              # 3 of 6 fail
+      critical: 0.67          # 4+ of 6 fail
+    exit_on:
+      - "hard"
+      - "critical"
+    order_style: "marketable_limit"
+    time_in_force: "DAY"
+    marketable_limit_offset_pct: 0.005    # cross 50 bps below bid
+    score_weights: null       # null = equal weight
+  # Deprecated top-level signal_fade_enabled retained one release
+  # for back-compat. Operators on the new schema set this to null.
+  signal_fade_enabled: null
 
   # Phase 5.1 — protected-position invariant. After a parent MARKET
   # BUY fills, the OCO bracket attach has ``max_unprotected_seconds``

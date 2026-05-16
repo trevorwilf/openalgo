@@ -3088,6 +3088,34 @@ def submit_otoco(
 # ---------------------------------------------------------------- single market
 
 
+# Phase 4.1 — explicit allow-list of (order_type, time_in_force)
+# combinations. The 2026-05-15 incident was an OPG-rejected MARKET
+# SELL: the broker rejects MARKET+OPG because OPG is reserved for
+# auction orders (limit_on_open / market_on_open).
+VALID_EXIT_COMBINATIONS: frozenset[tuple[str, str]] = frozenset({
+    ("market", "DAY"),
+    ("market", "GTC"),
+    ("limit", "DAY"),
+    ("limit", "GTC"),
+    ("market_on_close", "CLS"),
+    ("limit_on_close", "CLS"),
+    ("market_on_open", "OPG"),
+    ("limit_on_open", "OPG"),
+})
+
+
+def _validate_exit_combination(order_type: str, time_in_force: str) -> None:
+    """Raises ValueError on an invalid pair. Called from every exit
+    submit helper before any HTTP I/O — fail fast."""
+    key = (order_type.lower(), time_in_force.upper())
+    if key not in VALID_EXIT_COMBINATIONS:
+        raise ValueError(
+            f"invalid order_type/time_in_force combination: "
+            f"order_type={order_type!r} time_in_force={time_in_force!r}. "
+            f"Allowed: {sorted(VALID_EXIT_COMBINATIONS)}"
+        )
+
+
 def submit_market_sell(
     ticker: str,
     qty: int,
@@ -3097,8 +3125,13 @@ def submit_market_sell(
     venue_code: str,
     time_in_force: str = "DAY",
 ) -> dict[str, Any]:
-    """POST /api/v2/orders with a single SELL MARKET. Phase 3 passes
-    ``time_in_force='OPG'`` for MOO."""
+    """POST /api/v2/orders with a single SELL MARKET.
+
+    Phase 4.1: validates the (order_type, time_in_force) combination
+    before any HTTP I/O. Calls passing market+OPG (the 2026-05-15
+    bug) raise immediately instead of round-tripping a 4xx from the
+    broker."""
+    _validate_exit_combination("market", time_in_force)
     body = {
         "apikey": api_key,
         "instrument": {"venue_code": venue_code, "canonical_symbol": ticker},
@@ -3106,6 +3139,49 @@ def submit_market_sell(
         "order_type": "MARKET",
         "quantity": str(qty),
         "quantity_unit": "WHOLE",
+        "time_in_force": time_in_force,
+    }
+    r = http.post("/api/v2/orders",
+                  json=body,
+                  headers=_api_headers(api_key))
+    parsed = r.json() if r.content else {}
+    parsed["_http_status"] = r.status_code
+    return parsed
+
+
+def compute_marketable_sell_limit(
+    quote_bid: float, offset_pct: float,
+) -> float:
+    """Phase 4.2: SELL marketable-limit price = bid * (1 - offset).
+    A positive offset crosses below the inside bid to ensure a fill
+    on a thin book.
+    """
+    return round(float(quote_bid) * (1.0 - float(offset_pct)), 4)
+
+
+def submit_marketable_limit_sell(
+    ticker: str,
+    qty: int,
+    http: httpx.Client,
+    api_key: str,
+    *,
+    venue_code: str,
+    limit_price: float,
+    time_in_force: str = "DAY",
+) -> dict[str, Any]:
+    """Phase 4.2: SELL LIMIT (default DAY TIF) at the supplied
+    marketable price. Mirrors :func:`submit_parent_marketable_limit_buy`
+    on the buy side.
+    """
+    _validate_exit_combination("limit", time_in_force)
+    body = {
+        "apikey": api_key,
+        "instrument": {"venue_code": venue_code, "canonical_symbol": ticker},
+        "side": "SELL",
+        "order_type": "LIMIT",
+        "quantity": str(qty),
+        "quantity_unit": "WHOLE",
+        "price": str(round(float(limit_price), 4)),
         "time_in_force": time_in_force,
     }
     r = http.post("/api/v2/orders",
@@ -3691,6 +3767,16 @@ def trigger_time_stop(
     siblings) and this function's own mirrored check both exclude the
     position from re-firing. On any error path the status is reverted
     to ``"filled"`` so the next pass can retry."""
+    # Phase 4.5 — assert allowable TIF. Marketable-limit signal-fade
+    # exits route through replace_protection_with_exit, not through
+    # this function. The only legitimate values here are DAY and
+    # GTC (max-hold time stop, kill-switch flattens).
+    if time_in_force not in {"DAY", "GTC"}:
+        raise ValueError(
+            f"trigger_time_stop: unsupported time_in_force={time_in_force!r} "
+            "(allowed: DAY, GTC)"
+        )
+
     # ---- Dedup guard ----------------------------------------------------
     # Mirror the caller's ``status == "filled"`` filter here too, so
     # any future caller that forgets to filter (or a race where the
@@ -4001,6 +4087,70 @@ def signal_passes_gates(features: dict[str, float | None], cfg: dict) -> bool:
     return True
 
 
+# Phase 4.3 — fade-score components. Each entry is
+# (component_name, gate_cfg_key, feature_key). Adding a component
+# is allowed (defaults to equal weight). Renaming is breaking.
+_FADE_COMPONENTS: list[tuple[str, str, str]] = [
+    ("rvol_below_min",            "rvol_min",            "rvol"),
+    ("atr_pct_below_min",         "atr_pct_min",         "atr_pct"),
+    ("range_expansion_below_min", "range_expansion_min", "range_expansion"),
+    ("close_location_below_min",  "close_location_min",  "close_location"),
+    ("ema_distance_below_min",    "ema_distance_min",    "ema_distance"),
+    ("ema_slope_negative",        "ema_slope_min",       "ema_slope"),
+]
+
+
+def compute_fade_score(
+    features: dict[str, float | None], cfg: dict,
+) -> tuple[float, dict[str, bool]]:
+    """Phase 4.3: Score in [0, 1]. Higher = stronger fade.
+
+    Each component checks one of the cfg.signal_gates against the
+    feature. ``True`` in the result dict means the component is in
+    a *failed* state (the gate is broken). When the gate's threshold
+    is null the component is skipped (does not contribute to the
+    score). Weights are read from
+    ``cfg.exits.signal_fade.score_weights`` (defaults to equal).
+    Returns ``(score, component_results)``.
+    """
+    sf_cfg = ((cfg.get("exits") or {}).get("signal_fade") or {})
+    weights = sf_cfg.get("score_weights") or {}
+    gates = cfg.get("signal_gates", {}) or {}
+
+    component_results: dict[str, bool] = {}
+    contrib_weight = 0.0
+    fail_weight = 0.0
+    for name, gate_key, feat_key in _FADE_COMPONENTS:
+        thr = gates.get(gate_key)
+        if thr is None:
+            continue
+        val = features.get(feat_key)
+        failed = (val is None) or (float(val) < float(thr))
+        component_results[name] = bool(failed)
+        w = float(weights.get(name) if weights else 1.0)
+        contrib_weight += w
+        if failed:
+            fail_weight += w
+    score = fail_weight / contrib_weight if contrib_weight > 0 else 0.0
+    return score, component_results
+
+
+def fade_score_to_band(score: float, cfg: dict) -> str:
+    """Phase 4.3: Map a fade score to {hold|soft|hard|critical}."""
+    sf_cfg = ((cfg.get("exits") or {}).get("signal_fade") or {})
+    thresholds = sf_cfg.get("score_thresholds") or {}
+    soft = float(thresholds.get("soft", 0.34))
+    hard = float(thresholds.get("hard", 0.50))
+    crit = float(thresholds.get("critical", 0.67))
+    if score >= crit:
+        return "critical"
+    if score >= hard:
+        return "hard"
+    if score >= soft:
+        return "soft"
+    return "hold"
+
+
 # ---------------------------------------------------------------- bars fetch
 
 
@@ -4045,6 +4195,36 @@ def fetch_daily_bars_for_signal_fade(
 # ---------------------------------------------------------------- signal-fade
 
 
+def _signal_fade_cfg(cfg: dict) -> dict:
+    """Read exits.signal_fade with back-compat for the deprecated
+    top-level ``exits.signal_fade_enabled`` flag."""
+    sf = ((cfg.get("exits") or {}).get("signal_fade") or {})
+    if "enabled" not in sf:
+        # Honor the deprecated key one more release.
+        legacy = (cfg.get("exits") or {}).get("signal_fade_enabled")
+        if legacy is not None:
+            sf = {**sf, "enabled": bool(legacy)}
+    return sf
+
+
+def _signal_fade_eval_time(cfg: dict) -> str:
+    """15:45 ET by default (Phase 4 redesign). Back-compat: read
+    ``session.signal_fade_eval_time`` when the new
+    ``exits.signal_fade.eval_time`` is unset."""
+    sf = _signal_fade_cfg(cfg)
+    if t := sf.get("eval_time"):
+        return t
+    # Back-compat: the legacy session.signal_fade_eval_time was 16:05;
+    # respect it when the new key is absent.
+    return (cfg.get("session") or {}).get("signal_fade_eval_time", "15:45")
+
+
+def _signal_fade_telemetry_time(cfg: dict) -> str:
+    """16:05 ET by default — log-only run for counterfactual study."""
+    sf = _signal_fade_cfg(cfg)
+    return sf.get("telemetry_time", "16:05")
+
+
 def run_signal_fade_pass(
     cfg: dict,
     state: State,
@@ -4054,16 +4234,38 @@ def run_signal_fade_pass(
     today_et: date,
     state_path: Path,
     now_utc: datetime,
+    mode: str = "exit",
 ) -> list[str]:
-    """EOD subroutine. For each filled position, fetch its daily bars,
-    re-run feature math, compare to the configured signal_gates, and
-    submit a MOO sell (TIF=OPG) when any gate fails."""
-    if state.get("signal_fade_evaluated_for_date") == today_et.isoformat():
+    """Phase 4.4: hold-thesis fade evaluation. Two scheduled passes
+    per day:
+
+      * ``mode="exit"`` at ``exits.signal_fade.eval_time`` (default
+        15:45) — submits a marketable-limit SELL when the band is
+        in ``exits.signal_fade.exit_on`` (default {hard, critical}).
+      * ``mode="telemetry"`` at ``exits.signal_fade.telemetry_time``
+        (default 16:05) — emits ``signal_fade_telemetry`` events for
+        the counterfactual ledger. Never submits an order, even
+        when ``enabled`` is false.
+
+    Returns the list of tickers that submitted an exit (mode=exit
+    only). The telemetry run always returns an empty list.
+    """
+    sf_cfg = _signal_fade_cfg(cfg)
+    marker = f"signal_fade_evaluated_for_date_{mode}"
+    if state.get(marker) == today_et.isoformat():
         return []
-    if not cfg.get("exits", {}).get("signal_fade_enabled", True):
-        state["signal_fade_evaluated_for_date"] = today_et.isoformat()
+
+    # In exit mode the enabled flag gates the actual exit submit. In
+    # telemetry mode we run even when enabled is false so the
+    # counterfactual study has data.
+    exit_mode = (mode == "exit")
+    if exit_mode and not sf_cfg.get("enabled", True):
+        state[marker] = today_et.isoformat()
         save_state(state, state_path)
         return []
+
+    band_exit_on = set(sf_cfg.get("exit_on") or ["hard", "critical"])
+    offset_pct = float(sf_cfg.get("marketable_limit_offset_pct") or 0.005)
 
     faded: list[str] = []
     open_positions = dict(state.get("open_positions") or {})
@@ -4077,24 +4279,98 @@ def run_signal_fade_pass(
                 lookback_calendar_days=45, end=now_utc,
             )
         except Exception as e:
-            LOG.warning("signal_fade bars fetch failed for %s: %s — keeping position",
-                        ticker, e)
+            LOG.warning(
+                "signal_fade bars fetch failed for %s (mode=%s): %s",
+                ticker, mode, e,
+            )
             continue
         if bars.empty or len(bars) < int(cfg["indicators"]["lookback_days"]):
-            LOG.info("signal_fade: insufficient bars for %s — keeping position",
-                     ticker)
+            LOG.info(
+                "signal_fade: insufficient bars for %s (mode=%s) — skipping",
+                ticker, mode,
+            )
             continue
         feats = compute_features_single(bars, cfg)
-        if not signal_passes_gates(feats, cfg):
-            LOG.info("signal faded for %s: %s", ticker, feats)
-            trigger_time_stop(
-                ticker, pos, cfg, http, api_key,
-                state=state, state_path=state_path,
-                reason="signal_fade", time_in_force="OPG",
+        score, gates = compute_fade_score(feats, cfg)
+        band = fade_score_to_band(score, cfg)
+
+        emit_ledger_event(
+            cfg, event_type="signal_fade_score",
+            trade_id=pos.get("link_id"), ticker=ticker,
+            payload={
+                "mode": mode, "score": score, "band": band,
+                "gates": gates, "features": feats,
+            },
+        )
+
+        if not exit_mode:
+            # Telemetry pass — emit the second event and continue.
+            emit_ledger_event(
+                cfg, event_type="signal_fade_telemetry",
+                trade_id=pos.get("link_id"), ticker=ticker,
+                payload={
+                    "score": score, "band": band, "gates": gates,
+                },
             )
+            continue
+
+        if band not in band_exit_on:
+            continue
+
+        # Phase 4.4 — atomic marketable-limit exit via
+        # replace_protection_with_exit. Fetch a quote, compute
+        # marketable-limit price, hand a zero-arg callable to the
+        # protection helper.
+        try:
+            qr = http.post(
+                "/api/v2/quotes",
+                json={
+                    "apikey": api_key,
+                    "instruments": [{
+                        "venue_code": venue_code,
+                        "canonical_symbol": ticker,
+                    }],
+                },
+                headers=_api_headers(api_key),
+            )
+            quote = None
+            if qr.status_code == 200:
+                rows = (qr.json().get("data") or [])
+                if rows:
+                    quote = rows[0]
+        except Exception as e:
+            LOG.warning(
+                "signal_fade: quote fetch failed for %s — skipping: %s",
+                ticker, e,
+            )
+            continue
+        bid = float((quote or {}).get("bid") or 0.0)
+        if bid <= 0:
+            LOG.warning(
+                "signal_fade: no usable bid for %s; skipping atomic exit",
+                ticker,
+            )
+            continue
+        limit_price = compute_marketable_sell_limit(bid, offset_pct)
+
+        def _do_submit(qty=int(pos.get("qty") or 0),
+                       _venue=venue_code, _limit=limit_price):
+            return submit_marketable_limit_sell(
+                ticker, qty, http, api_key,
+                venue_code=_venue, limit_price=_limit,
+                time_in_force="DAY",
+            )
+
+        ok, reason = replace_protection_with_exit(
+            ticker, pos, cfg, http, api_key,
+            exit_submit_callable=_do_submit,
+            state=state, state_path=state_path,
+        )
+        if ok:
+            pos["exit_reason"] = "signal_fade"
             faded.append(ticker)
 
-    state["signal_fade_evaluated_for_date"] = today_et.isoformat()
+    state[marker] = today_et.isoformat()
     save_state(state, state_path)
     return faded
 
@@ -8100,11 +8376,17 @@ def run_loop(
                         except Exception as e:
                             LOG.exception("session summary write failed: %s", e)
 
-            # Signal-fade EOD subroutine — runs at the configured eval
-            # minute on a NYSE trading day, even if outside regular
-            # session window (16:05 ET is post-close). Superseded under L2.
-            sf_eval = cfg["session"].get("signal_fade_eval_time", "16:05")
-            if kill not in (KillLevel.L2_SOFT,) and is_signal_fade_window(now, sf_eval):
+            # Phase 4.4 — two-phase signal-fade. The exit pass runs
+            # at 15:45 ET (default) and uses an atomic marketable-
+            # limit SELL; the telemetry pass runs at 16:05 ET and
+            # only emits events for the counterfactual study. Both
+            # superseded under L2.
+            sf_eval_time = _signal_fade_eval_time(cfg)
+            sf_tel_time = _signal_fade_telemetry_time(cfg)
+
+            if kill not in (KillLevel.L2_SOFT,) and is_signal_fade_window(
+                now, sf_eval_time,
+            ):
                 today_et = _to_eastern(now).date()
                 # Analytic logging: write today's mark for every
                 # filled position BEFORE the signal-fade exit pass.
@@ -8126,10 +8408,23 @@ def run_loop(
                     run_signal_fade_pass(
                         cfg, state, http_client, api_key,
                         today_et=today_et, state_path=state_path,
-                        now_utc=now,
+                        now_utc=now, mode="exit",
                     )
                 except Exception as e:
-                    LOG.exception("signal-fade pass error: %s", e)
+                    LOG.exception("signal-fade exit pass error: %s", e)
+
+            if kill not in (KillLevel.L2_SOFT,) and is_signal_fade_window(
+                now, sf_tel_time,
+            ):
+                today_et = _to_eastern(now).date()
+                try:
+                    run_signal_fade_pass(
+                        cfg, state, http_client, api_key,
+                        today_et=today_et, state_path=state_path,
+                        now_utc=now, mode="telemetry",
+                    )
+                except Exception as e:
+                    LOG.exception("signal-fade telemetry pass error: %s", e)
 
             if once:
                 break

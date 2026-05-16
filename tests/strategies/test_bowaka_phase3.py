@@ -375,12 +375,37 @@ def _passing_bars():
 
 
 def _faded_bars():
-    """Bars whose latest row fails the rvol gate (volume crashes)."""
+    """Bars whose latest row fails multiple gates.
+
+    Phase 4 (2026-05-16): signal_fade exits now require a score
+    >= 0.5 (3 of 6 gates failed) by default. Single-gate failure no
+    longer triggers an exit. This helper collapses the last bar
+    enough to break rvol, range_expansion, atr_pct, and
+    close_location simultaneously.
+    """
     rows = _passing_bars()
+    # Make the last bar a flat doji with no volume.
     rows[-1]["volume"] = "1"
-    rows[-1]["high"] = rows[-1]["close"]  # collapse range too
-    rows[-1]["low"] = rows[-1]["close"]
+    last_close = float(rows[-1]["close"])
+    rows[-1]["high"] = str(last_close)
+    rows[-1]["low"] = str(last_close)
+    rows[-1]["open"] = str(last_close)
     return rows
+
+
+def _enable_new_signal_fade(cfg: dict) -> None:
+    """Phase 4 (2026-05-16): pin the new exits.signal_fade schema so
+    the legacy phase3 tests run against the new code path."""
+    cfg.setdefault("exits", {})["signal_fade"] = {
+        "enabled": True,
+        "eval_time": "15:45",
+        "telemetry_time": "16:05",
+        "score_thresholds": {
+            "soft": 0.34, "hard": 0.50, "critical": 0.67,
+        },
+        "exit_on": ["hard", "critical"],
+        "marketable_limit_offset_pct": 0.005,
+    }
 
 
 def test_signal_fade_no_trigger_when_all_gates_pass(
@@ -409,6 +434,11 @@ def test_signal_fade_no_trigger_when_all_gates_pass(
 def test_signal_fade_triggers_when_rvol_drops_below_gate(
     strategy_module, cfg_with_paths, tmp_path,
 ):
+    """Phase 4 (2026-05-16): the trigger is now a HARD-band fade
+    score (>= 3 of 6 gates failed), and the exit is a marketable-
+    limit DAY SELL, not MARKET+OPG. The behavioral intent — a
+    weakened signal at EOD closes the position — is preserved."""
+    _enable_new_signal_fade(cfg_with_paths)
     state = strategy_module.blank_state()
     state["open_positions"] = {
         "AAPL": _filled_pos(strategy_module, entry_iso="2026-05-04T13:30:00+00:00"),
@@ -420,38 +450,54 @@ def test_signal_fade_triggers_when_rvol_drops_below_gate(
     def handler(req):
         if req.method == "POST" and req.url.path == "/api/v2/bars":
             return httpx.Response(200, json={"data": {"bars": _faded_bars()}})
+        if req.method == "POST" and req.url.path == "/api/v2/quotes":
+            return httpx.Response(
+                200,
+                json={"data": [{"bid": 11.5, "ask": 11.6,
+                                "venue_code": "XNAS",
+                                "canonical_symbol": "AAPL"}]},
+            )
         if req.method == "DELETE" and req.url.path.startswith("/api/v2/orders/"):
             return httpx.Response(200, json={})
         if req.method == "POST" and req.url.path == "/api/v2/orders":
             sells.append(json.loads(req.content))
-            return httpx.Response(200, json={"data": {"order_id": "EX-MOO-1"}})
+            return httpx.Response(
+                200,
+                json={"data": {"native_response": {"id": "EX-MKL-1"}}},
+            )
         return httpx.Response(404)
 
     http = strategy_module.make_http_client(
         "http://x", transport=httpx.MockTransport(handler),
     )
-    now = datetime(2026, 5, 5, 20, 5, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 5, 19, 45, tzinfo=timezone.utc)  # 15:45 ET
     out = strategy_module.run_signal_fade_pass(
         cfg_with_paths, state, http, "k",
-        today_et=date(2026, 5, 5), state_path=state_path, now_utc=now,
+        today_et=date(2026, 5, 5), state_path=state_path,
+        now_utc=now, mode="exit",
     )
     assert out == ["AAPL"]
     assert state["open_positions"]["AAPL"]["exit_reason"] == "signal_fade"
-    # MOO submission semantics: market + OPG + sell.
-    assert sells, "signal-fade must submit a market sell"
-    assert sells[0]["order_type"] == "MARKET"
+    # New contract: marketable-limit DAY SELL.
+    assert sells, "signal-fade must submit a sell"
+    assert sells[0]["order_type"] == "LIMIT"
     assert sells[0]["side"] == "SELL"
-    assert sells[0]["time_in_force"] == "OPG"
+    assert sells[0]["time_in_force"] == "DAY"
 
 
 def test_signal_fade_runs_only_once_per_day(
     strategy_module, cfg_with_paths, tmp_path,
 ):
+    """Phase 4 (2026-05-16): the dedupe marker is now per-mode
+    (signal_fade_evaluated_for_date_exit /
+     signal_fade_evaluated_for_date_telemetry). Set the matching
+    marker so the exit pass short-circuits without fetching bars."""
+    _enable_new_signal_fade(cfg_with_paths)
     state = strategy_module.blank_state()
     state["open_positions"] = {
         "AAPL": _filled_pos(strategy_module, entry_iso="2026-05-04T13:30:00+00:00"),
     }
-    state["signal_fade_evaluated_for_date"] = "2026-05-05"
+    state["signal_fade_evaluated_for_date_exit"] = "2026-05-05"
     state_path = Path(cfg_with_paths["paths"]["state_path"])
 
     n_bars_calls = [0]
@@ -465,10 +511,11 @@ def test_signal_fade_runs_only_once_per_day(
     http = strategy_module.make_http_client(
         "http://x", transport=httpx.MockTransport(handler),
     )
-    now = datetime(2026, 5, 5, 20, 5, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 5, 19, 45, tzinfo=timezone.utc)  # 15:45 ET
     out = strategy_module.run_signal_fade_pass(
         cfg_with_paths, state, http, "k",
-        today_et=date(2026, 5, 5), state_path=state_path, now_utc=now,
+        today_et=date(2026, 5, 5), state_path=state_path,
+        now_utc=now, mode="exit",
     )
     assert out == []
     assert n_bars_calls[0] == 0  # short-circuited
@@ -482,6 +529,12 @@ def test_signal_fade_resets_on_new_session(strategy_module):
 
 
 def test_signal_fade_records_pending_exit(strategy_module, cfg_with_paths, tmp_path):
+    """Phase 4 (2026-05-16): the redesigned exit path persists
+    exit_order_id + status='exiting' on the position itself via
+    replace_protection_with_exit, NOT in
+    state['pending_signal_fade_exits'] (which only carried the
+    legacy OPG-routed exits)."""
+    _enable_new_signal_fade(cfg_with_paths)
     state = strategy_module.blank_state()
     state["open_positions"] = {
         "AAPL": _filled_pos(strategy_module, entry_iso="2026-05-04T13:30:00+00:00"),
@@ -491,23 +544,34 @@ def test_signal_fade_records_pending_exit(strategy_module, cfg_with_paths, tmp_p
     def handler(req):
         if req.method == "POST" and req.url.path == "/api/v2/bars":
             return httpx.Response(200, json={"data": {"bars": _faded_bars()}})
+        if req.method == "POST" and req.url.path == "/api/v2/quotes":
+            return httpx.Response(
+                200,
+                json={"data": [{"bid": 11.5, "ask": 11.6,
+                                "venue_code": "XNAS",
+                                "canonical_symbol": "AAPL"}]},
+            )
         if req.method == "DELETE" and req.url.path.startswith("/api/v2/orders/"):
             return httpx.Response(200, json={})
         if req.method == "POST" and req.url.path == "/api/v2/orders":
-            return httpx.Response(200, json={"data": {"order_id": "EX-MOO-7"}})
+            return httpx.Response(
+                200,
+                json={"data": {"native_response": {"id": "EX-MKL-7"}}},
+            )
         return httpx.Response(404)
 
     http = strategy_module.make_http_client(
         "http://x", transport=httpx.MockTransport(handler),
     )
-    now = datetime(2026, 5, 5, 20, 5, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 5, 19, 45, tzinfo=timezone.utc)
     strategy_module.run_signal_fade_pass(
         cfg_with_paths, state, http, "k",
-        today_et=date(2026, 5, 5), state_path=state_path, now_utc=now,
+        today_et=date(2026, 5, 5), state_path=state_path,
+        now_utc=now, mode="exit",
     )
-    pending = state["pending_signal_fade_exits"]
-    assert "AAPL" in pending
-    assert pending["AAPL"]["exit_order_id"] == "EX-MOO-7"
+    pos = state["open_positions"]["AAPL"]
+    assert pos["exit_order_id"] == "EX-MKL-7"
+    assert pos["status"] == "exiting"
 
 
 # ---------------------------------------------------------------- closures
