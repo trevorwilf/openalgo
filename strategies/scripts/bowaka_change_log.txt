@@ -628,7 +628,7 @@ flips the disabled-by-default features.
 
 
 ================================================================
-2026-05-16 — Quant + Engineering audit remediation (Phase 1–6)
+2026-05-16 — Quant + Engineering audit remediation (Phase 1–7)
 ================================================================
 
 2026-05-16 (uncommitted) | feature/bowaka-paper-epoch-ledger-separation
@@ -833,6 +833,40 @@ flips the disabled-by-default features.
         observed seconds sooner (no need to wait for the next
         scheduled poll interval) and the polling path remains as a
         belt-and-suspenders reconciliation surface.
+
+2026-05-16 (uncommitted) | feature/bowaka-candidate-decisions-counterfactuals
+        | feat(bowaka): candidate-decision ledger, minute-bar
+          storage, counterfactual engine
+      * fetch_and_store_candidate_minute_bars persists 1-minute
+        bars per candidate for the configured premarket-to-session-
+        end window. Parquet by default (gzipped jsonl fallback when
+        pyarrow is unavailable). One file per session date under
+        data/<env>/candidate_bars/bars_<YYYY-MM-DD>.parquet.
+      * bowaka_counterfactuals.py — new module with ENTRY_SCENARIOS
+        (10 alternative timings: session_open_actual, t_09_35/40/45,
+        t_10_00, t_10_30, or_breakout_15m, vwap_reclaim_first,
+        vwap_pullback_after_breakout, first_close_above_prior_close)
+        and EXIT_SURFACES (6 stop/target variants including two
+        stop-management rules). compute_counterfactuals returns one
+        record per entry scenario; the CLI
+        ``python -m strategies.scripts.bowaka_counterfactuals
+        --date YYYY-MM-DD --env paper`` writes them under
+        data/<env>/counterfactuals/<date>.jsonl.
+      * emit_intraday_tick now embeds shadow_stop_manager in every
+        intraday_tick log row when stop_manager.enabled=false. The
+        snapshot tells the operator what the rules WOULD have done
+        (would_have_moved_stop, shadow_stop_price, rule_triggered,
+        would_have_stopped_out) — a free ablation study.
+      * load_catalyst_overrides reads
+        data/<env>/catalyst_overrides.jsonl into a dict keyed by
+        (session_date, symbol). Phase 7 candidate_decision events
+        will look up matching entries when emit_entry_decision is
+        called.
+      Behavior: no change to live trading. The new artifacts
+        (candidate_bars, counterfactuals dir, shadow_stop_manager
+        payload on intraday_tick logs) all light up under the
+        Phase 5 logging.log_* switches. The legacy paths are
+        unchanged.
 
 
 ================================================================

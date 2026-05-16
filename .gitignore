@@ -122,6 +122,7 @@ strategies/scripts/*
 !strategies/scripts/bowaka_prefilter.py
 !strategies/scripts/bowaka_prefilter.yaml
 !strategies/scripts/bowaka_analysis.py
+!strategies/scripts/bowaka_counterfactuals.py
 !strategies/scripts/bowaka_change_log.txt
 # Windows launchers (.bat / .cmd / Task Scheduler XML).
 # NOTE: _run_bowaka_strategy_oneshot.cmd is INTENTIONALLY NOT in the

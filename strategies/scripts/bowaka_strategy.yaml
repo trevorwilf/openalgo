@@ -523,6 +523,28 @@ logging:
   log_config_snapshot: true
   log_shadow_risk_controls: true
 
+# Phase 7.2 (2026-05-16) — minute-bar storage for every prefiltered
+# candidate. Used by bowaka_counterfactuals.py to compute alternative
+# entry-timing outcomes after the session.
+research:
+  candidate_minute_bars:
+    enabled: true
+    output_dir: "data/paper/candidate_bars"
+    layout: "by_session"           # one file per session date
+    window:
+      premarket_start: "08:00"
+      session_end: "16:00"
+    columns:
+      - "ts"
+      - "open"
+      - "high"
+      - "low"
+      - "close"
+      - "volume"
+      - "vwap"
+      - "trade_count"
+    on_missing: "warn"             # warn | skip | fail
+
 # Phase 7.1 — per-position intraday liquidity monitor. ``enabled:
 # false`` default; flip true after operator establishes baseline
 # expectations on the configured feed (paper SIP is the recommended
