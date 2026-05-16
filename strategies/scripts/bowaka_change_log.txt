@@ -628,7 +628,7 @@ flips the disabled-by-default features.
 
 
 ================================================================
-2026-05-16 — Quant + Engineering audit remediation (Phase 1–5)
+2026-05-16 — Quant + Engineering audit remediation (Phase 1–6)
 ================================================================
 
 2026-05-16 (uncommitted) | feature/bowaka-paper-epoch-ledger-separation
@@ -803,6 +803,36 @@ flips the disabled-by-default features.
         max_gross_exposure_pct 2.00 as the upper rail on cumulative
         exposure. Stop-out counts no longer block — only logged.
         Every entry decision carries a shadow_controls snapshot.
+
+2026-05-16 (uncommitted) | feature/bowaka-order-state-streaming
+        | feat(bowaka): event-driven order stream with poll
+          reconciliation
+      * OrderStreamClient class scaffolds an SSE-style fill stream.
+        Default-off; instantiated only when cfg.broker.stream.enabled
+        is true. Tests inject events via push_test_event so no real
+        SSE server is required in CI.
+      * poll_fills accepts a stream_client kwarg. When set, the
+        stream's queue is drained first; stream-delivered rows flow
+        through the same _process_order_rows path as the poll, so the
+        Phase 3 idempotency layer dedupes any event that arrives
+        through both transports.
+      * Missed-event recovery: poll_fills compares the polled order
+        ID set against the stream's seen-set per tick and increments
+        missed_events_recovered_by_poll on every order the stream
+        didn't surface first.
+      * Reconnect / failure handling: record_failure tracks
+        consecutive failures up to max_consecutive_failures, then
+        emits a stream_failed ledger event and stops attempting to
+        reconnect for the rest of the session.
+      * emit_stream_health emits a stream_health ledger row with the
+        canonical 5-field payload (connected, last_event_at,
+        lag_seconds, missed_events_recovered_by_poll,
+        reconnect_count) per tick.
+      Behavior: no change to live trading until the operator flips
+        cfg.broker.stream.enabled to true. When enabled, fills are
+        observed seconds sooner (no need to wait for the next
+        scheduled poll interval) and the polling path remains as a
+        belt-and-suspenders reconciliation surface.
 
 
 ================================================================

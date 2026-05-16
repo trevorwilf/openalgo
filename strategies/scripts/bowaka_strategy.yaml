@@ -55,6 +55,21 @@ broker:
   base_url_default: "http://127.0.0.1:5000"
   timeout_seconds: 15
   poll_interval_seconds: 5
+  # Phase 6 (2026-05-16) — optional event-driven order updates.
+  # When enabled, an SSE-style stream pushes broker order events
+  # into poll_fills' processing loop; the existing polling path
+  # remains for reconciliation. Both share the Phase 3 idempotency
+  # layer so duplicate events are silently dropped. Ships
+  # default-off; operator flips after a smoke run validates the
+  # endpoint.
+  stream:
+    enabled: false
+    endpoint: "/api/v2/orders/stream"
+    reconnect_initial_backoff_seconds: 1
+    reconnect_max_backoff_seconds: 30
+    max_consecutive_failures: 5
+    lag_warning_seconds: 5
+    lag_severe_seconds: 30
 
 sizing:
   per_trade_pct: 0.10
