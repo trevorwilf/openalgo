@@ -117,17 +117,33 @@ def test_seconds_since_iso(strategy_module):
 
 
 def test_has_confirmed_protection_truth_table(strategy_module):
+    """Phase 2 (2026-05-16): without a broker_orders snapshot,
+    ``has_confirmed_protection`` returns False for any non-terminal
+    status — even when ``protection_status`` is ``oco_attached``.
+    The legacy contract trusted the stored string, which left four
+    positions stranded on 2026-05-15. The new contract requires
+    broker-verified evidence."""
     base = _filled_unprotected_pos()
     assert strategy_module.has_confirmed_protection(base) is False
     base["protection_status"] = "oco_attached"
-    assert strategy_module.has_confirmed_protection(base) is True
-    base["protection_status"] = "fallback_stop_attached"
-    assert strategy_module.has_confirmed_protection(base) is True
-    # Legacy back-compat: pre-Phase-5 positions with valid child IDs
-    # but no protection_status still count as protected.
-    base["protection_status"] = "none"
+    # Without snapshot — distrusted.
+    assert strategy_module.has_confirmed_protection(base) is False
+    # With a broker snapshot showing both children live — confirmed.
     base["child_order_ids"] = {"target": "T-1", "stop": "S-1"}
-    assert strategy_module.has_confirmed_protection(base) is True
+    bo = {
+        "T-1": {"status": "accepted"},
+        "S-1": {"status": "new"},
+    }
+    assert strategy_module.has_confirmed_protection(base, bo) is True
+    # fallback_stop equivalent.
+    fb = {
+        "status": "filled",
+        "fallback_stop_order_id": "FB-1",
+        "child_order_ids": {"target": "", "stop": ""},
+    }
+    assert strategy_module.has_confirmed_protection(
+        fb, {"FB-1": {"status": "new"}},
+    ) is True
 
 
 def test_protection_deadline_breached(strategy_module, cfg_phase5):

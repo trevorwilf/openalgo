@@ -628,7 +628,7 @@ flips the disabled-by-default features.
 
 
 ================================================================
-2026-05-16 — Quant + Engineering audit remediation (Phase 1)
+2026-05-16 — Quant + Engineering audit remediation (Phase 1–2)
 ================================================================
 
 2026-05-16 (uncommitted) | feature/bowaka-paper-epoch-ledger-separation
@@ -660,6 +660,45 @@ flips the disabled-by-default features.
         (now in data/archive/) continue to work. Tests run under
         environment=test so synthetic events land in data/test/
         and never pollute the paper rollup.
+
+2026-05-16 (uncommitted) | feature/bowaka-protection-state-broker-truth
+        | fix(bowaka): derive protection state from broker truth;
+          startup repair
+      * Added derive_protection_state(pos, broker_orders) and the
+        canonical PROTECTION_STATES enum
+        (flat / pending_entry / filled_unprotected /
+         oco_attached_confirmed / fallback_stop_attached_confirmed /
+         exit_order_pending / exit_order_accepted /
+         rebracket_pending / protection_repair_failed / closed).
+      * has_confirmed_protection now requires a broker_orders
+        snapshot to confirm protection. Without one, only closed/
+        flat are trusted. The stored pos["protection_status"]
+        string is no longer authoritative — this fixes the bug
+        that stranded ASPN/ONDS/PCT/QS on 2026-05-15.
+        enforce_protected_position_invariant fetches the open-orders
+        snapshot once per invocation (callers can also pass it in).
+      * reconcile_at_startup recomputes protection_state for every
+        open position from broker truth and emits a
+        startup_repair_triggered ledger event for any position
+        whose derived state is filled_unprotected. The next
+        invariant-enforcer tick then drives the actual repair via
+        the existing OCO-resubmit / fallback-stop / flatten ladder.
+      * replace_protection_with_exit is the new atomic primitive
+        for Phase 4's signal-fade redesign: submit replacement
+        exit FIRST, persist exit_order_id + status="exiting"
+        before any cancel I/O, THEN cancel OCO children
+        best-effort. On submit rejection the OCO stays live and
+        the helper returns (False, reason).
+      * Canonical protection_* ledger event types added (see
+        PROTECTION_EVENT_TYPES). All transitions through the new
+        helper land in the ledger via the protection_* family.
+      Behavior: on the next start of the strategy against a state
+        file that contains positions with empty child_order_ids and
+        stored "oco_attached" status, the reconcile step now flags
+        each one as filled_unprotected and the invariant enforcer
+        repairs them on the next tick (OCO retry, then fallback
+        stop, then flatten — exactly the existing ladder). No
+        behavior change for fully-protected positions.
 
 
 ================================================================
