@@ -628,7 +628,7 @@ flips the disabled-by-default features.
 
 
 ================================================================
-2026-05-16 — Quant + Engineering audit remediation (Phase 1–2)
+2026-05-16 — Quant + Engineering audit remediation (Phase 1–3)
 ================================================================
 
 2026-05-16 (uncommitted) | feature/bowaka-paper-epoch-ledger-separation
@@ -699,6 +699,36 @@ flips the disabled-by-default features.
         repairs them on the next tick (OCO retry, then fallback
         stop, then flatten — exactly the existing ladder). No
         behavior change for fully-protected positions.
+
+2026-05-16 (uncommitted) | feature/bowaka-parent-fill-idempotency-canonical-mfe-mae
+        | fix(bowaka): parent-fill idempotency + canonical MFE/MAE
+          engine
+      * _build_order_index only indexes parent_order_id when the
+        position is in a pre-fill state. A lingering FILLED parent
+        in /orders?status=all no longer re-triggers the parent-fill
+        branch — that was the bug that reset peak/trough on every
+        poll and corrupted MFE/MAE for the affected positions.
+      * New _handle_parent_fill helper runs exactly once per
+        (position, parent_order_id) pair. Second invocations are
+        no-ops; a parent fill arriving in a non-pre-fill state
+        emits one duplicate_parent_fill_suppressed event without
+        mutating price / qty / peak / trough.
+      * _initialize_peak_trough_once gates the peak/trough init at
+        entry_price so MFE/MAE state cannot be reset.
+      * trigger_time_stop computes an exit_idempotency_key
+        ({link_id}|exit|{reason}|{entry_date}) and scans the last
+        200 ledger entries for a matching exit_submitted /
+        replacement_exit_accepted / exit_order_accepted before
+        submitting. Two back-to-back calls (e.g., across a process
+        restart) now submit at most one market-sell. Emits an
+        exit_submitted event with the key for the next run to see.
+      * canonical_mfe_mae(entry_price, bars, mark_source="
+        trade_high_low"|"mid") is the one calculator used by tests
+        and by future close_position / closure-analysis paths.
+      Behavior: the parent fill is processed exactly once per
+        position regardless of broker echo behavior. Two close
+        attempts for the same position + reason on the same day
+        submit at most one market sell. No alpha changes.
 
 
 ================================================================
