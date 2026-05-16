@@ -8,6 +8,7 @@
 !bowaka_prefilter.py
 !bowaka_strategy.py
 !bowaka_analysis.py
+!bowaka_counterfactuals.py
 
 # Ignore log files if any
 *.log
