@@ -58,7 +58,7 @@ broker:
 
 sizing:
   per_trade_pct: 0.10
-  max_concurrent_positions: 18        # Report §7 validation default; pre-audit value was 18
+  max_concurrent_positions: 18        # Paper-mode profile (audit §6.3, 2026-05-16); validation defaults archived
   default_venue_code: "XNAS"
   # When true (and bankroll is enabled), each trade is sized to
   # ``bankroll / max_concurrent_positions`` instead of
@@ -93,7 +93,12 @@ sizing:
   # (useful if you want per-trade *smaller* than the gross cap would
   # imply — e.g., a 0.50 fraction with gross_cap=0.80 leaves a 30%
   # cumulative buffer on top of the per-trade buffer).
-  equal_slice_bankroll_fraction: null
+  #
+  # Paper-mode profile (audit §6.2, 2026-05-16): pin this to 0.80
+  # explicitly so relaxing risk.max_gross_exposure_pct does NOT
+  # auto-scale per-trade dollars. 0.80 reproduces the $4,000/slot
+  # behavior at bankroll=$90k and max_concurrent_positions=18.
+  equal_slice_bankroll_fraction: 0.80
 
   # Phase 6.1 — risk-per-trade sizing mode.
   #   "equal_slice" (default): legacy bankroll/N equal-notional logic.
@@ -156,8 +161,14 @@ bankroll:
     days: null
 
 risk:
-  daily_loss_pct: 0.030               # Report §7 validation default; pre-audit value was 0.03
-  max_gross_exposure_pct: 0.80        # Report §7 validation default; pre-audit value was 0.80
+  # Paper-mode profile (audit §6.3, 2026-05-16); validation
+  # defaults archived. The relaxation lets the paper run collect
+  # more samples (sample size is the binding constraint right now,
+  # not capital protection). Per-trade dollars are pinned upstream
+  # via sizing.equal_slice_bankroll_fraction so this loosening does
+  # not auto-scale individual positions.
+  daily_loss_pct: null                # was 0.030 — disabled in paper mode
+  max_gross_exposure_pct: 2.00        # was 0.80 — relaxed materially
   max_per_trade_dollars: null         # nullable absolute floor
   max_gross_exposure_dollars: null    # nullable absolute floor
   # Item 3 — capacity cap. Each position is bounded to this fraction
@@ -172,7 +183,7 @@ risk:
   # out. Without this cap a fast-mean-reverting morning could burn
   # through 10+ trades on stale signals, all paying spread. Null
   # disables the cap (back to "max_concurrent_positions" only).
-  max_total_entries_per_day: 10        # Report §7 validation default; pre-audit value was 10
+  max_total_entries_per_day: 25        # Paper-mode profile (audit §6.3, 2026-05-16); validation default archived (was 10)
 
   # Phase 6.1 — risk-per-trade additions.
   # expected_stop_slippage_pct: extra slippage cushion baked into
@@ -425,7 +436,11 @@ exits:
     fallback_stop_order_type: "stop"        # stop | stop_limit
     fallback_stop_limit_offset_pct: 0.02
     flatten_if_unprotected: true
-    block_entries_on_violation: true
+    # Paper-mode profile (audit §6.3, 2026-05-16): log + repair on
+    # protection violations but do not throttle new entries — the
+    # paper run wants the most samples possible. Shadow controls
+    # still report what would-have-been-blocked.
+    block_entries_on_violation: false
 
   # Phase 5.8 — stop-manager scaffolding (DISABLED by default).
   # When enabled, every intraday tick consults
@@ -479,6 +494,19 @@ logging:
   # value to densify ticks (e.g. 30s for high-vol regimes); raise
   # it to reduce API load if the broker rate-limits quotes.
   intraday_tick_interval_seconds: 60
+  # Paper-mode profile (audit §6.3, 2026-05-16) — research-grade
+  # observability. Each switch is read by the code path that emits
+  # the corresponding event; with these on a paper run produces a
+  # complete decision + counterfactual + execution-quality dataset
+  # that downstream analyses can consume directly.
+  log_candidate_decisions: true
+  log_rejected_candidates: true
+  log_counterfactual_entries: true
+  log_counterfactual_exits: true
+  log_order_execution_quality: true
+  log_protection_state: true
+  log_config_snapshot: true
+  log_shadow_risk_controls: true
 
 # Phase 7.1 — per-position intraday liquidity monitor. ``enabled:
 # false`` default; flip true after operator establishes baseline

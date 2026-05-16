@@ -1512,6 +1512,72 @@ class Entry:
     equity_at_entry: float | None = None
 
 
+# ---------------------------------------------------------------- Phase 5.2 — shadow controls
+#
+# When the paper-mode profile relaxes daily_loss_pct,
+# max_gross_exposure_pct, max_total_entries_per_day, etc., the
+# stricter thresholds those flags WOULD have applied get echoed as
+# shadow_controls in every entry_decision event. The flags are not
+# enforced — purely a research artifact so an operator can see how
+# the live system would have behaved under tighter discipline
+# without rerunning the data.
+
+
+def _shadow_daily_loss(state: State, cfg: dict, threshold_pct: float) -> bool:
+    """True when today's realized PnL fraction is at or below -threshold."""
+    bk_basis = float(
+        (state.get("bankroll") or {}).get("current_dollars") or 0.0
+    )
+    if bk_basis <= 0:
+        return False
+    pnl = float(state.get("daily_realized_pnl_strategy") or 0.0)
+    return (pnl / bk_basis) <= -abs(float(threshold_pct))
+
+
+def _shadow_gross_exposure(
+    state: State, cfg: dict, projected_gross_dollars: float,
+    threshold_pct: float,
+) -> bool:
+    """True when adding the candidate would push gross exposure
+    above ``threshold_pct`` of the bankroll basis."""
+    bk_basis = float(
+        (state.get("bankroll") or {}).get("current_dollars") or 0.0
+    )
+    if bk_basis <= 0:
+        return False
+    return (float(projected_gross_dollars) / bk_basis) > float(threshold_pct)
+
+
+def _shadow_consecutive_stopouts(state: State, *, threshold: int) -> bool:
+    return int(
+        state.get("consecutive_stopouts_count") or 0
+    ) >= int(threshold)
+
+
+def compute_shadow_controls(
+    state: State, cfg: dict, *, candidate_notional: float,
+    is_stopout_day: bool, current_gross_exposure_dollars: float,
+    entries_today: int,
+) -> dict[str, bool]:
+    """Phase 5.2 — compute what would-have-been-blocked under
+    stricter rules. Returns a dict suitable for embedding in an
+    entry_decision payload. Read-only; never mutates state."""
+    projected_gross = float(current_gross_exposure_dollars) + float(candidate_notional)
+    return {
+        "would_block_daily_loss_1pct":
+            _shadow_daily_loss(state, cfg, 0.01),
+        "would_block_daily_loss_3pct":
+            _shadow_daily_loss(state, cfg, 0.03),
+        "would_block_gross_exposure_40pct":
+            _shadow_gross_exposure(state, cfg, projected_gross, 0.40),
+        "would_block_max_entries_4":  entries_today >= 4,
+        "would_block_max_entries_10": entries_today >= 10,
+        "would_block_after_2_stopouts":
+            _shadow_consecutive_stopouts(state, threshold=2),
+        "paper_mode_hard_block_applied": False,
+    }
+
+
 def select_entries(
     candidates: list[Candidate],
     state: State,
@@ -1619,9 +1685,27 @@ def select_entries(
     daily_count_v = int(state.get("daily_entries_count", 0))
 
     for rank, cand in enumerate(candidates, start=1):
+        # Phase 5.2 — shadow controls. Computed per-candidate so the
+        # snapshot reflects "did THIS candidate cross would-block-
+        # gross-exposure-40pct?". Pure read of state; never mutates.
+        cand_notional = float(cand.close or 0.0) * float(
+            per_trade_dollars_override or 0.0
+        ) if per_trade_dollars_override else 0.0
+        try:
+            shadow = compute_shadow_controls(
+                state, cfg,
+                candidate_notional=cand_notional,
+                is_stopout_day=False,
+                current_gross_exposure_dollars=running_gross,
+                entries_today=daily_count_v + len(selected),
+            )
+        except Exception:
+            shadow = None
+
         # Phase 1.4: helper closure for rejection emission with shared
         # candidate-rank threading.
-        def _reject(reason: str, qty: int | None = None) -> None:
+        def _reject(reason: str, qty: int | None = None,
+                    _sh=shadow) -> None:
             emit_entry_decision_rejected(
                 cfg, candidate=cand, state=state,
                 reason=reason,
@@ -1629,6 +1713,7 @@ def select_entries(
                 candidate_rank=rank,
                 qty=qty,
                 venue_code=(cand.venue_code or sizing_cfg.get("default_venue_code")),
+                shadow_controls=_sh,
             )
 
         if cand.ticker in halt_skip:
@@ -4868,6 +4953,7 @@ def emit_entry_decision(
     entry_trigger: str = "session_open",
     candidate_rank: int | None = None,
     quote: dict[str, Any] | None = None,
+    shadow_controls: dict[str, bool] | None = None,
 ) -> None:
     """At submit time: capture every variable the analyst would want
     to know about why we picked this name at this moment.
@@ -4967,6 +5053,8 @@ def emit_entry_decision(
         "quote": quote,
         "config_hash": config_hash(cfg),
     }
+    if shadow_controls is not None:
+        rec["shadow_controls"] = shadow_controls
     _append_trade_log(cfg, link_id, rec)
     # Phase 1.5: mirror to the canonical ledger so reject-path
     # analytics (Phase 7) can see every candidate considered.
@@ -4988,6 +5076,7 @@ def emit_entry_decision_rejected(
     qty: int | None = None,
     venue_code: str | None = None,
     quote: dict[str, Any] | None = None,
+    shadow_controls: dict[str, bool] | None = None,
 ) -> None:
     """Phase 1.4: lightweight rejected-path emission used by
     :func:`select_entries` and :func:`filter_by_intraday_confirmation`
@@ -5039,6 +5128,8 @@ def emit_entry_decision_rejected(
         "quote": quote,
         "config_hash": config_hash(cfg),
     }
+    if shadow_controls is not None:
+        rec["shadow_controls"] = shadow_controls
     # No link_id — rejected events go to the ledger only.
     emit_ledger_event(
         cfg, event_type="entry_decision",
@@ -6011,14 +6102,23 @@ def update_daily_pnl(
 ) -> bool:
     """Compare current equity to the session baseline. Trip the daily
     loss circuit breaker once, log the trip ratios. Returns True if
-    the trip happened on this call."""
+    the trip happened on this call.
+
+    Phase 5.1: when ``cfg.risk.daily_loss_pct`` is null (paper-mode
+    profile), the trip is disabled — equity may grind down without
+    blocking new entries. Shadow controls still report what would
+    have been tripped under the legacy threshold."""
     baseline = state.get("daily_pnl_baseline_equity")
     if baseline in (None, 0):
         return False
     if state.get("daily_pnl_tripped"):
         return False
+    raw_threshold = cfg["risk"].get("daily_loss_pct")
+    if raw_threshold is None:
+        # Phase 5.1: feature disabled in paper-mode profile.
+        return False
     pnl_pct = (current_equity - float(baseline)) / float(baseline)
-    threshold = float(cfg["risk"]["daily_loss_pct"])
+    threshold = float(raw_threshold)
     if pnl_pct <= -threshold:
         state["daily_pnl_tripped"] = True
         # Phase 3.5: mirror into the unified block flag so entry
@@ -7028,6 +7128,20 @@ def run_session_entry_pass(
         # uses (ticker + unix seconds), but we generate it here so
         # the entry_decision record can be filed under the same path.
         link_id_for_log = f"BOWAKA-{entry.ticker}-{int(time.time())}"
+        # Phase 5.2 — shadow controls on the accepted path. The
+        # snapshot is taken with the entry's actual notional and the
+        # current running_gross + entries_today counter so the
+        # event reflects the exact moment of the accept decision.
+        try:
+            shadow_for_accept = compute_shadow_controls(
+                state, cfg,
+                candidate_notional=float(entry.qty) * float(entry.close_price),
+                is_stopout_day=False,
+                current_gross_exposure_dollars=running_gross_at_slate_start,
+                entries_today=int(state.get("daily_entries_count", 0)),
+            )
+        except Exception:
+            shadow_for_accept = None
         try:
             emit_entry_decision(
                 cfg, link_id=link_id_for_log, entry=entry, state=state,
@@ -7043,6 +7157,7 @@ def run_session_entry_pass(
                         "intraday_confirmation", {}
                     ).get("enabled") else None
                 ),
+                shadow_controls=shadow_for_accept,
             )
         except Exception as e:
             LOG.warning("emit_entry_decision failed for %s: %s", entry.ticker, e)
