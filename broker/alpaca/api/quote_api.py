@@ -7,6 +7,7 @@ quotes/bars.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -37,17 +38,17 @@ class AlpacaQuoteAdapter:
             return authenticate()
         return self._auth
 
-    def _get(self, url_path: str) -> dict:
+    def _get(self, url_path: str, params: dict | None = None) -> dict:
         auth = self._resolve_auth()
         if self._client is not None:
-            r = self._client.get(url_path)
+            r = self._client.get(url_path, params=params)
         else:
             with httpx.Client(
                 base_url=auth.data_base_url,
                 headers=dict(auth.headers),
                 timeout=httpx.Timeout(10.0, connect=5.0),
             ) as c:
-                r = c.get(url_path)
+                r = c.get(url_path, params=params)
         r.raise_for_status()
         return r.json()
 
@@ -69,7 +70,13 @@ class AlpacaQuoteAdapter:
         # The previous /quotes/latest endpoint omitted last-trade so
         # ``last`` had to fall back to the ask price, which the v1
         # bridge then propagated as ltp/high/low/open/prev_close.
-        data = self._get(f"/v2/stocks/{symbol}/snapshot")
+        # Pin the data feed (see bar_api.py for the full rationale —
+        # snapshot is on data.alpaca.markets too, so the same SIP-default
+        # 403 trap applies). ALPACA_DATA_FEED defaults to "iex".
+        data = self._get(
+            f"/v2/stocks/{symbol}/snapshot",
+            params={"feed": os.environ.get("ALPACA_DATA_FEED", "iex")},
+        )
         latest_quote = data.get("latestQuote") or {}
         latest_trade = data.get("latestTrade") or {}
         daily_bar = data.get("dailyBar") or {}

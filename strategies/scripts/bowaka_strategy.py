@@ -3375,6 +3375,20 @@ def trading_days_since(entry_iso: str, today_et: date) -> int:
     return max(0, len(sched) - 1)
 
 
+def _revert_exit_pending(
+    pos: dict[str, Any],
+    state: State,
+    state_path: Path,
+) -> None:
+    """Roll back the dedup reservation that ``trigger_time_stop`` placed
+    on a position when the exit submission fails. Returning the status
+    to ``"filled"`` re-arms the position for the next pass to retry."""
+    pos["status"] = "filled"
+    pos.pop("exit_reason_pending", None)
+    pos.pop("exit_pending_at", None)
+    save_state(state, state_path)
+
+
 def trigger_time_stop(
     ticker: str,
     pos: dict[str, Any],
@@ -3389,7 +3403,45 @@ def trigger_time_stop(
 ) -> None:
     """Cancel both OCO children, submit a market sell, mark the position
     as exiting. Idempotent on cancel: a child already filled (404) is
-    treated as success so the market sell still goes out."""
+    treated as success so the market sell still goes out.
+
+    Dedup guard (2026-05-15 incident): this function's network I/O
+    (cancel children + submit_market_sell) can outlast a single
+    ``loop_interval_seconds`` tick. Before the guard, two back-to-back
+    intraday-loop iterations could both enter the function for the same
+    ticker before the first reached the ``status = "exiting"`` mutation,
+    causing the market-sell to fire twice and (in the live incident)
+    opening an unintended short. The guard at the top reserves a
+    transient ``"exit_pending"`` status BEFORE any I/O and persists it
+    immediately, so the caller-level filter
+    (``pos.get("status") != "filled"`` in run_time_stop_pass and
+    siblings) and this function's own mirrored check both exclude the
+    position from re-firing. On any error path the status is reverted
+    to ``"filled"`` so the next pass can retry."""
+    # ---- Dedup guard ----------------------------------------------------
+    # Mirror the caller's ``status == "filled"`` filter here too, so
+    # any future caller that forgets to filter (or a race where the
+    # caller-side check passed before the first exit reserved the
+    # slot) is still safe.
+    if pos.get("status") != "filled":
+        LOG.info(
+            "exit for %s already in flight (status=%s, reason=%s); "
+            "not re-triggering",
+            ticker,
+            pos.get("status"),
+            pos.get("exit_reason") or pos.get("exit_reason_pending") or "?",
+        )
+        return
+    # Reserve the slot BEFORE any network I/O. The intraday loop fires
+    # every ``loop_interval_seconds`` (default 5s); cancel + submit can
+    # take longer than that, so without this reservation a second tick
+    # would see ``status == "filled"`` and re-enter.
+    pos["status"] = "exit_pending"
+    pos["exit_reason_pending"] = reason
+    pos["exit_pending_at"] = datetime.now(timezone.utc).isoformat()
+    save_state(state, state_path)
+    # ---------------------------------------------------------------------
+
     LOG.info("Triggering exit (%s) for %s qty=%d",
              reason, ticker, pos.get("qty"))
     children = pos.get("child_order_ids") or {}
@@ -3410,6 +3462,7 @@ def trigger_time_stop(
         )
     except Exception as e:
         LOG.exception("market-sell submission failed for %s: %s", ticker, e)
+        _revert_exit_pending(pos, state, state_path)
         return
 
     # Item 7 fix: a 4xx/5xx from /api/v2/orders does NOT raise from
@@ -3422,10 +3475,11 @@ def trigger_time_stop(
     http_status = (resp or {}).get("_http_status") if isinstance(resp, dict) else None
     if http_status not in (200, 201):
         LOG.error(
-            "market-sell rejected for %s (status=%s); leaving status='filled' "
-            "so the next pass can retry: %s",
+            "market-sell rejected for %s (status=%s); reverting to "
+            "'filled' so the next pass can retry: %s",
             ticker, http_status, resp,
         )
+        _revert_exit_pending(pos, state, state_path)
         return
 
     data = (resp.get("data") or {}) if isinstance(resp, dict) else {}
@@ -3433,15 +3487,21 @@ def trigger_time_stop(
     if not exit_id:
         LOG.error(
             "market-sell accepted for %s but no order_id surfaced; "
-            "leaving status='filled' so the next pass can retry: %s",
+            "reverting to 'filled' so the next pass can retry: %s",
             ticker, resp,
         )
+        _revert_exit_pending(pos, state, state_path)
         return
 
     pos["status"] = "exiting"
     pos["exit_reason"] = reason
     pos["exit_order_id"] = exit_id
     pos["exit_submitted_at"] = datetime.now(timezone.utc).isoformat()
+    # Clear the transient reservation fields now that the broker has
+    # ack'd — ``exit_reason`` / ``exit_submitted_at`` / ``exit_order_id``
+    # are the canonical "exit in flight" markers from here on.
+    pos.pop("exit_reason_pending", None)
+    pos.pop("exit_pending_at", None)
     if reason == "signal_fade":
         state.setdefault("pending_signal_fade_exits", {})[ticker] = {
             "submitted_at": pos["exit_submitted_at"],

@@ -356,3 +356,204 @@ def test_main_succeeds_with_api_key(strategy_module, monkeypatch, cfg_with_paths
     cfg_path.write_text(yaml.safe_dump(cfg_with_paths))
     rc = strategy_module.main(["--config", str(cfg_path), "--once"])
     assert rc == 0
+
+
+# ============================================================
+# 2026-05-15 — trigger_time_stop dedup guard
+#
+# Regression for the live incident on 2026-05-15: a single ASPI
+# position had two market-sells fired ~12s apart because the
+# intraday loop's network I/O (cancel children + submit market
+# sell) outlasted one ``loop_interval_seconds`` tick. The second
+# loop iteration saw ``status == "filled"`` and re-entered the
+# function, opening an unintended short. The guard reserves a
+# transient ``"exit_pending"`` status BEFORE any I/O so the
+# second tick's filter excludes the position.
+# ============================================================
+
+
+def _make_filled_position(qty: int = 100) -> dict:
+    """Minimal position dict shaped like ``state['open_positions'][t]``."""
+    return {
+        "qty": qty,
+        "entry_price": 10.0,
+        "entry_timestamp": "2026-05-12T13:30:00+00:00",
+        "status": "filled",
+        "venue_code": "XNAS",
+        "child_order_ids": {"target": "tgt-1", "stop": "stp-1"},
+        "link_id": "BOWAKA-TEST-1",
+    }
+
+
+def test_trigger_time_stop_skips_when_status_is_exit_pending(
+    strategy_module, cfg_with_paths, monkeypatch
+):
+    """Dedup guard: a position whose status is already ``exit_pending``
+    (i.e. a previous loop iteration is mid-flight) must not have its
+    exit re-triggered."""
+    bw = strategy_module
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    pos = _make_filled_position()
+    pos["status"] = "exit_pending"
+    pos["exit_reason_pending"] = "time_stop"
+    pos["exit_pending_at"] = "2026-05-15T13:45:00+00:00"
+    state = {"open_positions": {"AAPL": pos}}
+    bw.save_state(state, state_path)
+
+    calls = {"submit": 0, "cancel": 0}
+
+    def fake_submit(*a, **kw):
+        calls["submit"] += 1
+        return {"_http_status": 200, "data": {"order_id": "SHOULD-NOT-FIRE"}}
+
+    def fake_cancel(*a, **kw):
+        calls["cancel"] += 1
+        return {}
+
+    monkeypatch.setattr(bw, "submit_market_sell", fake_submit)
+    monkeypatch.setattr(bw, "cancel_order", fake_cancel)
+
+    bw.trigger_time_stop(
+        "AAPL", pos, cfg_with_paths, None, "k",
+        state=state, state_path=state_path,
+    )
+
+    assert pos["status"] == "exit_pending", "guard must not mutate status"
+    assert calls["submit"] == 0, "guard must NOT submit a duplicate market sell"
+    assert calls["cancel"] == 0, "guard must NOT re-cancel OCO children"
+
+
+def test_trigger_time_stop_skips_when_status_is_exiting(
+    strategy_module, cfg_with_paths, monkeypatch
+):
+    """Same dedup rule for ``status == "exiting"`` (the post-ack
+    state) — a redundant trigger must also be a no-op."""
+    bw = strategy_module
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    pos = _make_filled_position()
+    pos["status"] = "exiting"
+    pos["exit_reason"] = "time_stop"
+    pos["exit_order_id"] = "prior-exit-id"
+    state = {"open_positions": {"AAPL": pos}}
+    bw.save_state(state, state_path)
+
+    submitted = []
+    monkeypatch.setattr(
+        bw, "submit_market_sell",
+        lambda *a, **kw: submitted.append(1) or {"_http_status": 200, "data": {"order_id": "X"}},
+    )
+    monkeypatch.setattr(bw, "cancel_order", lambda *a, **kw: {})
+
+    bw.trigger_time_stop(
+        "AAPL", pos, cfg_with_paths, None, "k",
+        state=state, state_path=state_path,
+    )
+
+    assert pos["status"] == "exiting"
+    assert pos["exit_order_id"] == "prior-exit-id"
+    assert submitted == []
+
+
+def test_trigger_time_stop_reserves_exit_pending_before_submit_market_sell(
+    strategy_module, cfg_with_paths, monkeypatch
+):
+    """The status flip to ``exit_pending`` must happen BEFORE the broker
+    call. We assert this by sampling ``state`` from inside the mocked
+    ``submit_market_sell`` — by the time the broker call fires, the
+    reservation must already be visible in state."""
+    bw = strategy_module
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    pos = _make_filled_position()
+    state = {"open_positions": {"AAPL": pos}}
+    bw.save_state(state, state_path)
+
+    seen_status_at_submit: list[str] = []
+    seen_status_on_disk: list[str] = []
+
+    def fake_submit(ticker, qty, http, api_key, *, venue_code, time_in_force):
+        # In-memory snapshot
+        seen_status_at_submit.append(state["open_positions"][ticker]["status"])
+        # And: must already be persisted (so a crash here wouldn't strand
+        # the reservation in memory only).
+        on_disk = json.loads(state_path.read_text())
+        seen_status_on_disk.append(on_disk["open_positions"][ticker]["status"])
+        return {"_http_status": 200, "data": {"order_id": "FAKE-1"}}
+
+    monkeypatch.setattr(bw, "cancel_order", lambda *a, **kw: {})
+    monkeypatch.setattr(bw, "submit_market_sell", fake_submit)
+
+    bw.trigger_time_stop(
+        "AAPL", pos, cfg_with_paths, None, "k",
+        state=state, state_path=state_path,
+    )
+
+    assert seen_status_at_submit == ["exit_pending"], (
+        f"submit_market_sell saw status={seen_status_at_submit!r}; "
+        "the dedup reservation must be visible BEFORE the broker call"
+    )
+    assert seen_status_on_disk == ["exit_pending"], (
+        "the dedup reservation must be persisted on disk before the broker "
+        "call (so a crash mid-call doesn't strand the position as 'filled')"
+    )
+    # Post-success: 'exit_pending' → 'exiting'; transient fields cleared.
+    assert pos["status"] == "exiting"
+    assert pos["exit_order_id"] == "FAKE-1"
+    assert "exit_reason_pending" not in pos
+    assert "exit_pending_at" not in pos
+
+
+def test_trigger_time_stop_reverts_to_filled_on_http_error(
+    strategy_module, cfg_with_paths, monkeypatch
+):
+    """If submit_market_sell returns non-200, the dedup reservation is
+    reverted to ``"filled"`` so the next pass retries cleanly (rather
+    than getting stuck on ``exit_pending`` forever)."""
+    bw = strategy_module
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    pos = _make_filled_position()
+    state = {"open_positions": {"AAPL": pos}}
+    bw.save_state(state, state_path)
+
+    monkeypatch.setattr(bw, "cancel_order", lambda *a, **kw: {})
+    monkeypatch.setattr(
+        bw, "submit_market_sell",
+        lambda *a, **kw: {"_http_status": 500, "error": "broker rejected"},
+    )
+
+    bw.trigger_time_stop(
+        "AAPL", pos, cfg_with_paths, None, "k",
+        state=state, state_path=state_path,
+    )
+
+    assert pos["status"] == "filled", "status must revert for retry"
+    assert "exit_reason_pending" not in pos
+    assert "exit_pending_at" not in pos
+    # And on-disk state matches.
+    on_disk = json.loads(state_path.read_text())
+    assert on_disk["open_positions"]["AAPL"]["status"] == "filled"
+
+
+def test_trigger_time_stop_reverts_on_missing_order_id(
+    strategy_module, cfg_with_paths, monkeypatch
+):
+    """200 OK but no order_id surfaced → also revert for retry."""
+    bw = strategy_module
+    state_path = Path(cfg_with_paths["paths"]["state_path"])
+    pos = _make_filled_position()
+    state = {"open_positions": {"AAPL": pos}}
+    bw.save_state(state, state_path)
+
+    monkeypatch.setattr(bw, "cancel_order", lambda *a, **kw: {})
+    monkeypatch.setattr(
+        bw, "submit_market_sell",
+        lambda *a, **kw: {"_http_status": 200, "data": {}},  # missing order_id
+    )
+
+    bw.trigger_time_stop(
+        "AAPL", pos, cfg_with_paths, None, "k",
+        state=state, state_path=state_path,
+    )
+
+    assert pos["status"] == "filled"
+    assert "exit_reason_pending" not in pos
+    assert "exit_pending_at" not in pos

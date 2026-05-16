@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -91,6 +92,13 @@ class AlpacaBarAdapter:
             "start": _iso(request.start),
             "end": _iso(request.end),
             "limit": 10000,
+            # Pin the data feed explicitly. When omitted, Alpaca routes
+            # "recent" stock-bar requests (end within ~15 min of now) to
+            # SIP — accounts without SIP entitlement get 403
+            # "subscription does not permit querying recent SIP data".
+            # Historical bars work without this; live/EOD bars don't.
+            # Operators with SIP can set ALPACA_DATA_FEED=sip in .env.
+            "feed": os.environ.get("ALPACA_DATA_FEED", "iex"),
         }
         # Alpaca paginates beyond ``limit`` via ``next_page_token``. A
         # historical-bar consumer asking for more rows than fit in a

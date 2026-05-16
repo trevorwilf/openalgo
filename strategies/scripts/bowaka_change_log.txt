@@ -560,6 +560,74 @@ flips the disabled-by-default features.
 
 
 ================================================================
+2026-05-15 — Exit-trigger dedup guard (incident retrospective)
+================================================================
+
+2026-05-15 07:45 MT (live)   | (incident, no commit)        | ASPI exit fired twice
+  - On the 2026-05-15 session-open time-stop pass the intraday loop
+    called trigger_time_stop for ASPI at 07:45:25 MT (09:45:25 ET)
+    and again at 07:45:37 MT (12s apart). Both reached Alpaca; both
+    market sells of 643 ASPI filled at $5.77. The first closed the
+    long carryover (realized pnl = -$115.74); the second OPENED an
+    unintended short of 643 ASPI @ $5.77 that was not tracked in
+    state.open_positions and had no OCO bracket protection.
+  - Root cause: trigger_time_stop's network I/O (cancel OCO children
+    + submit_market_sell) routinely outlasts one
+    cfg.session.loop_interval_seconds tick (default 5s). Before the
+    fix, pos["status"] only flipped from "filled" to "exiting" AFTER
+    submit_market_sell returned with a 200 + order_id. A second loop
+    tick fired in the gap, saw status == "filled", and re-entered.
+  - Mitigation (live): a manual BUY 643 ASPI MARKET DAY was
+    submitted via /api/v2/orders at 15:10:12 ET; filled at $5.80,
+    realizing -$19.29 on the unintended short. ASPI is flat as of
+    15:10 ET. Bowaka's state.open_positions was already clean (the
+    strategy treated ASPI as closed after its single "closure"
+    record); no state edit was needed.
+
+2026-05-15 (uncommitted)     | (uncommitted)                | fix(bowaka): dedup guard on trigger_time_stop
+  - trigger_time_stop now reserves the position slot BEFORE any
+    network I/O by flipping pos["status"] from "filled" to a
+    transient "exit_pending", persisting state immediately, then
+    proceeding. The existing caller-side filter
+    (``pos.get("status") != "filled"`` in run_time_stop_pass,
+    run_signal_fade_pass, execute_kill_l2 / l3, and the protected-
+    position enforcer) already excludes positions in this state; a
+    mirrored check at the top of the function makes the guard self-
+    contained for any future caller that forgets to filter.
+  - On every error path (submit_market_sell exception, non-200 HTTP,
+    or missing order_id) the new ``_revert_exit_pending`` helper
+    rolls status back to "filled" and clears the transient fields,
+    so the next pass retries cleanly rather than getting stuck on
+    "exit_pending" forever.
+  - On success, "exit_pending" transitions to "exiting" (the existing
+    canonical in-flight marker); the transient fields
+    ``exit_reason_pending`` / ``exit_pending_at`` are cleared.
+  - New regression tests in tests/strategies/test_bowaka_strategy.py:
+      * test_trigger_time_stop_skips_when_status_is_exit_pending
+      * test_trigger_time_stop_skips_when_status_is_exiting
+      * test_trigger_time_stop_reserves_exit_pending_before_submit_market_sell
+      * test_trigger_time_stop_reverts_to_filled_on_http_error
+      * test_trigger_time_stop_reverts_on_missing_order_id
+  - Behavior: from this commit, no time_stop / signal_fade /
+    kill_switch_l2 / kill_switch_l3 / protected_position exit can
+    submit two market sells for the same position within one
+    session. A broker-side rejection (5xx, 4xx, or missing
+    order_id) re-arms the position for the next pass; only an
+    accepted submission with a real order_id transitions the
+    position to "exiting".
+  - Not in scope (open follow-ups):
+      * Self-healing of stale "exit_pending" status on restart —
+        currently relies on the existing reconcile pass to detect
+        a closed_externally / untracked mismatch with Alpaca. A TTL
+        sweep at load_state time would be tighter; deferred.
+      * The same race exists in principle for parent BUY paths
+        (submit_parent_market_buy / submit_otoco) but those are
+        guarded by the entry-pass's once-per-session ``entered_today``
+        check and the daily entry cap, so a re-fire is not observed.
+        Worth a follow-up audit.
+
+
+================================================================
 Active runtime knobs that drive trading behavior
 ================================================================
 
