@@ -628,7 +628,7 @@ flips the disabled-by-default features.
 
 
 ================================================================
-2026-05-16 — Quant + Engineering audit remediation (Phase 1–7)
+2026-05-16 — Quant + Engineering audit remediation (Phase 1–8)
 ================================================================
 
 2026-05-16 (uncommitted) | feature/bowaka-paper-epoch-ledger-separation
@@ -867,6 +867,42 @@ flips the disabled-by-default features.
         payload on intraday_tick logs) all light up under the
         Phase 5 logging.log_* switches. The legacy paths are
         unchanged.
+
+2026-05-16 (uncommitted) | feature/bowaka-execution-quality-research-reports
+        | feat(bowaka): execution-quality telemetry, manual-
+          intervention events, daily/weekly/incident reports
+      * emit_order_event now embeds an execution_quality payload on
+        parent and exit-leg fills with: arrival_bid / arrival_ask /
+        arrival_mid / arrival_spread_pct (captured at SUBMIT time
+        via pos.arrival_market, NOT at fill time);
+        submitted_ts_utc / filled_ts_utc / fill_latency_ms;
+        slippage_vs_mid_bps / slippage_vs_ask_bps (buy) /
+        slippage_vs_bid_bps (sell); effective_spread_bps;
+        post_fill_mid_15s / 60s / 300s placeholders (backfilled
+        by a future intraday-tick patch). Slippage sign is
+        normalized so "positive = worse for the trader" on both
+        sides.
+      * bowaka_analysis.py grows four new top-level switches:
+          --manual-intervention   (write a manual_intervention
+                                   ledger event from the CLI)
+          --daily-report YYYY-MM-DD
+          --weekly-report YYYY-Www
+          --incident-report ID
+        Reports are markdown under reports/{daily,weekly,incidents}/
+        and ALWAYS include the Appendix-D metadata block
+        (analysis_epoch, strategy_version, environment, data_feed
+        lineage). Daily/weekly reports refuse to run on a mixed-
+        environment ledger.
+      * Two prefab incident reports committed to
+        reports/incidents/:
+          incident_2026_05_15_signal_fade_opg_rejections.md
+          incident_2026_05_15_aspi_duplicate_time_stop.md
+        These document the bugs Phase 2/3/4 closed and serve as
+        fixtures for the renderer's tests.
+      Behavior: no change to live trading. Execution-quality data
+        starts landing in per-trade jsonl on the next run for every
+        parent/exit fill; downstream analyses can rely on the
+        canonical schema documented in this commit.
 
 
 ================================================================

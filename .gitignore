@@ -110,6 +110,13 @@ frontend/private/**
 !frontend/private/tradingview/
 !frontend/private/tradingview/README.md
 reports/*
+# Phase 8 (2026-05-16) — bowaka prefab incident reports are tracked
+# so the renderer has stable fixtures and operators see the post-
+# mortems in source. The rest of reports/ remains ignored (it gets
+# millions of generated artifacts).
+!reports/incidents/
+!reports/incidents/incident_2026_05_15_signal_fade_opg_rejections.md
+!reports/incidents/incident_2026_05_15_aspi_duplicate_time_stop.md
 
 # strategies — block user-uploaded scripts but track the canonical
 # bowaka deployment artifacts (the cmd/bat/sh wrappers + xml/cron task
