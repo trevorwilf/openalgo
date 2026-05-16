@@ -418,10 +418,8 @@ def test_select_entries_rejects_leveraged_etp_by_class(
     )
     assert [e.ticker for e in selected] == ["AAPL"]
     # Verify the ledger captured the rejection with the correct reason.
-    ledger_path = (
-        Path(cfg_with_paths["paths"]["daily_summary_path"]).parent
-        / "trade_ledger.jsonl"
-    )
+    # Phase 1.2: ledger lives under data/<env>/trade_ledger.jsonl.
+    ledger_path = strategy_module._ledger_path(cfg_with_paths)
     events = []
     for line in ledger_path.read_text().splitlines():
         if not line.strip():

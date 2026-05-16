@@ -273,10 +273,8 @@ def test_select_entries_blocks_when_flag_set(strategy_module, cfg_phase3):
         cfg=cfg_phase3, kill_state=strategy_module.KillLevel.NONE,
     )
     assert sel == []
-    ledger_path = (
-        Path(cfg_phase3["paths"]["daily_summary_path"]).parent
-        / "trade_ledger.jsonl"
-    )
+    # Phase 1.2: ledger lives under data/<env>/trade_ledger.jsonl.
+    ledger_path = strategy_module._ledger_path(cfg_phase3)
     events = []
     for line in ledger_path.read_text().splitlines():
         if not line.strip():

@@ -213,10 +213,8 @@ def test_oco_fail_then_fallback_succeeds(strategy_module, cfg_phase5, tmp_path):
     assert state["open_positions"]["AAPL"]["fallback_stop_order_id"] == "FB-1"
     assert n_fallback[0] == 1
     # Ledger captured the protection_event.
-    ledger_path = (
-        Path(cfg_phase5["paths"]["daily_summary_path"]).parent
-        / "trade_ledger.jsonl"
-    )
+    # Phase 1.2: ledger lives under data/<env>/trade_ledger.jsonl.
+    ledger_path = strategy_module._ledger_path(cfg_phase5)
     events = []
     for line in ledger_path.read_text().splitlines():
         if line.strip():

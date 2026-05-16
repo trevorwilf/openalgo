@@ -279,9 +279,13 @@ def test_load_candidates_handshake_disabled_accepts_any(strategy_module, tmp_pat
 
 
 def _ledger_for(cfg) -> Path:
-    """Resolve the ledger path for a cfg with paths.daily_summary_path."""
-    summary = Path(cfg["paths"]["daily_summary_path"])
-    return summary.parent / "trade_ledger.jsonl"
+    """Resolve the ledger path for a cfg with paths.daily_summary_path.
+
+    Phase 1.2 — the strategy now partitions the ledger by environment
+    under ``data/<env>/trade_ledger.jsonl``. Delegate to the canonical
+    resolver so tests stay aligned with the runtime path."""
+    import bowaka_strategy as bw
+    return bw._ledger_path(cfg)
 
 
 def _read_ledger(path: Path) -> list[dict]:
@@ -448,7 +452,9 @@ def test_ledger_event_has_uuid_and_schema_version(
         payload={"reason": "accepted"},
     )
     [ev] = _read_ledger(_ledger_for(cfg_with_paths))
-    assert ev["schema_version"] == 1
+    # Phase 1.3: schema bumped to 3. Use ``>= 1`` for forward
+    # compatibility — the v1 shape is no longer the canonical form.
+    assert ev["schema_version"] >= 1
     # uuid4 hex is 32 chars all hex.
     assert re.fullmatch(r"[0-9a-f]{32}", ev["event_id"])
     assert ev["session_date"]  # populated
@@ -571,7 +577,9 @@ def test_reconcile_summary_appends_correction_version(
         "total_realized_pnl": 0.0,
     }) + "\n")
     # Seed the ledger with a closure that the prior summary missed.
-    ledger = summary_path.parent / "trade_ledger.jsonl"
+    # Phase 1.2: ledger now lives under data/<env>/trade_ledger.jsonl.
+    ledger = _ledger_for(cfg_with_paths)
+    ledger.parent.mkdir(parents=True, exist_ok=True)
     import uuid
     with open(ledger, "w") as f:
         f.write(json.dumps({

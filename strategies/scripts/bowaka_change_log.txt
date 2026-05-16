@@ -628,6 +628,41 @@ flips the disabled-by-default features.
 
 
 ================================================================
+2026-05-16 — Quant + Engineering audit remediation (Phase 1)
+================================================================
+
+2026-05-16 (uncommitted) | feature/bowaka-paper-epoch-ledger-separation
+        | feat(bowaka): paper analysis epoch + environment-separated
+          ledgers (schema v3)
+      * data/ now partitioned by environment: trade_ledger.jsonl, and
+        candidate_decisions/, protection_events/, counterfactuals/,
+        config_snapshots/ live under data/<env>/ where env is
+        "paper" | "test" | "live". The legacy flat ledger has been
+        archived to data/archive/pre_epoch_2026_05_16/ (915 events).
+      * emit_ledger_event bumps schema_version to 3 and stamps every
+        record with environment, is_test_fixture, strategy_id,
+        strategy_version (git sha), analysis_epoch, run_id (stable
+        per process), daemon_instance_id (host_pid_uuid),
+        config_hash_full (full sha256), config_snapshot_path. The
+        snapshot is written once at startup under
+        data/<env>/config_snapshots/<date>_<run_id>.yaml.
+      * recompute_daily_summary_from_ledger refuses a mixed-env
+        ledger unless include_test_fixtures=True is passed. The
+        same flag is wired through bowaka_analysis.py's CLI as
+        --include-test-fixtures. Synthetic test fixtures can no
+        longer contaminate paper analysis through a shared file.
+      * main() refuses to start when strategy.environment falls
+        outside {paper,test,live} or disagrees with the resolved
+        ledger path (operator opt-out via paths.trade_ledger_path).
+      Behavior: a paper run from 2026-05-16 forward writes its
+        ledger to data/paper/trade_ledger.jsonl with v3 envelope
+        events. Analyses run on the historical pre-epoch ledger
+        (now in data/archive/) continue to work. Tests run under
+        environment=test so synthetic events land in data/test/
+        and never pollute the paper rollup.
+
+
+================================================================
 Active runtime knobs that drive trading behavior
 ================================================================
 

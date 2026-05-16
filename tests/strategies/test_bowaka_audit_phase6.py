@@ -339,9 +339,8 @@ def test_marketable_limit_timeout_cancels_and_frees_slot(
     assert n_cancel[0] == 1
     assert "AAPL" not in state["open_positions"]
     # Ledger captured the missed_trade event.
-    ledger_path = (
-        Path(cfg["paths"]["daily_summary_path"]).parent / "trade_ledger.jsonl"
-    )
+    # Phase 1.2: ledger lives under data/<env>/trade_ledger.jsonl.
+    ledger_path = strategy_module._ledger_path(cfg)
     events = []
     if ledger_path.exists():
         for line in ledger_path.read_text().splitlines():
@@ -415,7 +414,8 @@ def test_planned_risk_dollars_used_in_r_multiple(strategy_module, cfg_with_paths
         exit_price=11.0,    # +$100 pnl
         reason="target_hit",
     )
-    ledger_path = summary_path.parent / "trade_ledger.jsonl"
+    # Phase 1.2: ledger lives under data/<env>/trade_ledger.jsonl.
+    ledger_path = strategy_module._ledger_path(cfg_with_paths)
     closures = []
     for line in ledger_path.read_text().splitlines():
         if not line.strip():

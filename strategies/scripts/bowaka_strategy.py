@@ -29,6 +29,8 @@ import math
 import os
 import re
 import signal
+import socket
+import subprocess
 import sys
 import time
 import uuid
@@ -284,6 +286,133 @@ def config_hash(cfg: dict) -> str:
     8 hex chars, sort_keys, default=str)."""
     blob = json.dumps(cfg, sort_keys=True, default=str).encode()
     return hashlib.sha256(blob).hexdigest()[:8]
+
+
+# ---- Phase 1.3 — schema v3 envelope helpers ----
+#
+# Every ledger event carries the run_id / daemon_instance_id /
+# strategy_version / config_hash_full / analysis_epoch so analyses can
+# join across runs and detect config drift after the fact. The values
+# are computed once per process and cached.
+
+DEFAULT_ANALYSIS_EPOCH: str = "bowaka_paper_epoch_2026_05_16_v1"
+
+
+def _strategy_version() -> str:
+    """Return short git sha if running from a repo, else 'unknown'."""
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+            cwd=str(Path(__file__).resolve().parent),
+        ).stdout.strip()
+        return sha or "unknown"
+    except Exception:
+        return "unknown"
+
+
+_RUN_ID_CACHE: str | None = None
+
+
+def _run_id(environment: str | None = None) -> str:
+    """Stable per-process run identifier of the form
+    ``<iso-z>_bowaka_<env>_<6-hex>`` (iso colons replaced with ``-``
+    so the value is safe as part of a filename on Windows). Cached
+    for the life of the process so all events from a run share the
+    same id."""
+    global _RUN_ID_CACHE
+    if _RUN_ID_CACHE is None:
+        env = (environment or os.environ.get("BOWAKA_ENV") or "paper").lower()
+        # Colons are illegal in Windows filenames — replace them so
+        # the run_id can be embedded in the config-snapshot path.
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+        _RUN_ID_CACHE = f"{ts}_bowaka_{env}_{uuid.uuid4().hex[:6]}"
+    return _RUN_ID_CACHE
+
+
+_DAEMON_ID_CACHE: str | None = None
+
+
+def _daemon_instance_id() -> str:
+    """Stable per-process daemon identifier of the form
+    ``<host>_<pid>_<8-hex>``."""
+    global _DAEMON_ID_CACHE
+    if _DAEMON_ID_CACHE is None:
+        _DAEMON_ID_CACHE = (
+            f"{socket.gethostname()}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+        )
+    return _DAEMON_ID_CACHE
+
+
+def _reset_run_id_cache_for_tests() -> None:
+    """Test-only escape hatch. Lets a test simulate a new process
+    without spawning a real subprocess. Do not call from production
+    code."""
+    global _RUN_ID_CACHE, _DAEMON_ID_CACHE
+    _RUN_ID_CACHE = None
+    _DAEMON_ID_CACHE = None
+
+
+def _config_hash_full(cfg: dict) -> str:
+    """Full sha256 hex of the cfg dump. ``config_hash`` returns the
+    first 8 chars for log lines; this returns the canonical 64-char
+    full digest so analyses can detect even tiny config drift."""
+    blob = json.dumps(cfg, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
+
+
+def _strategy_environment(cfg: dict | None) -> str:
+    """Resolve the environment string. Defaults to ``"paper"`` if
+    unset. Valid values: ``paper`` | ``test`` | ``live``."""
+    if cfg is None:
+        return "paper"
+    env = ((cfg.get("strategy") or {}).get("environment") or "paper").lower()
+    return env
+
+
+def _analysis_epoch(cfg: dict | None) -> str:
+    if cfg is None:
+        return DEFAULT_ANALYSIS_EPOCH
+    return (
+        (cfg.get("strategy") or {}).get("analysis_epoch")
+        or DEFAULT_ANALYSIS_EPOCH
+    )
+
+
+def _config_snapshot_path(cfg: dict) -> Path:
+    """Path of the per-run config snapshot under
+    ``data/<env>/config_snapshots/<YYYY-MM-DD>_<run_id>.yaml``.
+
+    Computed deterministically from the cached run_id so every event
+    in a run reports the same path. The file itself is written once
+    at ``main()`` startup by :func:`_write_config_snapshot`."""
+    env = _strategy_environment(cfg)
+    rid = _run_id(env)
+    # File name = <YYYY-MM-DD>_<run_id>.yaml. The date prefix lets
+    # operators eyeball "today's snapshots" without parsing run_ids.
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    base = _ledger_base_dir(cfg)
+    return base / env / "config_snapshots" / f"{day}_{rid}.yaml"
+
+
+def _write_config_snapshot(cfg: dict) -> Path | None:
+    """Write the resolved cfg to ``_config_snapshot_path(cfg)`` if it
+    doesn't already exist. Best-effort — returns None on failure so a
+    snapshot mishap can't block startup."""
+    try:
+        path = _config_snapshot_path(cfg)
+        if path.exists():
+            return path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(cfg, f, sort_keys=True)
+        return path
+    except Exception as e:
+        LOG.warning("config snapshot write failed: %s", e)
+        return None
 
 
 class _LineBufferedFileHandler(logging.FileHandler):
@@ -4006,16 +4135,41 @@ def _trade_log_path(cfg: dict, link_id: str) -> Path | None:
 # The daily summary file (``daily_summary.jsonl``) is reconstructed
 # from the ledger via :func:`recompute_daily_summary_from_ledger`.
 
-LEDGER_SCHEMA_VERSION: int = 1
+LEDGER_SCHEMA_VERSION: int = 3
+
+VALID_ENVIRONMENTS: frozenset[str] = frozenset({"paper", "test", "live"})
+
+
+def _ledger_base_dir(cfg: dict) -> Path:
+    """Root of the environment-partitioned ledger tree.
+
+    Resolution order (first that resolves wins):
+      1. ``paths.data_dir`` if explicitly set in cfg.
+      2. ``<daily_summary_path.parent>`` (the legacy anchor).
+    Anchored at the script directory when relative.
+    """
+    paths = cfg.get("paths") or {}
+    explicit_dir = paths.get("data_dir")
+    if explicit_dir:
+        p = Path(explicit_dir)
+        if not p.is_absolute():
+            p = Path(__file__).resolve().parent / p
+        return p
+    summary_path = _resolve_path(cfg, "daily_summary_path")
+    return summary_path.parent
 
 
 def _ledger_path(cfg: dict) -> Path:
-    """Path to ``trade_ledger.jsonl`` — sibling of daily_summary.
+    """Resolve the canonical ledger path under ``data/<environment>/``.
 
-    Resolution: ``paths.trade_ledger_path`` when explicitly set,
-    otherwise ``<daily_summary_path.parent>/trade_ledger.jsonl``.
-    Operators that want to keep the ledger off the prod log volume
-    can override the path key.
+    Environment is determined by ``cfg.strategy.environment`` in
+    ``{"paper", "test", "live"}``, defaulting to ``"paper"``. The
+    legacy flat ``data/trade_ledger.jsonl`` is no longer written;
+    archived runs live under ``data/archive/``.
+
+    Operators may still override the path explicitly with
+    ``paths.trade_ledger_path`` — useful for one-off reconciliations
+    and reports. The override bypasses the environment partition.
     """
     explicit = (cfg.get("paths") or {}).get("trade_ledger_path")
     if explicit:
@@ -4023,8 +4177,13 @@ def _ledger_path(cfg: dict) -> Path:
         if not p.is_absolute():
             p = Path(__file__).resolve().parent / p
         return p
-    summary_path = _resolve_path(cfg, "daily_summary_path")
-    return summary_path.parent / "trade_ledger.jsonl"
+    env = _strategy_environment(cfg)
+    if env not in VALID_ENVIRONMENTS:
+        raise ValueError(
+            f"invalid environment: {env!r}; expected one of {sorted(VALID_ENVIRONMENTS)}"
+        )
+    base = _ledger_base_dir(cfg)
+    return base / env / "trade_ledger.jsonl"
 
 
 def _ledger_session_date(now_utc: datetime | None = None) -> str:
@@ -4068,6 +4227,11 @@ def emit_ledger_event(
             event_type, e,
         )
         return None
+    env = _strategy_environment(cfg)
+    strategy_id = (cfg.get("strategy") or {}).get("strategy_id") or "bowaka"
+    is_test_fixture = bool(
+        (cfg.get("strategy") or {}).get("is_test_fixture", False)
+    )
     event = {
         "schema_version": LEDGER_SCHEMA_VERSION,
         "event_id": uuid.uuid4().hex,
@@ -4077,6 +4241,20 @@ def emit_ledger_event(
         "trade_id": trade_id,
         "ticker": ticker,
         "role": role,
+        # Phase 1.3: schema v3 envelope. Every event carries enough
+        # provenance to be analysed in isolation: which run wrote it,
+        # which daemon, which strategy version, which config, which
+        # environment. ``analysis_epoch`` is the operator's coarse
+        # cut between "old contaminated data" and "post-audit clean".
+        "environment": env,
+        "is_test_fixture": is_test_fixture,
+        "strategy_id": strategy_id,
+        "strategy_version": _strategy_version(),
+        "analysis_epoch": _analysis_epoch(cfg),
+        "run_id": _run_id(env),
+        "daemon_instance_id": _daemon_instance_id(),
+        "config_hash_full": _config_hash_full(cfg),
+        "config_snapshot_path": str(_config_snapshot_path(cfg)),
         "payload": payload,
     }
     try:
@@ -5891,6 +6069,8 @@ def execute_kill_l3(
 
 def recompute_daily_summary_from_ledger(
     ledger_path: Path, session_date: str,
+    *,
+    include_test_fixtures: bool = False,
 ) -> dict[str, Any]:
     """Project the trade ledger into a session-summary dict for one date.
 
@@ -5901,9 +6081,43 @@ def recompute_daily_summary_from_ledger(
     original. ``opened`` is counted from ``order_fill`` events with
     ``role == "parent"`` and a matching ``session_date``.
 
+    Phase 1.5 guardrail: the function refuses to run on a ledger that
+    contains mixed ``environment`` values (e.g., paper + test). The
+    operator must explicitly opt in with ``include_test_fixtures=True``
+    when a deliberate mixed-environment analysis is required.
+
     Returns the session_summary record (without ``record_type``;
     callers stamp that on write).
     """
+    if ledger_path.exists() and not include_test_fixtures:
+        envs_seen: set[str] = set()
+        with open(ledger_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                # Default to "paper" for legacy events that pre-date
+                # schema v3. A bare ledger composed entirely of legacy
+                # events is therefore allowed (treated as paper).
+                envs_seen.add((ev.get("environment") or "paper").lower())
+                if ev.get("is_test_fixture") is True:
+                    envs_seen.add("test")
+        if len(envs_seen - {"paper"}) > 0 and ("paper" in envs_seen):
+            raise ValueError(
+                "recompute_daily_summary_from_ledger: mixed environments "
+                f"present in ledger {ledger_path}: {sorted(envs_seen)}. "
+                "Pass include_test_fixtures=True to override."
+            )
+        if len(envs_seen) > 1:
+            raise ValueError(
+                "recompute_daily_summary_from_ledger: mixed environments "
+                f"present in ledger {ledger_path}: {sorted(envs_seen)}. "
+                "Pass include_test_fixtures=True to override."
+            )
     by_reason: dict[str, int] = {}
     by_trigger: dict[str, dict[str, Any]] = {}
     total_pnl = 0.0
@@ -7409,6 +7623,50 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(cfg)
     cfg_hash = config_hash(cfg)
     LOG.info("Starting bowaka strategy (config_hash=%s)", cfg_hash)
+
+    # Phase 1.2 — environment guardrail. Refuse to start if the YAML
+    # declares an environment that doesn't agree with the resolved
+    # ledger path. This catches the foot-gun where a test fixture
+    # accidentally writes to data/paper/ (or paper data accidentally
+    # writes to data/test/) — which silently contaminates the
+    # operator's research dataset.
+    env = _strategy_environment(cfg)
+    if env not in VALID_ENVIRONMENTS:
+        LOG.error(
+            "strategy.environment must be one of %s; got %r",
+            sorted(VALID_ENVIRONMENTS), env,
+        )
+        return 8
+    try:
+        ledger_path_resolved = _ledger_path(cfg)
+    except Exception as e:
+        LOG.error("ledger path unresolvable: %s", e)
+        return 8
+    if f"/{env}/" not in ledger_path_resolved.as_posix() and \
+            f"\\{env}\\" not in str(ledger_path_resolved):
+        # The explicit override path bypasses the partition; only
+        # complain when the partition is actually wrong (env=test but
+        # path is under data/paper/, or vice versa). The check is
+        # asymmetric: an operator with paths.trade_ledger_path
+        # override gets to opt out.
+        explicit = (cfg.get("paths") or {}).get("trade_ledger_path")
+        if not explicit:
+            LOG.error(
+                "environment=%r but resolved ledger path %s is not "
+                "under data/%s/. Refusing to start.",
+                env, ledger_path_resolved, env,
+            )
+            return 8
+
+    # Phase 1.4 — per-run config snapshot. Written once at startup
+    # before any ledger event, so every event in the run reports a
+    # snapshot path that exists.
+    try:
+        snap = _write_config_snapshot(cfg)
+        if snap:
+            LOG.info("config snapshot written: %s", snap)
+    except Exception as e:
+        LOG.warning("config snapshot write raised (continuing): %s", e)
 
     # Phase 1.6 — one-shot reconcile path. Skips handshake / API-key
     # check because the ledger + summary files are local artifacts

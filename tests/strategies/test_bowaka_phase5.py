@@ -797,7 +797,10 @@ def test_session_summary_includes_by_trigger_and_counters(
     # ledger (sibling file). Seed equivalent events so the assertions
     # below continue to reflect the same scenario.
     import uuid
-    ledger_path = summary_path.parent / "trade_ledger.jsonl"
+    # Phase 1.2: ledger lives under data/<env>/trade_ledger.jsonl. The
+    # conftest cfg fixture sets environment=test.
+    ledger_path = strategy_module._ledger_path(cfg_rescreen)
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
     ledger_events = [
         # Parent fills (session_open) — A and B
         {"event_type": "order_fill", "session_date": today, "trade_id": "BOWAKA-A-1",
