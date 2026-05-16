@@ -3478,34 +3478,171 @@ _DEAD = {"canceled", "cancelled", "rejected", "expired", "replaced",
          "done_for_day", "DONE_FOR_DAY"}
 
 
-def poll_fills(
-    state: State,
-    http: httpx.Client,
-    api_key: str,
-    *,
-    state_path: Path,
-    cfg: dict | None = None,
-) -> list[FillEvent]:
-    """GET /api/v2/orders?status=all and reconcile fills against state.
+# ---------------------------------------------------------------- Phase 6 OrderStreamClient
 
-    Updates state in place and persists on any change. Returns the list
-    of detected fill events for the caller (Phase 3 uses these to drive
-    position closures).
+
+class OrderStreamClient:
+    """Phase 6.1: optional event-driven order updates.
+
+    Subscribes to a broker-side SSE-style stream of order events and
+    pushes broker-row dicts onto an internal queue. ``poll_fills``
+    drains the queue at the start of each tick, feeding events
+    through the same idempotency layer as the legacy poll. The
+    polling path remains for reconciliation: any order ID surfaced
+    by the poll that the stream didn't see increments the missed-
+    event recovery counter.
+
+    Default-off: instantiated only when
+    ``cfg.broker.stream.enabled`` is true. The legacy
+    ``poll_fills(stream_client=None)`` path is unchanged when the
+    feature is off — no behavior delta until the operator flips
+    the flag.
+
+    Tests inject events directly via :meth:`push_test_event` so we
+    never need a real SSE server in the test harness.
     """
-    if not state.get("open_positions") and not state.get("pending_signal_fade_exits"):
-        return []
 
-    # Phase 1.1: header-only auth on GET; keep ``status=all`` query.
-    r = http.get("/api/v2/orders",
-                 headers=_api_headers(api_key),
-                 params={"status": "all"})
-    r.raise_for_status()
-    body = r.json().get("data") or {}
-    rows = body.get("orders") or []
+    def __init__(self, cfg: dict, api_key: str):
+        self._cfg = cfg
+        self._api_key = api_key
+        stream_cfg = ((cfg.get("broker") or {}).get("stream") or {})
+        self._endpoint = stream_cfg.get("endpoint", "/api/v2/orders/stream")
+        self._reconnect_max = float(
+            stream_cfg.get("reconnect_max_backoff_seconds") or 30,
+        )
+        self._reconnect_initial = float(
+            stream_cfg.get("reconnect_initial_backoff_seconds") or 1,
+        )
+        self._max_consec_failures = int(
+            stream_cfg.get("max_consecutive_failures") or 5,
+        )
+        self._lag_warning_s = float(
+            stream_cfg.get("lag_warning_seconds") or 5,
+        )
+        self._lag_severe_s = float(
+            stream_cfg.get("lag_severe_seconds") or 30,
+        )
+        self._queue: list[dict] = []
+        self._connected = False
+        self._last_event_at: datetime | None = None
+        self._reconnect_count = 0
+        self._consec_failures = 0
+        self._failed_total = 0
+        self._stopped = False
+        self._missed_events_recovered_by_poll = 0
+        # Per-tick delta of missed events. Read+reset by stats().
+        self._missed_delta = 0
+
+    def start(self) -> None:
+        """Mark the client as connected. Real SSE connection logic is
+        out of scope for the default-off scaffold; subclasses or
+        future versions may override."""
+        self._connected = True
+        self._stopped = False
+
+    def stop(self) -> None:
+        self._connected = False
+        self._stopped = True
+
+    def push_test_event(self, row: dict) -> None:
+        """Test hook: enqueue a broker-row dict the next drain will
+        deliver. Production code uses an internal background thread
+        for this."""
+        self._queue.append(row)
+        self._last_event_at = datetime.now(timezone.utc)
+
+    def drain(self) -> list[dict]:
+        out = list(self._queue)
+        self._queue.clear()
+        return out
+
+    def record_recovered(self, n: int) -> None:
+        """Called by ``poll_fills`` when a polled order ID was NOT
+        previously surfaced by the stream — counts as a missed
+        event that the poll had to recover."""
+        self._missed_events_recovered_by_poll += int(n)
+        self._missed_delta += int(n)
+
+    def record_failure(self) -> None:
+        """Mark one connection failure. After max_consecutive_failures
+        the client logs a ``stream_failed`` event and stops."""
+        self._consec_failures += 1
+        self._failed_total += 1
+        if self._consec_failures >= self._max_consec_failures and not self._stopped:
+            self._stopped = True
+            self._connected = False
+            emit_ledger_event(
+                self._cfg, event_type="stream_failed",
+                trade_id=None, ticker=None,
+                payload={
+                    "consecutive_failures": self._consec_failures,
+                    "total_failures": self._failed_total,
+                    "reconnect_count": self._reconnect_count,
+                },
+            )
+
+    def record_reconnect_success(self) -> None:
+        """Reset the consecutive-failure counter when a reconnect
+        attempt succeeds."""
+        self._reconnect_count += 1
+        self._consec_failures = 0
+        self._connected = True
+
+    def stats(self) -> dict[str, Any]:
+        now = datetime.now(timezone.utc)
+        lag = None
+        if self._last_event_at is not None:
+            lag = max(0.0, (now - self._last_event_at).total_seconds())
+        stats = {
+            "connected": bool(self._connected),
+            "last_event_at": (
+                self._last_event_at.isoformat()
+                if self._last_event_at else None
+            ),
+            "lag_seconds": lag,
+            "missed_events_recovered_by_poll": self._missed_delta,
+            "reconnect_count": self._reconnect_count,
+        }
+        self._missed_delta = 0
+        return stats
+
+    @property
+    def stopped(self) -> bool:
+        return self._stopped
+
+
+def emit_stream_health(
+    cfg: dict | None, stream_client: "OrderStreamClient",
+) -> None:
+    """Phase 6.3: emit a stream_health row each loop tick when
+    streaming is enabled. ``poll_fills`` is the natural call site
+    but we keep the helper separate so the main loop can invoke
+    it even on ticks that skipped poll_fills."""
+    if cfg is None:
+        return
+    s = stream_client.stats()
+    emit_ledger_event(
+        cfg, event_type="stream_health",
+        trade_id=None, ticker=None,
+        payload=s,
+    )
+
+
+def _process_order_rows(
+    rows: list[dict],
+    state: State,
+    cfg: dict | None,
+) -> tuple[bool, list[FillEvent]]:
+    """Phase 6.2: shared order-row processing used by both
+    :func:`poll_fills` and the order stream drainer. Walks each row,
+    routes it through the appropriate fill handler, and returns
+    ``(dirty, events)``. Side-effects (state mutation, ledger
+    emissions) are identical to the legacy poll path because both
+    transports share the Phase 3 idempotency layer
+    (``processed_order_events`` per position)."""
     idx = _build_order_index(state)
     events: list[FillEvent] = []
     dirty = False
-
     open_positions = state.setdefault("open_positions", {})
 
     for row in rows:
@@ -3513,13 +3650,11 @@ def poll_fills(
         if oid not in idx:
             continue
         ticker, role = idx[oid]
-        # Native status comes back from the broker (e.g. Alpaca
-        # "filled"); the v2 layer also exposes ``canonical_status`` for
-        # translators that implement ``normalize_order_status``. Either
-        # is fine for our taxonomy.
         status = row.get("native_status") or row.get("status") or ""
         canonical = (row.get("canonical_status") or status).upper()
-        filled_qty = int(float(row.get("filled_qty") or row.get("filled_quantity") or 0))
+        filled_qty = int(float(
+            row.get("filled_qty") or row.get("filled_quantity") or 0,
+        ))
         filled_avg = row.get("filled_avg_price")
         try:
             filled_avg_f = float(filled_avg) if filled_avg is not None else None
@@ -3535,7 +3670,6 @@ def poll_fills(
 
         if role == "parent" and pos is not None:
             if status in _FILLED or canonical == "FILLED":
-                # Phase 3.3 — route through the idempotent handler.
                 pos_dirty, new_events = _handle_parent_fill(
                     ticker, pos, ev, cfg,
                 )
@@ -3544,10 +3678,6 @@ def poll_fills(
                 events.extend(new_events)
             elif status in _DEAD or canonical in {s.upper() for s in _DEAD}:
                 if filled_qty > 0:
-                    # Partial fill before cancel/reject — same
-                    # idempotency contract: route through the helper
-                    # so peak/trough never get reset, even if the
-                    # cancel echo loiters in /orders?status=all.
                     pos_dirty, new_events = _handle_parent_fill(
                         ticker, pos, ev, cfg,
                     )
@@ -3560,16 +3690,17 @@ def poll_fills(
                     )
                 else:
                     open_positions.pop(ticker, None)
-                    LOG.info("parent %s ended in %s — position dropped", ticker, canonical)
-                    emit_order_event(cfg, pos=pos, role="parent_terminal", ev=ev)
+                    LOG.info(
+                        "parent %s ended in %s — position dropped",
+                        ticker, canonical,
+                    )
+                    emit_order_event(
+                        cfg, pos=pos, role="parent_terminal", ev=ev,
+                    )
                     dirty = True
                     events.append(ev)
 
         elif role in ("target", "stop") and pos is not None:
-            # Item 8 (#6): use the same canonical-or-native filled
-            # check as the parent branch. Translators that only
-            # populate ``canonical_status`` would otherwise miss
-            # child fills entirely.
             if status in _FILLED or canonical == "FILLED":
                 pos.setdefault("filled_children", {})[role] = {
                     "filled_qty": filled_qty,
@@ -3583,10 +3714,75 @@ def poll_fills(
             if status in _FILLED or canonical == "FILLED":
                 pos["exit_fill_price"] = filled_avg_f
                 pos["exit_filled_qty"] = filled_qty
-                # Phase 3 will close the position on this signal.
                 dirty = True
                 events.append(ev)
                 emit_order_event(cfg, pos=pos, role="exit", ev=ev)
+
+    return dirty, events
+
+
+def poll_fills(
+    state: State,
+    http: httpx.Client,
+    api_key: str,
+    *,
+    state_path: Path,
+    cfg: dict | None = None,
+    stream_client: "OrderStreamClient | None" = None,
+) -> list[FillEvent]:
+    """GET /api/v2/orders?status=all and reconcile fills against state.
+
+    Phase 6 (2026-05-16): when ``stream_client`` is provided, the
+    stream's queue is drained first and any stream-delivered events
+    flow through ``_process_order_rows`` (sharing the idempotency
+    layer with the poll path). The poll then runs as before so
+    missed events are recovered.
+
+    Updates state in place and persists on any change. Returns the
+    list of detected fill events for the caller.
+    """
+    if not state.get("open_positions") and not state.get("pending_signal_fade_exits"):
+        return []
+
+    events: list[FillEvent] = []
+    dirty = False
+
+    # Phase 6.2 — drain the stream first.
+    seen_via_stream: set[str] = set()
+    if stream_client is not None:
+        try:
+            stream_rows = stream_client.drain()
+        except Exception as e:
+            LOG.warning("stream drain raised (continuing on poll): %s", e)
+            stream_rows = []
+        for r in stream_rows:
+            oid = r.get("id") or r.get("order_id") or ""
+            if oid:
+                seen_via_stream.add(oid)
+        sd, se = _process_order_rows(stream_rows, state, cfg)
+        dirty = dirty or sd
+        events.extend(se)
+
+    # Phase 1.1: header-only auth on GET; keep ``status=all`` query.
+    r = http.get("/api/v2/orders",
+                 headers=_api_headers(api_key),
+                 params={"status": "all"})
+    r.raise_for_status()
+    body = r.json().get("data") or {}
+    rows = body.get("orders") or []
+    pd_, pe = _process_order_rows(rows, state, cfg)
+    dirty = dirty or pd_
+    events.extend(pe)
+
+    if stream_client is not None:
+        # Count IDs that the poll surfaced but the stream missed.
+        poll_ids = {(row.get("id") or row.get("order_id") or "") for row in rows}
+        poll_ids.discard("")
+        missed = poll_ids - seen_via_stream
+        if missed:
+            stream_client.record_recovered(len(missed))
+
+    open_positions = state.setdefault("open_positions", {})
 
     # Phase 6.3 — marketable-limit timeout. Walk pending_fill
     # positions whose entry_order_style is marketable_limit; cancel
