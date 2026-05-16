@@ -4927,6 +4927,161 @@ LEDGER_SCHEMA_VERSION: int = 3
 VALID_ENVIRONMENTS: frozenset[str] = frozenset({"paper", "test", "live"})
 
 
+# ---------------------------------------------------------------- Phase 7.2 — minute-bar storage
+
+
+def fetch_and_store_candidate_minute_bars(
+    cfg: dict,
+    candidates: list[dict],
+    today_et: date,
+    *,
+    http: httpx.Client | None = None,
+    api_key: str | None = None,
+    bars_supplier=None,
+) -> Path | None:
+    """Phase 7.2: persist minute bars for every candidate so the
+    counterfactual engine can replay alternative entry timings after
+    the session.
+
+    ``bars_supplier`` is an optional callable
+    ``(ticker, venue_code, http, api_key, start_utc, end_utc) -> pd.DataFrame``
+    used by tests to substitute synthetic bars. When omitted the
+    function POSTs to ``/api/v2/bars`` with a 1-minute interval over
+    the configured premarket-to-session-end window.
+
+    Returns the output file path, or None when the feature is
+    disabled or no bars were retrieved.
+    """
+    research_cfg = (cfg.get("research") or {})
+    cmb_cfg = (research_cfg.get("candidate_minute_bars") or {})
+    if not cmb_cfg.get("enabled"):
+        return None
+    layout = cmb_cfg.get("layout", "by_session")
+    if layout != "by_session":
+        LOG.warning(
+            "candidate_minute_bars: only layout=by_session is "
+            "implemented; got %s — using by_session", layout,
+        )
+    window = cmb_cfg.get("window") or {}
+    pre_start = window.get("premarket_start", "08:00")
+    sess_end = window.get("session_end", "16:00")
+    import pytz as _pytz
+    et = _pytz.timezone("America/New_York")
+    sh, sm = (int(x) for x in pre_start.split(":"))
+    eh, em = (int(x) for x in sess_end.split(":"))
+    start_utc = et.localize(datetime(
+        today_et.year, today_et.month, today_et.day, sh, sm,
+    )).astimezone(timezone.utc)
+    end_utc = et.localize(datetime(
+        today_et.year, today_et.month, today_et.day, eh, em,
+    )).astimezone(timezone.utc)
+
+    on_missing = cmb_cfg.get("on_missing", "warn").lower()
+
+    out_dir = _ledger_base_dir(cfg) / _strategy_environment(cfg) / "candidate_bars"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"bars_{today_et.isoformat()}.parquet"
+
+    frames: list[pd.DataFrame] = []
+    for cand in candidates or []:
+        symbol = cand.get("ticker") or cand.get("symbol")
+        if not symbol:
+            continue
+        venue_code = cand.get("venue_code") or "XNAS"
+        try:
+            if bars_supplier is not None:
+                df = bars_supplier(
+                    symbol, venue_code, http, api_key, start_utc, end_utc,
+                )
+            elif http is not None and api_key is not None:
+                body = {
+                    "apikey": api_key,
+                    "instrument": {
+                        "venue_code": venue_code,
+                        "canonical_symbol": symbol,
+                    },
+                    "interval": "1m",
+                    "start": start_utc.isoformat(),
+                    "end": end_utc.isoformat(),
+                }
+                r = http.post("/api/v2/bars", json=body,
+                              headers=_api_headers(api_key))
+                r.raise_for_status()
+                rows = (r.json().get("data") or {}).get("bars") or []
+                df = pd.DataFrame(rows)
+            else:
+                df = pd.DataFrame()
+        except Exception as e:
+            if on_missing == "fail":
+                raise
+            LOG.warning(
+                "candidate_minute_bars: fetch failed for %s: %s",
+                symbol, e,
+            )
+            continue
+        if df.empty:
+            if on_missing == "fail":
+                raise RuntimeError(
+                    f"empty minute bars for {symbol} on {today_et}"
+                )
+            if on_missing == "warn":
+                LOG.warning(
+                    "candidate_minute_bars: empty bars for %s", symbol,
+                )
+            continue
+        df = df.copy()
+        df["symbol"] = symbol
+        df["session_date"] = today_et.isoformat()
+        frames.append(df)
+
+    if not frames:
+        return None
+
+    combined = pd.concat(frames, ignore_index=True)
+    try:
+        combined.to_parquet(out_path, index=False)
+    except Exception as e:
+        # Fallback to gzipped jsonl when pyarrow is unavailable.
+        LOG.warning(
+            "candidate_minute_bars: parquet write failed (%s); "
+            "falling back to jsonl.gz", e,
+        )
+        out_path = out_path.with_suffix(".jsonl.gz")
+        combined.to_json(out_path, orient="records", lines=True,
+                          compression="gzip")
+    LOG.info(
+        "candidate_minute_bars: wrote %d rows for %d symbols to %s",
+        len(combined), combined["symbol"].nunique(), out_path,
+    )
+    return out_path
+
+
+def load_catalyst_overrides(cfg: dict) -> dict[tuple[str, str], dict]:
+    """Phase 7.5: load operator-curated catalyst metadata from
+    ``data/<env>/catalyst_overrides.jsonl``. Returns a dict keyed by
+    ``(session_date, symbol)``. Missing file returns an empty dict.
+    """
+    base = _ledger_base_dir(cfg)
+    env = _strategy_environment(cfg)
+    path = base / env / "catalyst_overrides.jsonl"
+    if not path.exists():
+        return {}
+    out: dict[tuple[str, str], dict] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            ev = json.loads(raw)
+        except ValueError:
+            continue
+        sd = ev.get("session_date")
+        sym = ev.get("symbol")
+        if sd and sym:
+            out[(str(sd), str(sym))] = ev
+    return out
+
+
 def _ledger_base_dir(cfg: dict) -> Path:
     """Root of the environment-partitioned ledger tree.
 
@@ -5638,6 +5793,55 @@ def emit_intraday_tick(
             "entry_timestamp": entry_iso,
         },
     }
+
+    # Phase 7.4 — shadow stop-manager. When the stop_manager is
+    # disabled the runtime still computes what its rules would have
+    # done at this tick. Embedded in every intraday_tick record so a
+    # downstream study can ablate the rules without rerunning.
+    try:
+        sm_cfg = ((cfg.get("exits") or {}).get("stop_manager") or {})
+        # The function honors its own enabled flag; we explicitly call
+        # the rule body even when disabled by temporarily forcing the
+        # enabled flag to True via a shadow copy.
+        if not sm_cfg.get("enabled"):
+            shadow_cfg = dict(cfg)
+            shadow_exits = dict(cfg.get("exits") or {})
+            shadow_sm = dict(sm_cfg)
+            shadow_sm["enabled"] = True
+            shadow_exits["stop_manager"] = shadow_sm
+            shadow_cfg["exits"] = shadow_exits
+            shadow_target_stop = desired_stop_from_mfe(pos, shadow_cfg)
+        else:
+            shadow_target_stop = desired_stop_from_mfe(pos, cfg)
+        rule_triggered = None
+        for rule in sm_cfg.get("rules") or []:
+            if (entry_price is not None
+                    and new_peak is not None
+                    and entry_price > 0):
+                mfe = (new_peak - entry_price) / entry_price
+                if mfe >= float(rule.get("mfe_min") or 0):
+                    rule_triggered = (
+                        f"mfe_{int(float(rule.get('mfe_min') or 0) * 100)}pct"
+                    )
+        would_have_moved = bool(
+            shadow_target_stop is not None
+            and stop_price is not None
+            and shadow_target_stop > stop_price
+        )
+        would_have_stopped_out = bool(
+            shadow_target_stop is not None
+            and mark is not None
+            and mark <= shadow_target_stop
+        )
+        rec["shadow_stop_manager"] = {
+            "would_have_moved_stop": would_have_moved,
+            "shadow_stop_price": shadow_target_stop,
+            "rule_triggered": rule_triggered,
+            "would_have_stopped_out": would_have_stopped_out,
+        }
+    except Exception as e:
+        LOG.debug("shadow_stop_manager compute failed: %s", e)
+
     _append_trade_log(cfg, link_id, rec)
 
 
