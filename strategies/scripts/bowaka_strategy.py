@@ -3164,11 +3164,22 @@ class FillEvent:
 
 
 def _build_order_index(state: State) -> dict[str, tuple[str, str]]:
-    """Map order_id -> (ticker, role)."""
+    """Map order_id -> (ticker, role).
+
+    Phase 3.2 (2026-05-16): only index ``parent_order_id`` when the
+    position is in a pre-fill state. Once filled (or further along),
+    the parent is terminal and any subsequent broker echo for it
+    becomes a duplicate to be suppressed by :func:`_handle_parent_fill`
+    rather than reprocessed by ``poll_fills``. Without this guard a
+    parent that lingers in the broker's ``/orders?status=all`` window
+    re-triggers the parent-fill branch on every poll, corrupting
+    MFE/MAE.
+    """
     idx: dict[str, tuple[str, str]] = {}
     for ticker, pos in (state.get("open_positions") or {}).items():
-        if pid := pos.get("parent_order_id"):
-            idx[pid] = (ticker, "parent")
+        if pos.get("status") in {"pending_entry", "submitted", "pending_fill"}:
+            if pid := pos.get("parent_order_id"):
+                idx[pid] = (ticker, "parent")
         for role, oid in (pos.get("child_order_ids") or {}).items():
             if oid:
                 idx[oid] = (ticker, role)
@@ -3178,6 +3189,124 @@ def _build_order_index(state: State) -> dict[str, tuple[str, str]]:
         if oid := pend.get("exit_order_id"):
             idx[oid] = (ticker, "exit")
     return idx
+
+
+# ---------------------------------------------------------------- Phase 3 idempotency helpers
+
+
+def _initialize_peak_trough_once(pos: dict) -> None:
+    """Phase 3.3: set peak / trough to entry_price exactly once per
+    position. Subsequent calls are no-ops, even if the price has
+    moved — the bug was a duplicate parent-fill reprocessing reset
+    peak/trough back to entry_price, corrupting MFE/MAE.
+    """
+    if pos.get("mfe_mae_initialized"):
+        return
+    ep = pos.get("entry_price")
+    if ep is None:
+        return
+    try:
+        ep_f = float(ep)
+    except (TypeError, ValueError):
+        return
+    pos["peak_since_entry"] = ep_f
+    pos["trough_since_entry"] = ep_f
+    pos["mfe_mae_initialized"] = True
+
+
+def _handle_parent_fill(
+    ticker: str, pos: dict, ev: "FillEvent", cfg: dict | None,
+) -> tuple[bool, list["FillEvent"]]:
+    """Process a parent BUY fill exactly once per position.
+
+    Returns ``(dirty, events_to_emit)``. Subsequent calls for the same
+    parent order are no-ops with one debug log line.
+
+    Phase 3.3 (2026-05-16): closes the bug class where the broker's
+    ``/orders?status=all`` window returns a FILLED parent row on
+    every poll, causing the legacy code to repeatedly reset peak /
+    trough to entry_price and re-emit entry_fill events.
+    """
+    order_id = ev.order_id
+    event_key = f"{order_id}|parent_fill|{ev.filled_qty}|{ev.status}"
+
+    if pos.get("parent_fill_processed"):
+        LOG.debug(
+            "duplicate_parent_fill_ignored ticker=%s order_id=%s",
+            ticker, order_id,
+        )
+        return False, []
+
+    if pos.get("status") not in {"pending_entry", "submitted", "pending_fill"}:
+        LOG.warning(
+            "late_parent_fill_ignored ticker=%s status=%s order_id=%s",
+            ticker, pos.get("status"), order_id,
+        )
+        pos["parent_fill_processed"] = True
+        pos["parent_fill_processed_at"] = _now_utc_iso()
+        emit_ledger_event(
+            cfg, event_type="duplicate_parent_fill_suppressed",
+            trade_id=pos.get("link_id"), ticker=ticker,
+            payload={"order_id": order_id, "current_status": pos.get("status")},
+        )
+        return True, []
+
+    proc = pos.setdefault("processed_order_events", {})
+    if event_key in proc:
+        return False, []
+
+    pos["status"] = "filled"
+    pos["entry_price"] = ev.filled_avg_price or pos.get("entry_price")
+    if ev.filled_qty > 0:
+        pos["qty"] = ev.filled_qty
+    pos["parent_fill_processed"] = True
+    pos["parent_fill_processed_at"] = _now_utc_iso()
+    proc[event_key] = pos["parent_fill_processed_at"]
+
+    _initialize_peak_trough_once(pos)
+    _mark_parent_filled_for_protection(pos, cfg)
+    emit_entry_fill(cfg, pos=pos, ev=ev)
+    return True, [ev]
+
+
+def _ledger_has_pending_exit(
+    cfg: dict | None, key: str, *, scan_last_n: int = 200,
+) -> bool:
+    """Phase 3.4: True when the canonical ledger contains an
+    ``exit_submitted`` / ``replacement_exit_accepted`` /
+    ``exit_order_accepted`` event for the given idempotency key in
+    the last ``scan_last_n`` entries (one trading day's worth)."""
+    if cfg is None or not cfg.get("paths"):
+        return False
+    try:
+        path = _ledger_path(cfg)
+    except Exception:
+        return False
+    if not path.exists():
+        return False
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    interesting = {
+        "exit_submitted",
+        "replacement_exit_accepted",
+        "exit_order_accepted",
+    }
+    for raw in lines[-scan_last_n:]:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            ev = json.loads(raw)
+        except ValueError:
+            continue
+        if ev.get("event_type") not in interesting:
+            continue
+        payload = ev.get("payload") or {}
+        if payload.get("exit_idempotency_key") == key:
+            return True
+    return False
 
 
 _FILLED = {"filled", "FILLED"}
@@ -3245,50 +3374,35 @@ def poll_fills(
 
         if role == "parent" and pos is not None:
             if status in _FILLED or canonical == "FILLED":
-                if pos.get("status") != "filled":
-                    pos["status"] = "filled"
-                    pos["entry_price"] = filled_avg_f or pos.get("entry_price")
-                    if filled_qty > 0:
-                        pos["qty"] = filled_qty
-                    # Initialize MFE/MAE excursion tracking at the
-                    # actual fill price. write_daily_marks updates these
-                    # at each session end with the day's high/low.
-                    if pos.get("entry_price") is not None:
-                        pos["peak_since_entry"] = float(pos["entry_price"])
-                        pos["trough_since_entry"] = float(pos["entry_price"])
-                    # Phase 5.3 — set the protection deadline so the
-                    # invariant enforcer has something to act on.
-                    _mark_parent_filled_for_protection(pos, cfg)
+                # Phase 3.3 — route through the idempotent handler.
+                pos_dirty, new_events = _handle_parent_fill(
+                    ticker, pos, ev, cfg,
+                )
+                if pos_dirty:
                     dirty = True
-                    events.append(ev)
-                    # Per-trade rich log: parent fill is a state
-                    # transition we want a record for.
-                    emit_entry_fill(cfg, pos=pos, ev=ev)
+                events.extend(new_events)
             elif status in _DEAD or canonical in {s.upper() for s in _DEAD}:
                 if filled_qty > 0:
-                    # Partial fill before cancel/reject — keep the
-                    # filled portion and log the remainder.
-                    pos["status"] = "filled"
-                    pos["qty"] = filled_qty
-                    pos["entry_price"] = filled_avg_f or pos.get("entry_price")
-                    if pos.get("entry_price") is not None:
-                        pos["peak_since_entry"] = float(pos["entry_price"])
-                        pos["trough_since_entry"] = float(pos["entry_price"])
-                    # Phase 5.3 — partial-fill-then-cancel still needs
-                    # protection. The remaining filled portion is a
-                    # naked long until the OCO attaches.
-                    _mark_parent_filled_for_protection(pos, cfg)
+                    # Partial fill before cancel/reject — same
+                    # idempotency contract: route through the helper
+                    # so peak/trough never get reset, even if the
+                    # cancel echo loiters in /orders?status=all.
+                    pos_dirty, new_events = _handle_parent_fill(
+                        ticker, pos, ev, cfg,
+                    )
+                    if pos_dirty:
+                        dirty = True
+                    events.extend(new_events)
                     LOG.warning(
                         "parent %s ended in %s with partial fill %d shares",
                         ticker, canonical, filled_qty,
                     )
-                    emit_entry_fill(cfg, pos=pos, ev=ev)
                 else:
                     open_positions.pop(ticker, None)
                     LOG.info("parent %s ended in %s — position dropped", ticker, canonical)
                     emit_order_event(cfg, pos=pos, role="parent_terminal", ev=ev)
-                dirty = True
-                events.append(ev)
+                    dirty = True
+                    events.append(ev)
 
         elif role in ("target", "stop") and pos is not None:
             # Item 8 (#6): use the same canonical-or-native filled
@@ -3591,6 +3705,25 @@ def trigger_time_stop(
             pos.get("exit_reason") or pos.get("exit_reason_pending") or "?",
         )
         return
+
+    # Phase 3.4 — exit idempotency key. The same position + reason +
+    # entry_date should never produce two market-sell submissions. The
+    # transient status-flip dedup catches in-process double-fires, but
+    # a process restart mid-exit (or any future caller that bypasses
+    # the status guard) is still vulnerable. Scan the canonical
+    # ledger for a matching key before submitting.
+    key = pos.get("exit_idempotency_key")
+    if key is None:
+        entry_date = (pos.get("entry_timestamp") or "")[:10]
+        key = f"{pos.get('link_id', ticker)}|exit|{reason}|{entry_date}"
+        pos["exit_idempotency_key"] = key
+    if _ledger_has_pending_exit(cfg, key):
+        LOG.warning(
+            "trigger_time_stop: exit suppressed by idempotency key %s",
+            key,
+        )
+        return
+
     # Reserve the slot BEFORE any network I/O. The intraday loop fires
     # every ``loop_interval_seconds`` (default 5s); cancel + submit can
     # take longer than that, so without this reservation a second tick
@@ -3666,6 +3799,18 @@ def trigger_time_stop(
             "submitted_at": pos["exit_submitted_at"],
             "exit_order_id": exit_id,
         }
+    # Phase 3.4 — emit an exit_submitted event with the idempotency
+    # key so re-runs (or future callers) can detect the duplicate.
+    emit_ledger_event(
+        cfg, event_type="exit_submitted",
+        trade_id=pos.get("link_id"), ticker=ticker,
+        payload={
+            "exit_order_id": exit_id,
+            "reason": reason,
+            "exit_idempotency_key": pos.get("exit_idempotency_key"),
+            "time_in_force": time_in_force,
+        },
+    )
     save_state(state, state_path)
 
 
@@ -3720,6 +3865,61 @@ def run_time_stop_pass(
 # pin parity via a regression test (see
 # tests/strategies/test_bowaka_phase3.py:test_signal_fade_features_match_prefilter).
 # Any future drift will break that test.
+
+
+def canonical_mfe_mae(
+    entry_price: float,
+    bars,  # list[dict] | pd.DataFrame
+    *,
+    mark_source: str = "trade_high_low",
+) -> dict[str, float]:
+    """One canonical MFE/MAE calculator. Used by exit-record sealing,
+    closure analysis, and tests.
+
+    ``mark_source`` selects which bar columns to inspect:
+      * ``"trade_high_low"`` (default) — bar ``high`` / ``low``,
+        matching per-trade tick logs that use trade_last_price as
+        mark.
+      * ``"mid"`` — bar mid ((open+close)/2) — for execution-quality
+        replay where trades happened against quotes.
+
+    Returns a dict with ``mfe_pct``, ``mae_pct``, ``peak``,
+    ``trough``. Empty bars or ``entry_price <= 0`` returns all zeros
+    so the function is safe to call defensively.
+    """
+    out = {"mfe_pct": 0.0, "mae_pct": 0.0, "peak": 0.0, "trough": 0.0}
+    if entry_price is None or float(entry_price) <= 0:
+        return out
+    ep = float(entry_price)
+
+    rows: list[dict]
+    if isinstance(bars, pd.DataFrame):
+        if bars.empty:
+            return out
+        rows = bars.to_dict("records")
+    else:
+        rows = list(bars or [])
+        if not rows:
+            return out
+
+    if mark_source == "mid":
+        marks_high = [
+            float(((r.get("open") or r.get("close") or 0.0)
+                   + (r.get("close") or r.get("open") or 0.0)) / 2.0)
+            for r in rows
+        ]
+        marks_low = marks_high
+    else:
+        marks_high = [float(r.get("high") or r.get("close") or ep) for r in rows]
+        marks_low = [float(r.get("low") or r.get("close") or ep) for r in rows]
+
+    peak = max([ep, *marks_high])
+    trough = min([ep, *marks_low])
+    out["peak"] = peak
+    out["trough"] = trough
+    out["mfe_pct"] = (peak - ep) / ep
+    out["mae_pct"] = (trough - ep) / ep
+    return out
 
 
 def compute_features_single(bars: pd.DataFrame, cfg: dict) -> dict[str, float]:
