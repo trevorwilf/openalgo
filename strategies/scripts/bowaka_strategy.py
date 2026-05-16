@@ -5613,14 +5613,110 @@ def emit_bracket_attached(
     )
 
 
+def _execution_quality_metrics(
+    pos: dict[str, Any], ev: "FillEvent", role: str,
+) -> dict[str, Any]:
+    """Phase 8.1: capture arrival market state + slippage + fill
+    latency for an order fill. ``pos['arrival_market']`` is set at
+    submit time and reused here on the fill.
+
+    Buy-side slippage is measured against the ask (positive bps =
+    paid up); sell-side against the bid. Effective spread is the
+    half-spread realised by the fill."""
+    out: dict[str, Any] = {}
+    am = pos.get("arrival_market") or {}
+    arrival_bid = _safe_float(am.get("bid"))
+    arrival_ask = _safe_float(am.get("ask"))
+    arrival_mid = (
+        (arrival_bid + arrival_ask) / 2.0
+        if (arrival_bid is not None and arrival_ask is not None) else None
+    )
+    arrival_spread_pct = (
+        (arrival_ask - arrival_bid) / arrival_mid
+        if (arrival_bid is not None and arrival_ask is not None
+            and arrival_mid and arrival_mid > 0)
+        else None
+    )
+    out["arrival_bid"] = arrival_bid
+    out["arrival_ask"] = arrival_ask
+    out["arrival_mid"] = arrival_mid
+    out["arrival_spread_pct"] = arrival_spread_pct
+
+    fill_price = _safe_float(ev.filled_avg_price)
+    out["submitted_ts_utc"] = am.get("submitted_ts_utc")
+    out["filled_ts_utc"] = _now_utc_iso()
+    if out["submitted_ts_utc"]:
+        try:
+            sub_dt = datetime.fromisoformat(
+                out["submitted_ts_utc"].replace("Z", "+00:00"),
+            )
+            out["fill_latency_ms"] = int(
+                (datetime.now(timezone.utc) - sub_dt).total_seconds() * 1000,
+            )
+        except Exception:
+            out["fill_latency_ms"] = None
+    else:
+        out["fill_latency_ms"] = None
+
+    if fill_price is not None and arrival_mid is not None and arrival_mid > 0:
+        delta_mid_bps = (fill_price - arrival_mid) / arrival_mid * 10_000.0
+        # On a SELL, fill_price below mid hurts; flip the sign so a
+        # positive slippage_vs_mid_bps consistently means "worse for
+        # the trader" regardless of side.
+        if role.startswith("exit") or role in {"target", "stop"}:
+            delta_mid_bps = -delta_mid_bps
+        out["slippage_vs_mid_bps"] = delta_mid_bps
+    else:
+        out["slippage_vs_mid_bps"] = None
+
+    if fill_price is not None:
+        if role == "parent" and arrival_ask is not None and arrival_ask > 0:
+            out["slippage_vs_ask_bps"] = (
+                (fill_price - arrival_ask) / arrival_ask * 10_000.0
+            )
+            out["slippage_vs_bid_bps"] = None
+        elif (role.startswith("exit") or role in {"target", "stop"}) \
+                and arrival_bid is not None and arrival_bid > 0:
+            out["slippage_vs_bid_bps"] = (
+                (arrival_bid - fill_price) / arrival_bid * 10_000.0
+            )
+            out["slippage_vs_ask_bps"] = None
+        else:
+            out["slippage_vs_ask_bps"] = None
+            out["slippage_vs_bid_bps"] = None
+    else:
+        out["slippage_vs_ask_bps"] = None
+        out["slippage_vs_bid_bps"] = None
+
+    if (fill_price is not None and arrival_mid is not None
+            and arrival_mid > 0):
+        out["effective_spread_bps"] = (
+            abs(fill_price - arrival_mid) / arrival_mid * 10_000.0
+        )
+    else:
+        out["effective_spread_bps"] = None
+
+    out["post_fill_mid_15s"] = None
+    out["post_fill_mid_60s"] = None
+    out["post_fill_mid_300s"] = None
+    out["realized_spread_15s_bps"] = None
+    out["realized_spread_60s_bps"] = None
+    out["realized_spread_300s_bps"] = None
+    return out
+
+
 def emit_order_event(
     cfg: dict, *, pos: dict[str, Any], role: str, ev: "FillEvent",
 ) -> None:
     """Non-terminal order events (child fills don't go here when they
     cause closure; the closure record covers those). Use this for
-    intermediate state changes the analyst might want to inspect."""
+    intermediate state changes the analyst might want to inspect.
+
+    Phase 8.1: parent and exit-leg fills carry the execution-quality
+    payload (arrival market, slippage, latency, post-fill marks).
+    Non-fill order events keep the legacy shape."""
     link_id = pos.get("link_id") or ""
-    _append_trade_log(cfg, link_id, {
+    rec: dict[str, Any] = {
         "record_type": "order_event",
         "ts": _now_utc_iso(),
         "ticker": ev.ticker, "link_id": link_id,
@@ -5629,7 +5725,12 @@ def emit_order_event(
         "status": ev.status,
         "filled_qty": ev.filled_qty,
         "filled_avg_price": _safe_float(ev.filled_avg_price),
-    })
+    }
+    if ev.status == "FILLED" and ev.filled_qty > 0:
+        rec["execution_quality"] = _execution_quality_metrics(
+            pos, ev, role,
+        )
+    _append_trade_log(cfg, link_id, rec)
 
 
 def emit_intraday_tick(

@@ -847,6 +847,185 @@ def _print_section(title: str, df: pd.DataFrame) -> None:
         print(df.to_string(index=False))
 
 
+# ---------------------------------------------------------------- Phase 8 CLI helpers
+
+
+def _cli_manual_intervention(args) -> int:
+    """Phase 8.2: write a single manual_intervention event to the
+    current environment's ledger."""
+    if not args.symbol or not args.reason:
+        print("--symbol and --reason are required", flush=True)
+        return 2
+    cfg = {
+        "strategy": {"strategy_id": "bowaka", "environment": args.env},
+        "paths": {
+            "daily_summary_path": str(
+                Path(__file__).resolve().parent / "data"
+                / "daily_summary.jsonl"
+            ),
+        },
+    }
+    import bowaka_strategy as bw
+    ev = bw.emit_ledger_event(
+        cfg, event_type="manual_intervention",
+        trade_id=args.linked_trade_id,
+        ticker=args.symbol,
+        payload={
+            "reason": args.reason,
+            "side": args.side,
+            "qty": args.qty,
+            "price": args.price,
+            "linked_trade_id": args.linked_trade_id,
+            "linked_incident_id": args.linked_incident_id,
+            "realized_pnl_impact": args.realized_pnl_impact,
+            "notes": args.notes,
+        },
+    )
+    if ev is None:
+        print("manual_intervention write failed", flush=True)
+        return 3
+    print(f"wrote manual_intervention event {ev['event_id']}")
+    return 0
+
+
+def _reports_root() -> Path:
+    return Path(__file__).resolve().parents[2] / "reports"
+
+
+def _read_ledger_for_env(env: str) -> Path:
+    return (
+        Path(__file__).resolve().parent / "data" / env
+        / "trade_ledger.jsonl"
+    )
+
+
+def _check_ledger_for_mixed_env(ledger_path: Path) -> list[str]:
+    """Return the list of distinct environment values seen. Empty
+    list means no records."""
+    envs: set[str] = set()
+    if not ledger_path.exists():
+        return []
+    for raw in ledger_path.read_text(encoding="utf-8").splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            ev = json.loads(raw)
+        except ValueError:
+            continue
+        envs.add((ev.get("environment") or "paper").lower())
+    return sorted(envs)
+
+
+def _cli_daily_report(args) -> int:
+    env = args.env or "paper"
+    ledger_path = _read_ledger_for_env(env)
+    envs = _check_ledger_for_mixed_env(ledger_path)
+    if len(envs) > 1:
+        print(
+            "refusing to run: mixed environments in ledger "
+            f"{ledger_path}: {envs}", flush=True,
+        )
+        return 4
+    out_dir = _reports_root() / "daily"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{args.daily_report}_summary.md"
+    body = _render_daily_report(args.daily_report, env, ledger_path)
+    out_path.write_text(body, encoding="utf-8")
+    print(f"wrote {out_path}")
+    return 0
+
+
+def _cli_weekly_report(args) -> int:
+    env = args.env or "paper"
+    ledger_path = _read_ledger_for_env(env)
+    envs = _check_ledger_for_mixed_env(ledger_path)
+    if len(envs) > 1:
+        print(
+            "refusing to run: mixed environments in ledger "
+            f"{ledger_path}: {envs}", flush=True,
+        )
+        return 4
+    out_dir = _reports_root() / "weekly"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{args.weekly_report}_bowaka_paper_report.md"
+    body = _render_weekly_report(args.weekly_report, env, ledger_path)
+    out_path.write_text(body, encoding="utf-8")
+    print(f"wrote {out_path}")
+    return 0
+
+
+def _cli_incident_report(args) -> int:
+    out_dir = _reports_root() / "incidents"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"incident_{args.incident_report}.md"
+    body = _render_incident_report(args.incident_report)
+    out_path.write_text(body, encoding="utf-8")
+    print(f"wrote {out_path}")
+    return 0
+
+
+def _render_daily_report(date_str: str, env: str, ledger_path: Path) -> str:
+    """Phase 8.4: minimal daily-report renderer. Future iterations can
+    expand sections; the contract is that the metadata block is
+    present and the report includes a data-feed lineage line."""
+    import bowaka_strategy as bw
+    summary = bw.recompute_daily_summary_from_ledger(
+        ledger_path, date_str,
+    )
+    lines: list[str] = []
+    lines.append(f"# Bowaka — Daily Report {date_str}\n")
+    lines.append("## Metadata\n")
+    lines.append(f"- analysis_epoch: `{bw.DEFAULT_ANALYSIS_EPOCH}`\n")
+    lines.append(f"- strategy_version: `{bw._strategy_version()}`\n")
+    lines.append(f"- config_hash: (see config_snapshots/)\n")
+    lines.append(f"- environment: `{env}`\n")
+    lines.append(f"- data_feed: see ENV_CONFIG_VERSION / prefilter\n")
+    lines.append("\n## Activity\n")
+    lines.append(f"- count_opened: {summary['count_opened']}\n")
+    lines.append(f"- count_closed: {summary['count_closed']}\n")
+    lines.append(
+        f"- total_realized_pnl: {summary['total_realized_pnl']:.2f}\n"
+    )
+    lines.append("\n## Reasons\n")
+    for r, n in (summary.get("by_reason") or {}).items():
+        lines.append(f"- {r}: {n}\n")
+    return "".join(lines)
+
+
+def _render_weekly_report(week: str, env: str, ledger_path: Path) -> str:
+    lines: list[str] = []
+    lines.append(f"# Bowaka — Weekly Report {week}\n")
+    lines.append("## Metadata\n")
+    import bowaka_strategy as bw
+    lines.append(f"- analysis_epoch: `{bw.DEFAULT_ANALYSIS_EPOCH}`\n")
+    lines.append(f"- strategy_version: `{bw._strategy_version()}`\n")
+    lines.append(f"- environment: `{env}`\n")
+    lines.append("\n## Notes\n")
+    lines.append(
+        "- This is the Phase 8 scaffold. Weekly aggregation across\n"
+        "  daily session_summary records will be filled in by a\n"
+        "  follow-up commit; the schema (metadata block, data-feed\n"
+        "  lineage) is pinned here so downstream tools can parse.\n"
+    )
+    return "".join(lines)
+
+
+def _render_incident_report(incident_id: str) -> str:
+    """Phase 8.4: parameterized incident template."""
+    return (
+        f"# Incident {incident_id}\n\n"
+        "## Summary\n"
+        "_Fill in_\n\n"
+        "## Timeline\n"
+        "_Fill in (use trade_ledger.jsonl events as the source of truth)_\n\n"
+        "## Root cause\n"
+        "_Fill in_\n\n"
+        "## Remediation\n"
+        "_Fill in_\n"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Bowaka trade-log analysis")
     parser.add_argument(
@@ -878,7 +1057,62 @@ def main(argv: list[str] | None = None) -> int:
              "contains both paper and test events, so synthetic "
              "fixtures cannot silently contaminate paper analysis.",
     )
+
+    # Phase 8 subcommands. argparse subparsers would force a backwards
+    # incompatible rework; instead we add named flags that, when
+    # present, switch the program into report-generator mode.
+    parser.add_argument(
+        "--daily-report",
+        metavar="YYYY-MM-DD",
+        default=None,
+        help="Phase 8.4: write a markdown daily report for the date "
+             "to reports/daily/.",
+    )
+    parser.add_argument(
+        "--weekly-report",
+        metavar="YYYY-Www",
+        default=None,
+        help="Phase 8.4: write a markdown weekly report for the week "
+             "to reports/weekly/.",
+    )
+    parser.add_argument(
+        "--incident-report",
+        metavar="ID",
+        default=None,
+        help="Phase 8.4: write a markdown incident report.",
+    )
+    parser.add_argument(
+        "--manual-intervention", action="store_true",
+        help="Phase 8.2: log a manual_intervention event "
+             "(use with --symbol/--reason/--side/--qty/...)",
+    )
+    parser.add_argument("--symbol", default=None)
+    parser.add_argument("--reason", default=None)
+    parser.add_argument("--side", default=None)
+    parser.add_argument("--qty", type=int, default=None)
+    parser.add_argument("--price", type=float, default=None)
+    parser.add_argument("--linked-trade-id", default=None)
+    parser.add_argument("--linked-incident-id", default=None)
+    parser.add_argument(
+        "--realized-pnl-impact", type=float, default=None,
+    )
+    parser.add_argument("--notes", default=None)
+    parser.add_argument(
+        "--env", default="paper",
+        help="Environment for the manual_intervention event "
+             "(paper|test|live)",
+    )
+
     args = parser.parse_args(argv)
+
+    if args.manual_intervention:
+        return _cli_manual_intervention(args)
+    if args.daily_report:
+        return _cli_daily_report(args)
+    if args.weekly_report:
+        return _cli_weekly_report(args)
+    if args.incident_report:
+        return _cli_incident_report(args)
 
     if args.reconcile:
         result = reconcile_ledger_vs_summary(
