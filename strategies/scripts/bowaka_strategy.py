@@ -246,6 +246,36 @@ def blank_state() -> State:
     }
 
 
+# ---------------------------------------------------------------- Phase 2 protection state machine
+#
+# The protection_state derivation drives every "is this position
+# safe to leave running" decision. The state names below are the
+# canonical machine-readable values. The legacy
+# ``pos["protection_status"]`` string is now derived from the
+# broker truth (open orders), not trusted on its face — the 2026-
+# 05-15 incident showed that a stale string can leave four
+# positions wearing ``oco_attached`` with empty child IDs (no real
+# protection live at the broker).
+
+PROTECTION_STATES = (
+    "flat",
+    "pending_entry",
+    "filled_unprotected",
+    "oco_attached_confirmed",
+    "fallback_stop_attached_confirmed",
+    "exit_order_pending",
+    "exit_order_accepted",
+    "rebracket_pending",
+    "protection_repair_failed",
+    "closed",
+)
+
+_ACTIVE_OR_ACCEPTED_BROKER_STATUSES = {
+    "new", "accepted", "pending_new", "partially_filled",
+    "NEW", "ACCEPTED", "PENDING_NEW", "PARTIALLY_FILLED",
+}
+
+
 # ---------------------------------------------------------------- kill switch
 
 
@@ -5921,6 +5951,58 @@ def reconcile_at_startup(
             state.get("pending_signal_fade_exits", {}).pop(ticker, None)
             summary["pending_signal_fade_resolved"].append(f"{ticker}:cleared")
 
+    # Phase 2.4 — recompute protection_status from broker truth.
+    # The 2026-05-15 incident showed four positions wearing
+    # ``oco_attached`` strings with empty child_order_ids. The fix
+    # is to derive the state from the live broker order snapshot at
+    # every startup and persist the derived result. Any position
+    # that lands in ``filled_unprotected`` is then picked up by the
+    # invariant enforcer on the next tick (protection is no longer
+    # confirmed, so the enforcer kicks in automatically).
+    broker_orders_for_derive = {
+        (o.get("id") or o.get("order_id")): o for o in broker_all_orders
+    }
+    summary["protection_state_recomputed"] = []
+    summary["startup_repair_triggered"] = []
+    for ticker, pos in list(open_positions.items()):
+        derived = derive_protection_state(pos, broker_orders_for_derive)
+        prev_status = pos.get("protection_status")
+        pos["protection_state"] = derived
+        # Map the derived state back to the legacy protection_status
+        # string used by the rest of the codebase. Done as a tight
+        # equivalence — no behavior change for positions whose status
+        # was already correct.
+        legacy_map = {
+            "oco_attached_confirmed": "oco_attached",
+            "fallback_stop_attached_confirmed": "fallback_stop_attached",
+            "exit_order_accepted": "exiting",
+            "exit_order_pending": "exiting",
+            "closed": "flat",
+        }
+        new_legacy = legacy_map.get(derived)
+        if new_legacy and new_legacy != prev_status:
+            pos["protection_status"] = new_legacy
+        summary["protection_state_recomputed"].append(
+            f"{ticker}:{prev_status}->{derived}"
+        )
+        if derived == "filled_unprotected" and pos.get("status") == "filled":
+            # Trigger startup repair via a ledger event; the next
+            # enforcer tick will see protection unconfirmed (because
+            # we did not promote the legacy string) and act.
+            summary["startup_repair_triggered"].append(ticker)
+            _emit_protection_ledger(
+                cfg, pos, event_type="startup_repair_triggered",
+                ticker=ticker,
+                payload={
+                    "prior_protection_status": prev_status,
+                    "derived_protection_state": derived,
+                    "child_order_ids": pos.get("child_order_ids") or {},
+                    "fallback_stop_order_id": pos.get(
+                        "fallback_stop_order_id"
+                    ),
+                },
+            )
+
     save_state(state, state_path)
     LOG.info("reconcile complete: %s", summary)
     return summary
@@ -6851,19 +6933,102 @@ def seconds_since_iso(ts: str | None, now_utc: datetime | None = None) -> float 
         return None
 
 
-def has_confirmed_protection(pos: dict) -> bool:
-    """A position is protected when it has an OCO attached OR a
-    fallback STOP order live, OR it's already exiting / flat."""
-    status = pos.get("protection_status")
-    if status in {"oco_attached", "fallback_stop_attached", "flat"}:
-        return True
-    # Also true if the OCO child IDs are populated (back-compat with
-    # pre-Phase-5 positions that have valid IDs but no
-    # protection_status field).
+def derive_protection_state(
+    pos: dict,
+    broker_orders: dict[str, dict] | None = None,
+) -> str:
+    """Compute the protection state from actual broker order statuses.
+
+    Phase 2 (2026-05-16): the legacy ``pos["protection_status"]``
+    string is no longer authoritative. Instead we ask the broker
+    which of the position's tracked order IDs are still live. The
+    state name returned is one of :data:`PROTECTION_STATES`.
+
+    ``broker_orders`` maps ``order_id -> dict`` with at least a
+    ``status`` field. Pass ``{}`` (or omit) when no broker snapshot
+    is available — the function will fall back conservatively to
+    ``filled_unprotected`` / ``rebracket_pending`` where it can,
+    rather than reporting a confirmation it cannot verify.
+    """
+    bo = broker_orders or {}
+    status = pos.get("status")
+    if status == "closed":
+        return "closed"
+    if status == "flat":
+        return "flat"
+    if status in {"pending_entry", "submitted", "pending_fill"}:
+        return "pending_entry"
+
+    exit_id = pos.get("exit_order_id")
+    if exit_id:
+        bs = (bo.get(exit_id) or {}).get("status", "")
+        if bs in _ACTIVE_OR_ACCEPTED_BROKER_STATUSES:
+            return "exit_order_accepted"
+        # Submission attempted but no broker echo yet.
+        if pos.get("exit_submitted_at") and not bs:
+            return "exit_order_pending"
+
     children = pos.get("child_order_ids") or {}
-    if children.get("target") and children.get("stop"):
+    stop_id = children.get("stop") or ""
+    target_id = children.get("target") or ""
+    stop_active = bool(stop_id) and (bo.get(stop_id) or {}).get(
+        "status"
+    ) in _ACTIVE_OR_ACCEPTED_BROKER_STATUSES
+    target_active = bool(target_id) and (bo.get(target_id) or {}).get(
+        "status"
+    ) in _ACTIVE_OR_ACCEPTED_BROKER_STATUSES
+    if stop_active and target_active:
+        return "oco_attached_confirmed"
+
+    fb_id = pos.get("fallback_stop_order_id")
+    if fb_id and (bo.get(fb_id) or {}).get(
+        "status"
+    ) in _ACTIVE_OR_ACCEPTED_BROKER_STATUSES:
+        return "fallback_stop_attached_confirmed"
+
+    if pos.get("rebracket_pending"):
+        return "rebracket_pending"
+
+    if pos.get("protection_repair_failed_at"):
+        return "protection_repair_failed"
+
+    return "filled_unprotected"
+
+
+def has_confirmed_protection(
+    pos: dict,
+    broker_orders: dict[str, dict] | None = None,
+) -> bool:
+    """A position is protected when broker order state confirms an
+    active OCO, fallback stop, or accepted exit order. Optional
+    ``broker_orders`` short-circuits the call when the caller has not
+    yet fetched live orders — in that case we trust ONLY explicit
+    terminal states (closed/flat); otherwise return False
+    conservatively to force a recheck rather than skip enforcement.
+
+    Phase 2 (2026-05-16): the bug fix. The legacy implementation
+    trusted the stored ``protection_status`` string verbatim, which
+    let four positions (ASPN/ONDS/PCT/QS on 2026-05-15) ride wearing
+    ``oco_attached`` with empty child_order_ids and no real OCO live
+    at the broker. The new contract requires either the explicit
+    closed/flat terminal markers OR a broker-confirmed derive call.
+    """
+    state = pos.get("status")
+    if state == "closed":
         return True
-    return False
+    if state == "flat":
+        return True
+    if broker_orders is None:
+        # No live snapshot — never trust the stored protection_status
+        # string. This is the heart of the fix for the 2026-05-15
+        # incident.
+        return False
+    derived = derive_protection_state(pos, broker_orders)
+    return derived in {
+        "oco_attached_confirmed",
+        "fallback_stop_attached_confirmed",
+        "exit_order_accepted",
+    }
 
 
 def protection_deadline_breached(
@@ -6981,6 +7146,176 @@ def _emit_protection_event(
     )
 
 
+# Phase 2.6 — canonical protection_* ledger event types. Every
+# protection-related transition is emitted via emit_ledger_event
+# with one of these event_type values.
+PROTECTION_EVENT_TYPES: frozenset[str] = frozenset({
+    "protection_state_changed",
+    "oco_submit_requested",
+    "oco_submit_accepted",
+    "oco_submit_rejected",
+    "child_cancel_requested",
+    "child_cancel_confirmed",
+    "replacement_exit_submitted",
+    "replacement_exit_accepted",
+    "replacement_exit_rejected",
+    "protection_gap_started",
+    "protection_gap_resolved",
+    "fallback_stop_submitted",
+    "fallback_stop_accepted",
+    "fallback_stop_rejected",
+    "forced_flatten_submitted",
+    "forced_flatten_accepted",
+    "forced_flatten_rejected",
+    "startup_repair_triggered",
+    "startup_repair_resolved",
+})
+
+
+def _emit_protection_ledger(
+    cfg: dict | None, pos: dict, *, event_type: str, ticker: str,
+    payload: dict[str, Any],
+) -> None:
+    """Phase 2.6: thin wrapper that drops one row in the canonical
+    ledger with the protection_* event_type. Separate from
+    ``_emit_protection_event`` because the legacy helper also writes
+    to per-trade jsonl — these protection_* events are ledger-only.
+    """
+    if event_type not in PROTECTION_EVENT_TYPES:
+        # Programming error, not a runtime issue — surface loudly in
+        # logs so the operator notices a typo.
+        LOG.error(
+            "_emit_protection_ledger: unknown event_type %r (allowed=%s)",
+            event_type, sorted(PROTECTION_EVENT_TYPES),
+        )
+        return
+    link_id = pos.get("link_id") or ""
+    emit_ledger_event(
+        cfg, event_type=event_type,
+        trade_id=link_id, ticker=ticker,
+        payload={"ts": _now_utc_iso(), **payload},
+    )
+
+
+def replace_protection_with_exit(
+    ticker: str,
+    pos: dict,
+    cfg: dict,
+    http: httpx.Client,
+    api_key: str,
+    *,
+    exit_submit_callable,
+    state: State,
+    state_path: Path,
+) -> tuple[bool, str | None]:
+    """Phase 2.5: atomic protection replacement.
+
+    Submit the replacement exit FIRST. Only on broker acceptance do
+    we cancel the OCO children. On rejection, the OCO remains live
+    and we return ``(False, reason)``. Used by signal_fade in
+    Phase 4 and by any future cancel-and-replace exit path.
+
+    ``exit_submit_callable`` is a zero-arg callable returning the
+    same dict shape as :func:`submit_market_sell` /
+    :func:`submit_marketable_limit_sell`. The caller chooses the
+    order type / TIF so this helper does not need to know.
+    """
+    # Step 1: submit the replacement exit.
+    try:
+        result = exit_submit_callable()
+    except Exception as e:
+        LOG.exception(
+            "replace_protection_with_exit: submit raised for %s: %s",
+            ticker, e,
+        )
+        _emit_protection_ledger(
+            cfg, pos, event_type="replacement_exit_rejected",
+            ticker=ticker,
+            payload={"reason": f"submit_exception: {e!r}"},
+        )
+        return False, f"submit_exception: {e!r}"
+
+    http_status = (
+        result.get("_http_status")
+        if isinstance(result, dict) else None
+    )
+    if not isinstance(result, dict) or http_status is None or http_status >= 400:
+        # Submit failed; protection remains live.
+        _emit_protection_ledger(
+            cfg, pos, event_type="replacement_exit_rejected",
+            ticker=ticker,
+            payload={"http_status": http_status, "response": result},
+        )
+        return False, f"http_status={http_status}"
+
+    # Step 2: extract order_id.
+    data = result.get("data") or {}
+    native = data.get("native_response") or {}
+    order_id = (
+        native.get("id") or native.get("order_id")
+        or data.get("order_id") or result.get("order_id") or ""
+    )
+    if not order_id:
+        _emit_protection_ledger(
+            cfg, pos, event_type="replacement_exit_rejected",
+            ticker=ticker,
+            payload={
+                "http_status": http_status,
+                "reason": "no_order_id_surfaced",
+                "response": result,
+            },
+        )
+        return False, "no_order_id_surfaced"
+
+    _emit_protection_ledger(
+        cfg, pos, event_type="replacement_exit_submitted",
+        ticker=ticker,
+        payload={"order_id": order_id, "http_status": http_status},
+    )
+
+    # Step 3: persist the new exit BEFORE attempting child cancels.
+    # If we crash between here and the cancel calls, the next tick
+    # finds the new exit_order_id and re-attempts to clean up.
+    pos["exit_order_id"] = order_id
+    pos["exit_submitted_at"] = _now_utc_iso()
+    pos["status"] = "exiting"
+    save_state(state, state_path)
+
+    _emit_protection_ledger(
+        cfg, pos, event_type="replacement_exit_accepted",
+        ticker=ticker,
+        payload={"order_id": order_id, "http_status": http_status},
+    )
+
+    # Step 4: cancel OCO children. Failures here are logged but do
+    # NOT roll back the exit — the broker may have already accepted
+    # / filled the replacement.
+    children = pos.get("child_order_ids") or {}
+    for role, child_id in list(children.items()):
+        if not child_id:
+            continue
+        _emit_protection_ledger(
+            cfg, pos, event_type="child_cancel_requested",
+            ticker=ticker,
+            payload={"role": role, "child_order_id": child_id},
+        )
+        try:
+            cancel_order(child_id, http, api_key)
+            _emit_protection_ledger(
+                cfg, pos, event_type="child_cancel_confirmed",
+                ticker=ticker,
+                payload={"role": role, "child_order_id": child_id},
+            )
+        except Exception as e:
+            LOG.warning(
+                "replace_protection_with_exit: cancel %s child %s "
+                "failed for %s (continuing — replacement is live): %s",
+                role, child_id, ticker, e,
+            )
+
+    return True, None
+
+
 def enforce_protected_position_invariant(
     state: State,
     cfg: dict,
@@ -6989,9 +7324,15 @@ def enforce_protected_position_invariant(
     *,
     state_path: Path,
     now_utc: datetime | None = None,
+    broker_orders: dict[str, dict] | None = None,
 ) -> dict[str, Any]:
     """Phase 5.6: iterate filled positions and ensure each one is
     protected (OCO attached OR fallback stop attached).
+
+    Phase 2 (2026-05-16): protection confirmation now requires a
+    broker-truth snapshot. ``broker_orders`` may be passed in by
+    the caller (avoids re-fetching when the caller already has it),
+    or fetched on demand here from ``fetch_open_orders``.
 
     Returns a summary dict for logging.
     """
@@ -7011,6 +7352,24 @@ def enforce_protected_position_invariant(
     flatten = bool(pp.get("flatten_if_unprotected"))
     block_on_viol = bool(pp.get("block_entries_on_violation"))
 
+    # Phase 2: fetch the broker's current order snapshot once per
+    # invocation. has_confirmed_protection / derive_protection_state
+    # need this to confirm an order is actually live — the stored
+    # ``protection_status`` string is no longer trusted on its face.
+    if broker_orders is None and http is not None and api_key is not None:
+        try:
+            rows = fetch_open_orders(http, api_key, status="open")
+            broker_orders = {
+                (o.get("id") or o.get("order_id")): o for o in rows
+            }
+        except Exception as e:
+            LOG.warning(
+                "enforce_protected_position_invariant: open orders "
+                "fetch failed; running with empty broker snapshot: %s", e,
+            )
+            broker_orders = {}
+    broker_orders = broker_orders or {}
+
     for ticker, pos in list(open_positions.items()):
         if pos.get("status") != "filled":
             continue
@@ -7018,7 +7377,7 @@ def enforce_protected_position_invariant(
         # in a state the protection enforcer can't help with.
         if pos.get("status") == "exiting":
             continue
-        if has_confirmed_protection(pos):
+        if has_confirmed_protection(pos, broker_orders):
             # If we have OCO children, normalize the status so the
             # state record reflects reality.
             if (pos.get("child_order_ids") or {}).get("target") and (
