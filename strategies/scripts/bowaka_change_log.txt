@@ -628,7 +628,7 @@ flips the disabled-by-default features.
 
 
 ================================================================
-2026-05-16 — Quant + Engineering audit remediation (Phase 1–4)
+2026-05-16 — Quant + Engineering audit remediation (Phase 1–5)
 ================================================================
 
 2026-05-16 (uncommitted) | feature/bowaka-paper-epoch-ledger-separation
@@ -770,6 +770,39 @@ flips the disabled-by-default features.
         (score ≈ 0.17) no longer trigger an exit; the new contract
         requires 3+ of 6 gates to fail. No exits at 16:05 ET; that
         slot is logging only.
+
+2026-05-16 (uncommitted) | feature/bowaka-paper-mode-profile-shadow-controls
+        | feat(bowaka): paper-mode YAML profile + shadow-control
+          telemetry
+      * YAML paper-mode profile (audit §6.3): risk.daily_loss_pct
+        null, max_gross_exposure_pct 2.00, max_total_entries_per_day
+        25, max_stopouts_per_day null,
+        stop_trading_after_consecutive_stopouts null,
+        protected_position.block_entries_on_violation false. Per-
+        trade dollars pinned via sizing.equal_slice_bankroll_fraction
+        0.80 so the gross-cap relaxation does NOT inflate individual
+        positions ($4,000/slot unchanged at bankroll=$90k, max
+        concurrent=18).
+      * compute_shadow_controls computes would-block flags
+        (daily_loss_1pct, daily_loss_3pct, gross_exposure_40pct,
+        max_entries_4, max_entries_10, after_2_stopouts) at every
+        candidate. The result rides as ``shadow_controls`` in
+        entry_decision events (both accept and reject paths) so a
+        downstream analysis can replay what a strict regime would
+        have done without re-running the strategy.
+      * update_daily_pnl handles cfg.risk.daily_loss_pct=null
+        without divide-by-zero / AttributeError. The shadow
+        controls still report what would have tripped.
+      * logging.log_* switches added (candidate_decisions,
+        rejected_candidates, counterfactual_entries,
+        counterfactual_exits, order_execution_quality,
+        protection_state, config_snapshot, shadow_risk_controls).
+      Behavior: a paper run from 2026-05-16 forward keeps trading
+        through drawdown (no daily P&L trip), can hold up to 18
+        slots with $4k each ($72k notional cap) but uses
+        max_gross_exposure_pct 2.00 as the upper rail on cumulative
+        exposure. Stop-out counts no longer block — only logged.
+        Every entry decision carries a shadow_controls snapshot.
 
 
 ================================================================
