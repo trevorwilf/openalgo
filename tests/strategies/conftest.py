@@ -39,7 +39,17 @@ def strategy_module(monkeypatch):
 def cfg_dict() -> dict:
     """A canonical config dict that mirrors the YAML template."""
     return {
-        "strategy": {"name": "Bowaka", "strategy_id": "bowaka"},
+        "strategy": {
+            "name": "Bowaka",
+            "strategy_id": "bowaka",
+            # Phase 1.2: tests run under env=test so any leaked test
+            # event lands in data/test/ rather than contaminating
+            # data/paper/. cfg_with_paths overrides the daily_summary
+            # path under tmp_path anyway, so the partition resolves
+            # under tmp_path/test/ which is fine.
+            "environment": "test",
+            "is_test_fixture": True,
+        },
         "paths": {
             "candidates_path": "data/in_play_candidates.json",
             "state_path": "data/state.json",

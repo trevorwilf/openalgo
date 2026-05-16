@@ -179,10 +179,8 @@ def test_liquidity_monitor_increments_counters(
     assert pos["last_liquidity_status"] == "warning"
     assert pos["liquidity_warning_count"] == 1
     # Ledger event was emitted.
-    ledger_path = (
-        Path(cfg_liquidity["paths"]["daily_summary_path"]).parent
-        / "trade_ledger.jsonl"
-    )
+    # Phase 1.2: ledger lives under data/<env>/trade_ledger.jsonl.
+    ledger_path = strategy_module._ledger_path(cfg_liquidity)
     events = []
     for line in ledger_path.read_text().splitlines():
         if line.strip():

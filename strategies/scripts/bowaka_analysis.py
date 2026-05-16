@@ -378,6 +378,8 @@ def report_rescreen_ablation(trades: pd.DataFrame) -> pd.DataFrame:
 
 def reconcile_ledger_vs_summary(
     ledger_path: Path, summary_path: Path,
+    *,
+    include_test_fixtures: bool = False,
 ) -> dict[str, Any]:
     """Phase 7.5: rebuild a daily_summary projection from the ledger
     for every date it covers, compare against the on-disk session_
@@ -386,6 +388,11 @@ def reconcile_ledger_vs_summary(
     Returns a dict with ``differences`` (list of {date, field, on_disk,
     expected}) and ``matched`` (count). Operators run this in CI to
     catch ledger / summary drift.
+
+    The ``include_test_fixtures`` flag is threaded through to
+    :func:`recompute_daily_summary_from_ledger` — without it the
+    ledger reader refuses to project a mixed-environment ledger
+    (Phase 1.5 guardrail).
     """
     # Import here to avoid circular dep when this module is imported
     # before bowaka_strategy in test harnesses.
@@ -414,7 +421,10 @@ def reconcile_ledger_vs_summary(
         d for d in ledger_df["session_date"].dropna().unique()
     )
     for date_str in dates_in_ledger:
-        expected = bw.recompute_daily_summary_from_ledger(ledger_path, date_str)
+        expected = bw.recompute_daily_summary_from_ledger(
+            ledger_path, date_str,
+            include_test_fixtures=include_test_fixtures,
+        )
         on_disk = on_disk_summaries.get(date_str)
         if on_disk is None:
             differences.append({
@@ -860,11 +870,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Phase 7.5: rebuild session summary from ledger and diff "
              "against on-disk daily_summary. Exits non-zero on mismatch.",
     )
+    parser.add_argument(
+        "--include-test-fixtures",
+        action="store_true",
+        help="Phase 1.5: allow mixed-environment ledgers. Without this "
+             "flag the ledger reader refuses to roll up a ledger that "
+             "contains both paper and test events, so synthetic "
+             "fixtures cannot silently contaminate paper analysis.",
+    )
     args = parser.parse_args(argv)
 
     if args.reconcile:
         result = reconcile_ledger_vs_summary(
             Path(args.ledger), Path(args.summary),
+            include_test_fixtures=args.include_test_fixtures,
         )
         print(f"reconcile: matched={result['matched']} "
               f"differences={len(result['differences'])}")

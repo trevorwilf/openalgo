@@ -165,9 +165,8 @@ def test_select_entries_rejects_thinnest_tier(strategy_module, cfg_with_paths):
     )
     assert selected == []
     # Verify the rejection event made it to the canonical ledger.
-    ledger_path = (
-        Path(cfg["paths"]["daily_summary_path"]).parent / "trade_ledger.jsonl"
-    )
+    # Phase 1.2: ledger lives under data/<env>/trade_ledger.jsonl.
+    ledger_path = strategy_module._ledger_path(cfg)
     events = []
     for line in ledger_path.read_text().splitlines():
         if not line.strip():

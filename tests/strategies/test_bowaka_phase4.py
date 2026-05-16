@@ -978,9 +978,14 @@ def _write_ledger_event(summary_path: Path, *, event_type: str,
     daily-summary file. Mirrors :func:`bowaka_strategy.emit_ledger_event`
     so tests can pre-seed the ledger without instantiating the strategy
     module's logger / cfg machinery.
+
+    Phase 1.2: the strategy module now reads/writes under
+    ``data/<env>/trade_ledger.jsonl``. Tests run with environment=test
+    (set by conftest), so this helper writes to the matching test
+    partition so the strategy can find seeded events.
     """
     import uuid
-    ledger_path = summary_path.parent / "trade_ledger.jsonl"
+    ledger_path = summary_path.parent / "test" / "trade_ledger.jsonl"
     ev = {
         "schema_version": 1,
         "event_id": event_id or uuid.uuid4().hex,

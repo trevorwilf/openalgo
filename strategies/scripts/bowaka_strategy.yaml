@@ -10,6 +10,17 @@
 strategy:
   name: "Bowaka"
   strategy_id: "bowaka"
+  # Phase 1.2 — environment partitioning. Valid values are
+  # "paper" | "test" | "live". The resolved trade-ledger path is
+  # forced under data/<environment>/ so paper and test events can
+  # never contaminate each other. The startup gate in main() refuses
+  # to run if the environment field disagrees with the resolved
+  # ledger path.
+  environment: "paper"
+  # Phase 1.3 — analysis epoch token, stamped on every ledger event.
+  # The post-audit epoch is "bowaka_paper_epoch_2026_05_16_v1"; the
+  # archived pre-epoch data lives under data/archive/.
+  analysis_epoch: "bowaka_paper_epoch_2026_05_16_v1"
 
 paths:
   candidates_path: "data/in_play_candidates.json"
