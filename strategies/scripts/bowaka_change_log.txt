@@ -904,6 +904,36 @@ flips the disabled-by-default features.
         parent/exit fill; downstream analyses can rely on the
         canonical schema documented in this commit.
 
+2026-05-18 (uncommitted) | fix/bowaka-startup-repair-event-once
+        | fix(bowaka): emit startup_repair_triggered only on state
+          transition (not every reconcile)
+      * Observed 2026-05-18: 504 startup_repair_triggered events for
+        4 positions, all from one run_id. The daily-reconcile path
+        (line 8845 in run_loop) plus the intraday_confirmation early-
+        return in run_session_entry_pass legitimately calls
+        reconcile_at_startup ~126 times per session; the Phase 2
+        emission gate compared the LEGACY ``protection_status``
+        string against the new ``derived_protection_state``, but the
+        legacy string is NEVER updated for the filled_unprotected
+        case (we want the invariant enforcer to see protection
+        unconfirmed and act). So every reconcile re-fired the event.
+      * Fix: gate the emission on the previously-stored DERIVED
+        state (``pos["protection_state"]``). One event per genuine
+        oco_attached_confirmed → filled_unprotected transition;
+        subsequent reconciles that see the same state are silent.
+        A position that recovers and then loses protection again
+        emits a fresh event (the right granularity).
+      * Two regression tests added in test_bowaka_protection_state.py:
+        emits_once_per_position_across_repeat_calls pins the no-
+        duplicate behavior; emits_again_when_position_falls_back_
+        into_unprotected pins the transition-on-recurrence behavior.
+      Behavior: future bowaka runs emit at most one
+        startup_repair_triggered event per (position, transition).
+        The 4 positions repaired today (ASPN/ONDS/PCT/QS) would
+        have produced 4 events instead of 504. No live trading
+        impact — the invariant enforcer reads broker truth on every
+        tick regardless of whether the ledger event fired.
+
 
 ================================================================
 Active runtime knobs that drive trading behavior

@@ -254,6 +254,140 @@ def test_reconcile_at_startup_repairs_unprotected_positions(
     assert triggered_tickers == ["ASPN", "ONDS", "PCT", "QS"]
 
 
+def test_reconcile_at_startup_emits_once_per_position_across_repeat_calls(
+    tmp_path, cfg_with_paths,
+):
+    """Regression for the 2026-05-18 ledger-flood (504 events / 4
+    positions / 1 run_id). A second reconcile against the same
+    state MUST NOT emit a duplicate startup_repair_triggered event:
+    the position's derived state is unchanged, so the event is a
+    no-op."""
+    state = _load_fixture_state()
+    cfg = copy.deepcopy(cfg_with_paths)
+    state_path = Path(cfg["paths"]["state_path"])
+    summary_path = Path(cfg["paths"]["daily_summary_path"])
+    bw.save_state(state, state_path)
+    http = _build_http_with_unprotected_positions(state)
+
+    # First call — should emit four events.
+    res1 = bw.reconcile_at_startup(
+        state, http, "k",
+        state_path=state_path, summary_path=summary_path, cfg=cfg,
+    )
+    assert set(res1["startup_repair_triggered"]) == {
+        "ASPN", "ONDS", "PCT", "QS",
+    }
+
+    # Second call — derived state already persisted as
+    # filled_unprotected on every position; no new transition; the
+    # emission list must be empty AND no additional events land in
+    # the ledger.
+    ledger_path = bw._ledger_path(cfg)
+    events_after_first = ledger_path.read_text().splitlines()
+    triggered_after_first = sum(
+        1 for raw in events_after_first if raw.strip()
+        and json.loads(raw).get("event_type")
+        == "startup_repair_triggered"
+    )
+    assert triggered_after_first == 4
+
+    res2 = bw.reconcile_at_startup(
+        state, http, "k",
+        state_path=state_path, summary_path=summary_path, cfg=cfg,
+    )
+    assert res2["startup_repair_triggered"] == []
+
+    events_after_second = ledger_path.read_text().splitlines()
+    triggered_after_second = sum(
+        1 for raw in events_after_second if raw.strip()
+        and json.loads(raw).get("event_type")
+        == "startup_repair_triggered"
+    )
+    # No new events landed.
+    assert triggered_after_second == 4
+
+
+def test_reconcile_emits_again_when_position_falls_back_into_unprotected(
+    tmp_path, cfg_with_paths,
+):
+    """If a previously-protected position loses its OCO and lands
+    back in filled_unprotected, a fresh startup_repair_triggered
+    event MUST fire (the transition is real and the operator wants
+    to see it). The state-change gate is the right granularity —
+    not a once-per-process latch."""
+    state = bw.blank_state()
+    state["open_positions"] = {
+        "X": {
+            "link_id": "BOWAKA-X-1",
+            "status": "filled",
+            "qty": 10,
+            "entry_price": 100.0,
+            "child_order_ids": {"stop": "S-1", "target": "T-1"},
+            "protection_status": "oco_attached",
+            "protection_state": "oco_attached_confirmed",
+        },
+    }
+    cfg = copy.deepcopy(cfg_with_paths)
+    state_path = Path(cfg["paths"]["state_path"])
+    summary_path = Path(cfg["paths"]["daily_summary_path"])
+    bw.save_state(state, state_path)
+
+    # First call: broker confirms OCO live -> no transition, no
+    # startup_repair event.
+    def handler_oco_live(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/api/v2/positions":
+            return httpx.Response(200, json={
+                "data": {"positions": [{
+                    "canonical_symbol": "X", "quantity": "10",
+                }]},
+            })
+        if req.url.path == "/api/v2/orders":
+            return httpx.Response(200, json={
+                "data": {"orders": [
+                    {"id": "S-1", "status": "new"},
+                    {"id": "T-1", "status": "accepted"},
+                ]},
+            })
+        return httpx.Response(404)
+
+    http = httpx.Client(
+        transport=httpx.MockTransport(handler_oco_live),
+        base_url="http://x",
+    )
+    res1 = bw.reconcile_at_startup(
+        state, http, "k",
+        state_path=state_path, summary_path=summary_path, cfg=cfg,
+    )
+    assert res1["startup_repair_triggered"] == []
+
+    # Second call: broker has dropped both OCO orders (DAY-TIF
+    # expiry, cancel, etc.) -> derived flips to filled_unprotected.
+    def handler_no_orders(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/api/v2/positions":
+            return httpx.Response(200, json={
+                "data": {"positions": [{
+                    "canonical_symbol": "X", "quantity": "10",
+                }]},
+            })
+        if req.url.path == "/api/v2/orders":
+            return httpx.Response(
+                200, json={"data": {"orders": []}},
+            )
+        return httpx.Response(404)
+
+    http2 = httpx.Client(
+        transport=httpx.MockTransport(handler_no_orders),
+        base_url="http://x",
+    )
+    res2 = bw.reconcile_at_startup(
+        state, http2, "k",
+        state_path=state_path, summary_path=summary_path, cfg=cfg,
+    )
+    # The transition oco_attached_confirmed -> filled_unprotected
+    # MUST emit one event.
+    assert res2["startup_repair_triggered"] == ["X"]
+
+
 # ---- replace_protection_with_exit atomicity --------------------------
 
 
