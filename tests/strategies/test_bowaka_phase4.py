@@ -1498,9 +1498,10 @@ def test_emit_entry_decision_writes_per_trade_file_with_full_context(
     assert rec["link_id"] == link_id
     assert rec["candidate"]["signal_strength"] == 9.0
     assert rec["candidate"]["features"]["rvol"] == 2.5
-    # Per-gate breakdown.
+    # Per-gate breakdown. Thresholds reflect the conftest cfg_dict
+    # (optuna_best.json values as of 2026-05-17).
     assert rec["gates"]["rvol"]["value"] == 2.5
-    assert rec["gates"]["rvol"]["threshold"] == 1.5
+    assert rec["gates"]["rvol"]["threshold"] == pytest.approx(1.3844422014336542)
     assert rec["gates"]["rvol"]["passed"] is True
     # Sizing rationale.
     assert rec["sizing"]["binding_cap"] == "per_trade_pct"
@@ -1510,7 +1511,9 @@ def test_emit_entry_decision_writes_per_trade_file_with_full_context(
     # Selection slot context.
     assert rec["selection"]["slot_index"] == 0
     assert rec["selection"]["slate_size"] == 5
-    # Bracket config snapshot.
+    # Bracket config snapshot. Reflects conftest cfg_dict's exits block
+    # (legacy 0.15 / 0.08; cfg_dict is intentionally NOT in sync with
+    # the canonical YAML's optuna values — the cfg is the test scaffold).
     assert rec["bracket"]["mode"] == "actual_fill"
     assert rec["bracket"]["target_pct"] == 0.15
     assert rec["bracket"]["stop_pct"] == 0.08
@@ -1684,20 +1687,28 @@ def test_emit_exit_writes_to_per_trade_file(
 # ---------------------------------------------------------------- prefilter handshake
 
 
+_OPTUNA_SIGNALS_YAML = (
+    "signals:\n"
+    "  rvol_min: 1.3844422014336542\n"
+    "  atr_pct_min: 0.03051262989343343\n"
+    "  range_expansion_min: 1.162515777135367\n"
+    "  close_location_min: 0.7340130537157081\n"
+    "  ema_distance_min: 0.08883008785458922\n"
+    "  ema_slope_min: 0.03594512696636021\n"
+)
+
+
 def test_handshake_passes_when_gates_match(
     strategy_module, cfg_with_paths, tmp_path,
 ):
-    """Item 8 (handshake): identical gates + indicators → no error."""
+    """Item 8 (handshake): identical gates + indicators → no error.
+
+    Values reflect the 2026-05-17 optuna_best.json import (in sync
+    with the conftest cfg_dict)."""
     pf = tmp_path / "bowaka_prefilter.yaml"
     pf.write_text(
-        "signals:\n"
-        "  rvol_min: 1.5\n"
-        "  atr_pct_min: 0.06\n"
-        "  range_expansion_min: 1.25\n"
-        "  close_location_min: 0.60\n"
-        "  ema_distance_min: 0.0\n"
-        "  ema_slope_min: 0.0\n"
-        "indicators:\n"
+        _OPTUNA_SIGNALS_YAML
+        + "indicators:\n"
         "  lookback_days: 20\n"
         "  atr_days: 14\n"
         "  ema_days: 10\n"
@@ -1717,12 +1728,12 @@ def test_handshake_raises_on_signal_gate_drift(
     pf = tmp_path / "bowaka_prefilter.yaml"
     pf.write_text(
         "signals:\n"
-        "  rvol_min: 2.0\n"  # strategy expects 1.5
-        "  atr_pct_min: 0.06\n"
-        "  range_expansion_min: 1.25\n"
-        "  close_location_min: 0.60\n"
-        "  ema_distance_min: 0.0\n"
-        "  ema_slope_min: 0.0\n"
+        "  rvol_min: 2.0\n"  # strategy expects 1.384... (optuna)
+        "  atr_pct_min: 0.03051262989343343\n"
+        "  range_expansion_min: 1.162515777135367\n"
+        "  close_location_min: 0.7340130537157081\n"
+        "  ema_distance_min: 0.08883008785458922\n"
+        "  ema_slope_min: 0.03594512696636021\n"
         "indicators:\n"
         "  lookback_days: 20\n"
         "  atr_days: 14\n"
@@ -1743,14 +1754,8 @@ def test_handshake_raises_on_indicator_window_drift(
 ):
     pf = tmp_path / "bowaka_prefilter.yaml"
     pf.write_text(
-        "signals:\n"
-        "  rvol_min: 1.5\n"
-        "  atr_pct_min: 0.06\n"
-        "  range_expansion_min: 1.25\n"
-        "  close_location_min: 0.60\n"
-        "  ema_distance_min: 0.0\n"
-        "  ema_slope_min: 0.0\n"
-        "indicators:\n"
+        _OPTUNA_SIGNALS_YAML
+        + "indicators:\n"
         "  lookback_days: 30\n"  # strategy expects 20
         "  atr_days: 14\n"
         "  ema_days: 10\n"

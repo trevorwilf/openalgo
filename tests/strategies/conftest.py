@@ -96,12 +96,16 @@ def cfg_dict() -> dict:
             "oco_time_in_force": "GTC",
         },
         "signal_gates": {
-            "rvol_min": 1.5,
-            "atr_pct_min": 0.06,
-            "range_expansion_min": 1.25,
-            "close_location_min": 0.60,
-            "ema_distance_min": 0.0,
-            "ema_slope_min": 0.0,
+            # Optuna best params (2026-05-17). Kept in sync with
+            # strategies/scripts/bowaka_prefilter.yaml so any test
+            # that writes cfg_dict to disk and calls main() passes
+            # the verify_prefilter_handshake step.
+            "rvol_min": 1.3844422014336542,
+            "atr_pct_min": 0.03051262989343343,
+            "range_expansion_min": 1.162515777135367,
+            "close_location_min": 0.7340130537157081,
+            "ema_distance_min": 0.08883008785458922,
+            "ema_slope_min": 0.03594512696636021,
         },
         "indicators": {
             "lookback_days": 20,

@@ -401,9 +401,12 @@ entry:
     max_stopouts_today: null
 
 exits:
-  stop_pct: 0.08
-  target_pct: 0.15
-  max_hold_days: 3
+  # Optuna best params (2026-05-17, study=bowaka_production_bt_iex_default,
+  # 2500 trials, best_value=2.169562557763738). Pre-optuna values
+  # archived in data/archive/pre_optuna_2026_05_17/.
+  stop_pct: 0.10434030942439301   # was 0.08
+  target_pct: 0.19958025044224442  # was 0.15
+  max_hold_days: 2                 # was 3
   # Phase 4.3 (2026-05-16) — hold-thesis signal-fade redesign. The
   # legacy 16:05 MARKET+OPG path is gone; the new design runs a
   # hold-thesis fade score at 15:45 and routes hard/critical bands
@@ -487,12 +490,17 @@ exits:
 # Duplication is intentional. A regression test (see Phase 3) pins parity
 # with the prefilter's compute_features.
 signal_gates:
-  rvol_min: 1.5
-  atr_pct_min: 0.06
-  range_expansion_min: 1.25
-  close_location_min: 0.60
-  ema_distance_min: 0.0
-  ema_slope_min: 0.0
+  # Optuna best params (2026-05-17, study=bowaka_production_bt_iex_default,
+  # 2500 trials, best_value=2.169562557763738). Pre-optuna values
+  # archived in data/archive/pre_optuna_2026_05_17/. These thresholds
+  # MUST match the prefilter signals block — verify_prefilter_handshake
+  # raises HandshakeMismatch on drift.
+  rvol_min: 1.3844422014336542            # was 1.5
+  atr_pct_min: 0.03051262989343343        # was 0.06
+  range_expansion_min: 1.162515777135367  # was 1.25
+  close_location_min: 0.7340130537157081  # was 0.60
+  ema_distance_min: 0.08883008785458922   # was 0.0
+  ema_slope_min: 0.03594512696636021      # was 0.0
 
 indicators:
   lookback_days: 20
