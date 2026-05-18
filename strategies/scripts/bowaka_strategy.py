@@ -7044,6 +7044,7 @@ def reconcile_at_startup(
     for ticker, pos in list(open_positions.items()):
         derived = derive_protection_state(pos, broker_orders_for_derive)
         prev_status = pos.get("protection_status")
+        prev_derived = pos.get("protection_state")
         pos["protection_state"] = derived
         # Map the derived state back to the legacy protection_status
         # string used by the rest of the codebase. Done as a tight
@@ -7062,16 +7063,29 @@ def reconcile_at_startup(
         summary["protection_state_recomputed"].append(
             f"{ticker}:{prev_status}->{derived}"
         )
-        if derived == "filled_unprotected" and pos.get("status") == "filled":
-            # Trigger startup repair via a ledger event; the next
-            # enforcer tick will see protection unconfirmed (because
-            # we did not promote the legacy string) and act.
+        # Phase 2.4 + 2026-05-18 fix: emit only when the derived
+        # state TRANSITIONS into filled_unprotected. The legacy
+        # ``protection_status`` string is not updated for the
+        # unprotected case (we want the invariant enforcer to see
+        # protection unconfirmed and act), so the previous emission
+        # gate (``prev_status == 'oco_attached'``) re-fired on every
+        # reconcile in a single process — 126 reconciles per session
+        # × 4 positions = 504 duplicate events observed on 2026-05-18.
+        # Comparing the previous DERIVED state ensures one event per
+        # genuine transition; subsequent reconciles that see the same
+        # state are silent.
+        if (
+            derived == "filled_unprotected"
+            and pos.get("status") == "filled"
+            and prev_derived != "filled_unprotected"
+        ):
             summary["startup_repair_triggered"].append(ticker)
             _emit_protection_ledger(
                 cfg, pos, event_type="startup_repair_triggered",
                 ticker=ticker,
                 payload={
                     "prior_protection_status": prev_status,
+                    "prior_protection_state": prev_derived,
                     "derived_protection_state": derived,
                     "child_order_ids": pos.get("child_order_ids") or {},
                     "fallback_stop_order_id": pos.get(
