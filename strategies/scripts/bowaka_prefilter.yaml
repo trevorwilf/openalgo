@@ -60,19 +60,22 @@ indicators:
   ema_slope_lookback: 3
 
 signals:
-  # Set any of these to null to disable that gate.
-  rvol_min: 1.5               # today's volume >= 1.5x rolling-20d avg
-  atr_pct_min: 0.06           # ATR is at least 6% of price
-  range_expansion_min: 1.25   # today's range >= 1.25x ATR
-  close_location_min: 0.60    # close in upper 40% of today's range
-  ema_distance_min: 0.0       # close above EMA
-  ema_slope_min: 0.0          # EMA rising
-  # Phase 2.1 — max gates. Disabled by default; the operator's
-  # calibrated config should pin them to (e.g.) 5.0 / 2.25 / 0.25
-  # per Report §6 / §7 to drop blow-off / exhaustion entries.
-  rvol_max: null
-  range_expansion_max: null
-  gap_pct_max: null
+  # Optuna best params (2026-05-17, study=bowaka_production_bt_iex_default,
+  # 2500 trials, best_value=2.169562557763738). Pre-optuna values
+  # archived in data/archive/pre_optuna_2026_05_17/. The min thresholds
+  # MUST match bowaka_strategy.yaml.signal_gates exactly —
+  # verify_prefilter_handshake raises HandshakeMismatch on drift.
+  rvol_min: 1.3844422014336542            # was 1.5
+  atr_pct_min: 0.03051262989343343        # was 0.06
+  range_expansion_min: 1.162515777135367  # was 1.25
+  close_location_min: 0.7340130537157081  # was 0.60
+  ema_distance_min: 0.08883008785458922   # was 0.0
+  ema_slope_min: 0.03594512696636021      # was 0.0
+  # Phase 2.1 max gates — pinned by optuna_best.json. Drop blow-off /
+  # exhaustion candidates so the signal regime is symmetric.
+  rvol_max: 8.0               # was null
+  range_expansion_max: 3.0    # was null
+  gap_pct_max: 0.3            # was null
 
 # Phase 2.2 — bounded signal_strength score. ``bounded: false`` keeps
 # legacy behavior (parity with the pre-audit formula); ``bounded:
