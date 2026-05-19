@@ -43,6 +43,9 @@ tmp/
 *.sqlite
 *.log
 *.jsonl
+# Allow committed test fixtures (jsonl).
+!tests/fixtures/**/*.jsonl
+!tests/strategies/fixtures/**/*.jsonl
 *.tmp
 checkpoint.txt
 checkpoints.json
@@ -136,6 +139,9 @@ strategies/scripts/*
 !strategies/scripts/bowaka_universe_builder.cron
 !strategies/scripts/run_bowaka_universe_builder.sh
 !strategies/scripts/run_bowaka_universe_builder.bat
+!strategies/scripts/bowaka_intraday_scanner.cron
+!strategies/scripts/run_bowaka_intraday_scanner.sh
+!strategies/scripts/run_bowaka_intraday_scanner.bat
 # v2 archives
 !strategies/scripts/archive/
 !strategies/scripts/archive/**
