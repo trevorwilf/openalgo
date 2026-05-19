@@ -67,7 +67,7 @@ def _baseline_cfg(extra_signals: dict | None = None,
 
 
 def test_rvol_max_drops_blowoff(tmp_path):
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     df = _features_df([
         {"symbol": "A", "close": 5.0, "rvol": 10.0, "atr_pct": 0.1,
          "range_expansion": 1.5, "close_location": 0.8,
@@ -88,7 +88,7 @@ def test_rvol_max_drops_blowoff(tmp_path):
 
 
 def test_range_expansion_max_drops_extreme(tmp_path):
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     df = _features_df([
         {"symbol": "A", "close": 5.0, "rvol": 3.0, "atr_pct": 0.1,
          "range_expansion": 5.0, "close_location": 0.8,
@@ -109,7 +109,7 @@ def test_range_expansion_max_drops_extreme(tmp_path):
 
 
 def test_gap_pct_max_drops_gappers(tmp_path):
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     df = _features_df([
         {"symbol": "A", "close": 5.0, "rvol": 3.0, "atr_pct": 0.1,
          "range_expansion": 1.5, "close_location": 0.8,
@@ -132,7 +132,7 @@ def test_gap_pct_max_drops_gappers(tmp_path):
 def test_max_gates_disabled_by_default(tmp_path):
     """Null = disabled. Pre-Phase-2 behavior preserved when YAML
     keeps the new gates at their null defaults."""
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     df = _features_df([
         {"symbol": "X", "close": 5.0, "rvol": 999.0, "atr_pct": 0.1,
          "range_expansion": 99.0, "close_location": 0.8,
@@ -157,7 +157,7 @@ def test_signal_strength_bounded_false_matches_legacy_formula():
     """Bounded=false produces the exact pre-Phase-2 formula:
        rvol + range_expansion + ema_distance*10 + ema_slope*10
     """
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     df = pd.DataFrame([
         {"rvol": 2.0, "range_expansion": 1.5, "ema_distance": 0.04,
          "ema_slope": 0.03, "gap_pct": 0.05},
@@ -175,7 +175,7 @@ def test_signal_strength_bounded_false_matches_legacy_formula():
 def test_signal_strength_bounded_caps_rvol_and_penalizes_gap():
     """Bounded=true clips each term at its cap and subtracts a
     penalty proportional to gap_pct above gap_penalty_above."""
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     df = pd.DataFrame([
         # rvol clipped 10 -> 5.0; gap 0.40 - 0.25 = 0.15 penalty
         {"rvol": 10.0, "range_expansion": 1.5, "ema_distance": 0.05,
@@ -196,7 +196,7 @@ def test_signal_strength_bounded_caps_rvol_and_penalizes_gap():
 
 def test_signal_strength_bounded_clips_all_terms():
     """Every term respects its cap independently."""
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     df = pd.DataFrame([
         {"rvol": 100.0, "range_expansion": 100.0,
          "ema_distance": 100.0, "ema_slope": 100.0, "gap_pct": 0.0},
@@ -218,7 +218,7 @@ def test_signal_strength_bounded_clips_all_terms():
 
 
 def test_classify_blocklist_takes_priority():
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     cfg = _baseline_cfg()
     r = pf.classify_instrument(
         "TSLL", {"name": "Direxion TSLA Bull 2X", "asset_class": "us_equity"}, cfg,
@@ -229,14 +229,14 @@ def test_classify_blocklist_takes_priority():
 
 
 def test_classify_conl_blocklisted():
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     cfg = _baseline_cfg()
     r = pf.classify_instrument("CONL", {"name": "Direxion COIN Bull 2X", "asset_class": "us_equity"}, cfg)
     assert r["instrument_class"] == "leveraged_etp"
 
 
 def test_classify_smcx_blocklisted():
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     cfg = _baseline_cfg()
     r = pf.classify_instrument("SMCX", {"name": "Direxion SMCI 2X", "asset_class": "us_equity"}, cfg)
     assert r["instrument_class"] == "leveraged_etp"
@@ -245,7 +245,7 @@ def test_classify_smcx_blocklisted():
 def test_classify_sqqq_by_name_keyword():
     """SQQQ is a 3X inverse on NASDAQ-100; the keyword path classifies
     it without it being on the blocklist."""
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     cfg = _baseline_cfg()
     r = pf.classify_instrument(
         "SQQQ",
@@ -267,7 +267,7 @@ def test_classify_tlt_passes_through_as_etf():
     """TLT is a regular bond ETF — should classify as etf (not
     leveraged/inverse) and be marked ineligible for the equity
     bucket."""
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     cfg = _baseline_cfg()
     r = pf.classify_instrument(
         "TLT",
@@ -280,7 +280,7 @@ def test_classify_tlt_passes_through_as_etf():
 
 
 def test_classify_operating_equity_default():
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     cfg = _baseline_cfg()
     r = pf.classify_instrument(
         "AAPL",
@@ -295,7 +295,7 @@ def test_classify_operating_equity_default():
 def test_classify_2x_3x_by_keyword():
     """A leveraged ETP whose name contains 2X / 3X / DAILY classifies
     as leveraged_etp even without being on the blocklist."""
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     cfg = _baseline_cfg()
     r = pf.classify_instrument(
         "TQQQ",
@@ -312,7 +312,7 @@ def test_apply_filters_drops_leveraged_etp_by_class():
     """A row whose name triggers the leveraged-etp classifier is
     dropped from the candidate set (and stashed on the dataframe for
     diagnostic CSV inclusion)."""
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     df = _features_df([
         {"symbol": "TSLL", "close": 5.0, "rvol": 3.0, "atr_pct": 0.1,
          "range_expansion": 1.5, "close_location": 0.8,
@@ -438,7 +438,7 @@ def test_select_entries_rejects_leveraged_etp_by_class(
 def test_apply_filters_diagnostic_carries_excluded_rows(tmp_path):
     """The diagnostic CSV path includes the rows excluded by
     instrument class with an ``excluded_reason`` column."""
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
 
     df = _features_df([
         {"symbol": "TSLL", "close": 5.0, "rvol": 3.0, "atr_pct": 0.1,

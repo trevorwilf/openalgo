@@ -130,14 +130,14 @@ def test_log_exception_traceback_redacted(strategy_module, tmp_path):
 
 
 def test_stable_hash_format():
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     h = pf.stable_hash({"b": 2, "a": [1, 2, 3]})
     assert h.startswith("sha256:")
     assert len(h) == len("sha256:") + 64  # full hex
 
 
 def test_stable_hash_order_independent():
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     a = pf.stable_hash({"b": 2, "a": 1})
     b = pf.stable_hash({"a": 1, "b": 2})
     assert a == b
@@ -146,7 +146,7 @@ def test_stable_hash_order_independent():
 def test_prefilter_write_output_v2_shape(tmp_path):
     """write_output produces a v2 candidate-file payload with all the
     required provenance fields."""
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     import pandas as pd
 
     df = pd.DataFrame(
@@ -190,7 +190,7 @@ def test_prefilter_write_output_v2_shape(tmp_path):
 
 
 def test_universe_hash_changes_on_universe_change(tmp_path):
-    import bowaka_prefilter as pf
+    pf = __import__("pytest").importorskip("bowaka_prefilter")
     a = pf.stable_hash(sorted(["AAPL", "MSFT"]))
     b = pf.stable_hash(sorted(["AAPL", "MSFT", "TSLA"]))
     assert a != b

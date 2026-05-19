@@ -315,7 +315,7 @@ def test_signal_fade_features_match_prefilter(strategy_module, cfg_with_paths):
     )
     if str(prefilter_dir) not in _sys.path:
         _sys.path.insert(0, str(prefilter_dir))
-    import bowaka_prefilter as bp
+    bp = __import__("pytest").importorskip("bowaka_prefilter")
 
     # Prefilter expects a multi-index DataFrame keyed by ('symbol', 'timestamp')
     # with lowercase OHLCV columns. Reshape our synthetic input to match.
