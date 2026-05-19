@@ -1,0 +1,134 @@
+"""Phase 2 — universe builder end-to-end integration smoke."""
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+import bowaka_universe_builder as ub
+import bowaka_v2_paths as paths
+
+
+def _cfg(tmp_path: Path) -> dict:
+    return {
+        "paths": {
+            "universe_snapshot_path": str(tmp_path / "universe_snapshot.json"),
+            "daily_feature_cache_path": str(tmp_path / "daily_feature_cache.parquet"),
+        },
+        "data": {"provider": "alpaca", "feed": "iex"},
+        "universe": {
+            "allowed_exchanges": ["NASDAQ", "NYSE"],
+            "exclude_otc": True,
+            "exclude_etf": True,
+            "exclude_leveraged_etp": True,
+            "price_min": 1.0, "price_max": 20.0,
+            "avg_dollar_volume_min": 250_000,
+            "ticker_blocklist": [],
+        },
+        "instrument_rules": {
+            "name_keywords": {
+                "leveraged": ["2X", "3X"],
+                "inverse": ["INVERSE"],
+                "etn": ["NOTES"],
+                "etf": ["ETF"],
+            },
+        },
+        "historical_features": {
+            "lookback_days": 20, "atr_days": 14,
+            "ema_days": 10, "ema_slope_lookback": 3,
+        },
+    }
+
+
+def test_end_to_end_writes_both_outputs(tmp_path):
+    cfg = _cfg(tmp_path)
+    assets = [
+        {"symbol": "FOO", "exchange": "NASDAQ", "name": "Foo Inc",
+         "asset_class": "us_equity", "tradable": True, "status": "active"},
+        {"symbol": "BAR", "exchange": "NYSE", "name": "Bar Holdings",
+         "asset_class": "us_equity", "tradable": True, "status": "active"},
+    ]
+
+    def bars_supplier(symbol):
+        rows = []
+        for i in range(25):
+            c = 5.0 + i * 0.05
+            rows.append({
+                "timestamp": datetime(2026, 4, 1, tzinfo=timezone.utc)
+                             + timedelta(days=i),
+                "open": c - 0.05, "high": c + 0.10,
+                "low":  c - 0.10, "close": c, "volume": 500_000,
+            })
+        return pd.DataFrame(rows)
+
+    snap, cache, meta = ub.build_universe(
+        cfg,
+        asset_supplier=lambda: assets,
+        bars_supplier=bars_supplier,
+    )
+    snap_path, cache_path = ub.write_outputs(snap, cache, meta, cfg)
+    assert snap_path.exists()
+    assert cache_path.exists()
+
+    snap_doc = json.loads(snap_path.read_text())
+    assert snap_doc["symbols_count"] == 2
+    symbols = {s["symbol"] for s in snap_doc["symbols"]}
+    assert symbols == {"FOO", "BAR"}
+    assert snap_doc["universe_hash"].startswith("sha256:")
+    assert snap_doc["config_hash"].startswith("sha256:")
+    # data_feed lineage present.
+    assert snap_doc["data_feed"] == "iex"
+    # Cache parquet readable + contains both symbols.
+    df = pd.read_parquet(cache_path)
+    assert set(df["symbol"]) == {"FOO", "BAR"}
+    assert "prior_close" in df.columns
+
+
+def test_dry_run_smoke_completes(tmp_path, monkeypatch):
+    """Phase 2 smoke command: python bowaka_universe_builder.py
+    --config <cfg> --dry-run uses the built-in fixture and writes
+    both outputs without a network call."""
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_text = (
+        "paths:\n"
+        f"  universe_snapshot_path: {tmp_path}/universe_snapshot.json\n"
+        f"  daily_feature_cache_path: {tmp_path}/daily_feature_cache.parquet\n"
+        "data:\n"
+        "  provider: alpaca\n"
+        "  feed: iex\n"
+        "universe:\n"
+        "  allowed_exchanges: [NASDAQ, NYSE]\n"
+        "  exclude_otc: true\n"
+        "  exclude_leveraged_etp: true\n"
+        "  exclude_etf: true\n"
+        "  price_min: 1.0\n"
+        "  price_max: 50.0\n"
+        "  avg_dollar_volume_min: 1.0\n"
+        "  ticker_blocklist: []\n"
+        "instrument_rules:\n"
+        "  name_keywords:\n"
+        "    leveraged: ['1.5X', '2X', '3X']\n"
+        "    inverse: []\n"
+        "    etn: []\n"
+        "    etf: []\n"
+        "historical_features:\n"
+        "  lookback_days: 20\n"
+        "  atr_days: 14\n"
+        "  ema_days: 10\n"
+        "  ema_slope_lookback: 3\n"
+        "logging:\n"
+        "  level: WARNING\n"
+    )
+    cfg_path.write_text(cfg_text)
+    rc = ub.main(["--config", str(cfg_path), "--dry-run"])
+    assert rc == 0
+    snap_path = tmp_path / "universe_snapshot.json"
+    cache_path = tmp_path / "daily_feature_cache.parquet"
+    assert snap_path.exists()
+    assert cache_path.exists()
+    snap_doc = json.loads(snap_path.read_text())
+    # FOO is the operating equity; TSLL is leveraged and dropped.
+    assert {s["symbol"] for s in snap_doc["symbols"]} == {"FOO"}

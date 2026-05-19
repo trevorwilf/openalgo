@@ -1,0 +1,64 @@
+# ──────────────────────────────────────────────────────────────────
+# Bowaka v2 — universe builder configuration.
+#
+# Replaces bowaka_prefilter.yaml. The signals: block is INTENTIONALLY
+# absent — signal gates (rvol_so_far, range_expansion, etc.) belong
+# to the intraday scanner so it can evaluate the FORMING session bar
+# against the universe every minute. The universe layer is a "garbage
+# filter" only.
+# ──────────────────────────────────────────────────────────────────
+
+strategy:
+  name: "BowakaV2UniverseBuilder"
+  strategy_id: "bowaka_v2_universe"
+
+paths:
+  universe_snapshot_path: "strategies/scripts/data/bowaka_v2/universe_snapshot.json"
+  daily_feature_cache_path: "strategies/scripts/data/bowaka_v2/daily_feature_cache.parquet"
+
+data:
+  provider: "alpaca"
+  feed: "iex"                              # IEX during research; SIP for live
+  daily_timeframe: "1D"
+  timezone: "America/New_York"
+
+universe:
+  allowed_exchanges: ["NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"]
+  exclude_otc: true
+  exclude_etf: true
+  exclude_leveraged_etp: true
+  exclude_inverse_etp: true
+  exclude_etn: true
+  exclude_warrants: true
+  exclude_units: true
+  exclude_rights: true
+  exclude_preferred: true
+  ticker_blocklist: ["TSLL", "CONL", "SMCX"]
+
+  price_min: 1.0
+  price_max: 20.0
+  avg_dollar_volume_min: 250000
+  avg_dollar_volume_max: null
+
+historical_features:
+  lookback_days: 20
+  atr_days: 14
+  ema_days: 10
+  ema_slope_lookback: 3
+
+# Instrument-class name-keyword matchers (mirror v1 prefilter).
+instrument_rules:
+  ticker_blocklist: []                      # additive to universe.ticker_blocklist
+  name_keywords:
+    leveraged: ["1.5X", "2X", "3X", "BULL", "BEAR", "ULTRA", "DAILY"]
+    inverse:   ["INVERSE", "SHORT", "BEAR"]
+    etn:       [" ETN ", "NOTES", "EXCHANGE TRADED NOTE"]
+    warrant:   ["WARRANT", " W ", " WS "]
+    unit:      ["UNIT", " UT "]
+    right:     ["RIGHT", " R "]
+    preferred: ["PREFERRED", " PR ", " PFD "]
+    etf:       ["ETF", "INDEX FUND", "TRUST"]
+
+logging:
+  level: "INFO"
+  file: "logs/bowaka_v2_universe_builder.log"

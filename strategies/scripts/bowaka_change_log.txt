@@ -989,3 +989,30 @@ Append a section dated by the commit's author date with:
 Keep entries oldest-first. Group commits from the same day under one
 date heading. The "Active runtime knobs" table at the bottom should
 be regenerated whenever a new operator-tunable flag is added.
+
+================================================================
+2026-05-18 — Bowaka v2 implementation (Phases 1–6)
+================================================================
+
+2026-05-18 | Phase 1 — v2 foundation
+        | strategies/scripts/bowaka_v2_paths.py    (path constants)
+        | strategies/scripts/bowaka_v2_features.py (causal features)
+        | strategies/scripts/bowaka_v2_schemas.py  (candidate + entry schemas)
+        | strategies/scripts/bowaka_v2_config.yaml (handoff §6 verbatim)
+        | tests/strategies/test_bowaka_v2_*.py     (29 tests)
+        Behavior: additive only. No v1 paths touched.
+
+2026-05-18 | Phase 2 — universe builder (replaces prefilter)
+        | strategies/scripts/bowaka_universe_builder.py / .yaml / .cron
+        | strategies/scripts/run_bowaka_universe_builder.{sh,bat}
+        | strategies/scripts/archive/v1_prefilter/  (all v1 prefilter
+        |   wrappers + cron + Windows task XML moved here)
+        | tests/strategies/test_bowaka_universe_builder_{filtering,
+        |   baselines,end_to_end}.py (13 tests)
+        | tests/strategies/archive/v1_test_bowaka_prefilter.py
+        | Audit-phase tests 1/2 + signal_fade_features_match_prefilter
+        |   use pytest.importorskip("bowaka_prefilter") so they skip
+        |   cleanly when v1 is archived.
+        Behavior: universe layer is a "garbage filter" only — no
+        signal gates. Names that v1 would reject on RVOL/range/
+        close_location now flow through to the (Phase 3) scanner.

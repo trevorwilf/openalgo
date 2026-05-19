@@ -1,0 +1,16 @@
+# Bowaka v2 universe builder cron (replaces bowaka_prefilter.cron).
+# Runs nightly before the session at 02:00 / 03:00 / 04:00 / 05:00 / 06:00
+# Mountain Time on weekdays. Mirrors v1 retry pattern; flock prevents
+# overlapping runs.
+
+CRON_TZ=America/Denver
+HOME=/home/bowaka
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Each line: try the universe build. flock holds an exclusive lock so a
+# slow run cannot collide with the next retry.
+0 2 * * 1-5  /usr/bin/flock -n /tmp/bowaka_universe_builder.lock /opt/bowaka/scripts/run_bowaka_universe_builder.sh
+0 3 * * 1-5  /usr/bin/flock -n /tmp/bowaka_universe_builder.lock /opt/bowaka/scripts/run_bowaka_universe_builder.sh
+0 4 * * 1-5  /usr/bin/flock -n /tmp/bowaka_universe_builder.lock /opt/bowaka/scripts/run_bowaka_universe_builder.sh
+0 5 * * 1-5  /usr/bin/flock -n /tmp/bowaka_universe_builder.lock /opt/bowaka/scripts/run_bowaka_universe_builder.sh
+0 6 * * 1-5  /usr/bin/flock -n /tmp/bowaka_universe_builder.lock /opt/bowaka/scripts/run_bowaka_universe_builder.sh

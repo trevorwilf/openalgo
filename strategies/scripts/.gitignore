@@ -12,6 +12,7 @@
 !bowaka_v2_features.py
 !bowaka_v2_schemas.py
 !bowaka_v2_paths.py
+!bowaka_universe_builder.py
 
 # Ignore log files if any
 *.log
