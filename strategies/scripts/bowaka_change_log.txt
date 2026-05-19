@@ -1053,3 +1053,24 @@ be regenerated whenever a new operator-tunable flag is added.
           candidate_minute_bars (scaffold) /
           per_position_ticks (scaffold) /
           liquidity_monitor (scaffold, Phase 6 wires actions).
+
+2026-05-18 | Phase 5 — v2 backtester + cost model + ablation +
+        |   counterfactuals + analysis
+        | strategies/scripts/bowaka_v2_backtest.py
+        | strategies/scripts/bowaka_v2_cost_model.py
+        | strategies/scripts/bowaka_v2_ablation.py
+        | strategies/scripts/bowaka_v2_bucket_analysis.py
+        | strategies/scripts/bowaka_v2_replay_data.py
+        | strategies/scripts/bowaka_v2_counterfactuals.py
+        | strategies/scripts/bowaka_v2_analysis.py
+        | tests/strategies/test_bowaka_v2_{cost_model,
+        |   backtest_no_lookahead,ablation,bucket_analysis,
+        |   backtest_integration,counterfactuals,analysis,
+        |   feature_parity}.py (21 tests)
+        Behavior: backtester replays one session at a time using
+        the EXACT same bowaka_v2_features module the scanner uses
+        — feature parity is structural, not parallel. Cost model
+        supports base / conservative / severe stresses + halt /
+        gap variants. Ablation harness runs the 14-variant suite
+        per handoff §8.5. Bucket analysis emits expectancy /
+        win-rate per ADV / price / spread bucket.
