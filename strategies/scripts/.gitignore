@@ -30,3 +30,10 @@ __pycache__/
 !bowaka_intraday_scanner.py
 !bowaka_v2_volume_curve.py
 !bowaka_v2_strategy.py
+!bowaka_v2_backtest.py
+!bowaka_v2_cost_model.py
+!bowaka_v2_ablation.py
+!bowaka_v2_bucket_analysis.py
+!bowaka_v2_replay_data.py
+!bowaka_v2_counterfactuals.py
+!bowaka_v2_analysis.py
