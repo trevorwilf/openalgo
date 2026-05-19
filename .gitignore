@@ -131,6 +131,7 @@ strategies/scripts/*
 !strategies/scripts/bowaka_analysis.py
 !strategies/scripts/bowaka_counterfactuals.py
 !strategies/scripts/bowaka_change_log.txt
+!strategies/scripts/bowaka_v2_config.yaml
 # Windows launchers (.bat / .cmd / Task Scheduler XML).
 # NOTE: _run_bowaka_strategy_oneshot.cmd is INTENTIONALLY NOT in the
 # allowlist — operators are expected to hardcode their personal

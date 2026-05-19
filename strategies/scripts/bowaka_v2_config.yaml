@@ -1,0 +1,278 @@
+# ──────────────────────────────────────────────────────────────────
+# Bowaka v2 — forming-daily-bar scanner configuration.
+#
+# Sourced verbatim from handoff §6 ("Recommended v2 configuration")
+# at strategies/scripts/documentation/V2/bowaka_v2_quant_engineering_handoff.md
+# with the operator-state overrides:
+#   strategy.environment: "paper"
+#   data.feed: "iex"
+#   data.allow_non_sip_for_research_only: true
+#   data.live_requires_sip: true          (NEW — Phase 4 startup gate)
+#
+# WARNING — IEX is partial-tape coverage. Volume aggregates seen on
+# IEX are a fraction of consolidated tape volume, which biases
+# RVOL_so_far / projected_full_day_rvol / range_expansion DOWN for
+# microcaps that route most of their flow elsewhere. The signal
+# regime CANNOT be trusted on IEX data; use it only for plumbing
+# tests and architecture validation. Switching to consolidated SIP
+# data is purely a config flip:
+#   data.feed: "sip"
+#   data.allow_non_sip_for_research_only: false
+# No code change required.
+# ──────────────────────────────────────────────────────────────────
+
+strategy:
+  name: "BowakaV2"
+  strategy_id: "bowaka_v2"
+  mode: "forming_daily_bar_monitor"
+  environment: "paper"
+  analysis_epoch: "bowaka_v2_research_epoch_2026_05_18"
+
+paths:
+  universe_snapshot_path: "data/bowaka_v2/universe_snapshot.json"
+  daily_feature_cache_path: "data/bowaka_v2/daily_feature_cache.parquet"
+  volume_curve_path: "data/bowaka_v2/volume_curve.parquet"
+  candidate_events_path: "data/bowaka_v2/candidate_events.jsonl"
+  entry_decisions_path: "data/bowaka_v2/entry_decisions.jsonl"
+  state_path: "data/bowaka_v2/state.json"
+  trade_ledger_path: "data/bowaka_v2/trade_ledger.jsonl"
+  daily_summary_path: "data/bowaka_v2/daily_summary.jsonl"
+  log_path: "logs/bowaka_v2_strategy.log"
+  kill_switch_dir: "."
+
+data:
+  provider: "alpaca"
+  feed: "iex"                              # operator override; SIP target
+  allow_non_sip_for_research_only: true    # operator override
+  live_requires_sip: true                  # Phase 4 startup gate refuses live unless SIP
+  daily_timeframe: "1D"
+  intraday_timeframe: "1m"
+  timezone: "America/New_York"
+  min_history_trading_days: 45
+  require_adjusted_daily_bars: true
+  require_split_adjustment: true
+  fail_on_missing_baseline: true
+  max_bar_age_seconds: 90
+  max_quote_age_seconds: 15
+
+session:
+  timezone: "America/New_York"
+  start: "09:30"
+  end: "15:55"
+  scanner_start: "09:45"
+  scanner_end: "15:30"
+  loop_interval_seconds: 5
+
+universe:
+  allowed_exchanges: ["NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"]
+  exclude_otc: true
+  exclude_etf: true
+  exclude_leveraged_etp: true
+  exclude_inverse_etp: true
+  exclude_etn: true
+  exclude_warrants: true
+  exclude_units: true
+  exclude_rights: true
+  exclude_preferred: true
+  ticker_blocklist: ["TSLL", "CONL", "SMCX"]
+
+  price_min: 1.0
+  price_max: 20.0
+  avg_dollar_volume_min: 250000
+  avg_dollar_volume_max: null
+
+  market_cap_max: null
+  float_shares_max: null
+  shares_outstanding_max: null
+
+historical_features:
+  lookback_days: 20
+  atr_days: 14
+  ema_days: 10
+  ema_slope_lookback: 3
+  volume_curve:
+    mode: "adv_bucket"
+    bucket_edges: [250000, 500000, 1000000, 5000000, 20000000]
+    fallback_opening_15m_share: 0.08
+    min_days_for_symbol_curve: 20
+
+scanner:
+  enabled: true
+  scan_interval_seconds: 60
+  full_universe_refresh_interval_minutes: 5
+  in_play_refresh_interval_seconds: 60
+  max_candidates_per_scan: 25
+  max_entries_per_scan: 3
+  signal_expiry_seconds: 600
+  same_symbol_entries_per_day: 1
+  symbol_cooldown_minutes: 390
+  require_prior_daily_baseline: true
+  require_fresh_intraday_bar: true
+
+signals:
+  rvol_so_far_min: 1.50
+  projected_full_day_rvol_min: 1.50
+  prior_atr_pct_min: 0.06
+  range_expansion_so_far_min: 1.25
+  close_location_so_far_min: 0.60
+  ema_distance_min: 0.0
+  ema_slope_min: 0.0
+
+  # Universe-layer thresholds mirrored here so apply_v2_gates can
+  # evaluate them against the candidate's current price / ADV.
+  price_min: 1.0
+  price_max: 20.0
+  avg_dollar_volume_min: 250000
+  avg_dollar_volume_max: null
+
+  # Blow-off / exhaustion guards. Research priors.
+  rvol_so_far_max: 8.0
+  projected_full_day_rvol_max: 8.0
+  range_expansion_so_far_max: 2.50
+  gap_pct_max: 0.25
+  current_return_pct_max: 0.50
+
+score:
+  bounded: true
+  rvol_score_cap: 5.0
+  range_score_cap: 2.5
+  ema_distance_score_cap: 0.40
+  ema_slope_score_cap: 0.25
+  close_location_weight: 0.75
+  gap_penalty_above: 0.25
+
+execution:
+  parent_order_style: "market"
+  marketable_limit_slippage_pct: 0.005
+  marketable_limit_timeout_seconds: 30
+  bracket_pricing_mode: "actual_fill"
+  default_venue_code: "XNAS"
+
+  quote_gate:
+    enabled: true
+    max_spread_pct: 0.01
+    max_quote_age_seconds: 15
+    require_bid_ask_positive: true
+
+  price_chase_gate:
+    enabled: true
+    max_pct_above_signal_price: 0.10
+    min_pct_below_signal_price: -0.03
+
+  halt_gate:
+    enabled: true
+    block_on_halt_or_pending_review: true
+    block_on_recent_luld_pause: true
+
+sizing:
+  sizing_mode: "equal_slice"
+  bankroll_fixed_dollars: 90000
+  max_concurrent_positions: 18
+  equal_slice_bankroll_fraction: 0.80
+  target_risk_dollars: 200
+  min_order_notional: 500
+  max_per_trade_dollars: null
+
+risk:
+  daily_loss_pct: 0.03
+  strategy_slice_loss_pct: 0.025
+  max_gross_exposure_pct: 0.80
+  max_total_entries_per_day: 10
+  max_stopouts_per_day: 2
+  stop_trading_after_consecutive_stopouts: 2
+
+  adv_tier_caps:
+    - max_adv_dollars: 250000
+      reject_if_below: true
+    - max_adv_dollars: 500000
+      max_position_as_adv_frac: 0.003
+    - max_adv_dollars: 1000000
+      max_position_as_adv_frac: 0.005
+    - max_adv_dollars: 5000000
+      max_position_as_adv_frac: 0.010
+    - max_adv_dollars: null
+      max_position_as_adv_frac: 0.015
+
+  # Phase 4 shadow risk: stricter mirrors that log "would have
+  # blocked" events without actually blocking live entries.
+  shadow:
+    daily_loss_pct: 0.01
+    max_gross_exposure_pct: 0.40
+    max_total_entries_per_day: 4
+    adv_tier_caps:
+      - max_adv_dollars: 250000
+        reject_if_below: true
+      - max_adv_dollars: 500000
+        max_position_as_adv_frac: 0.002
+      - max_adv_dollars: 1000000
+        max_position_as_adv_frac: 0.003
+      - max_adv_dollars: 5000000
+        max_position_as_adv_frac: 0.005
+      - max_adv_dollars: null
+        max_position_as_adv_frac: 0.010
+
+exits:
+  stop_pct: 0.08
+  target_pct: 0.15
+  max_hold_days: 3
+
+  time_stop:
+    enabled: true
+    exit_time: "15:45"
+
+  signal_fade:
+    enabled: true
+    initial_mode: "telemetry_then_active_after_validation"
+    eval_time: "15:45"
+    telemetry_time: "16:05"
+    score_thresholds:
+      soft: 0.34
+      hard: 0.50
+      critical: 0.67
+    exit_on: ["hard", "critical"]
+    order_style: "marketable_limit"
+    marketable_limit_offset_pct: 0.005
+
+protected_position:
+  enabled: true
+  max_unprotected_seconds: 10
+  max_oco_attach_attempts: 2
+  fallback_stop_enabled: true
+  flatten_if_unprotected: true
+  block_entries_on_violation: true
+
+logging:
+  level: "INFO"
+  file: "logs/bowaka_v2_strategy.log"
+  intraday_tick_interval_seconds: 60
+  emit_candidate_events: true
+  emit_entry_decisions: true
+  emit_rejected_candidates: true
+  emit_feature_snapshots: true
+  log_order_execution_quality: true
+  log_protection_state: true
+  log_shadow_risk_controls: true
+  log_counterfactual_entries: true
+  log_counterfactual_exits: true
+  persist_config_snapshot: true
+
+research:
+  candidate_minute_bars:
+    enabled: true
+    output_dir: "data/bowaka_v2/candidate_bars"
+    layout: "by_session"
+    window:
+      premarket_start: "08:00"
+      session_end: "16:00"
+    columns: ["ts", "open", "high", "low", "close", "volume", "vwap", "trade_count"]
+    on_missing: "warn"
+
+liquidity_monitor:
+  enabled: false
+  tick_interval_seconds: 30
+  stale_quote_seconds: 30
+  severe_stale_quote_seconds: 60
+  spread_warning_pct: 0.03
+  spread_severe_pct: 0.05
+  consecutive_warning_ticks: 3
+  action_on_severe_if_profitable: "none"

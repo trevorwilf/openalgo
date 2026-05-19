@@ -9,6 +9,9 @@
 !bowaka_strategy.py
 !bowaka_analysis.py
 !bowaka_counterfactuals.py
+!bowaka_v2_features.py
+!bowaka_v2_schemas.py
+!bowaka_v2_paths.py
 
 # Ignore log files if any
 *.log
@@ -23,6 +26,3 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# Keep the directory but ignore contents
-# This ensures the scripts folder exists in git but user strategies are not tracked
