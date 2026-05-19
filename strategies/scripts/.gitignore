@@ -37,3 +37,8 @@ __pycache__/
 !bowaka_v2_replay_data.py
 !bowaka_v2_counterfactuals.py
 !bowaka_v2_analysis.py
+!bowaka_v2_stream.py
+!bowaka_v2_heartbeat.py
+!bowaka_v2_dashboard.py
+!bowaka_v2_replay.py
+!bowaka_v2_event_stream_versioning.py
