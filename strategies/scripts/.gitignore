@@ -42,3 +42,4 @@ __pycache__/
 !bowaka_v2_dashboard.py
 !bowaka_v2_replay.py
 !bowaka_v2_event_stream_versioning.py
+!bowaka_v2_openalgo_client.py

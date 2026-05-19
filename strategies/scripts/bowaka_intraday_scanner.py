@@ -526,13 +526,10 @@ def main(argv: list[str] | None = None) -> int:
             cfg, universe, daily_cache, volume_curve, state, args,
         )
 
-    # Live path: not yet wired (Phase 6 will land streaming bars).
     if args.dry_run:
         LOG.info(
-            "dry-run with no replay fixture: emitting empty scan + "
-            "heartbeat (no symbols to evaluate)"
+            "dry-run: emitting empty scan + heartbeat (no live scan)"
         )
-        # Heartbeat only.
         append_heartbeat({
             "ts": _iso(_now_utc()),
             "scan_timestamp": _iso(_now_utc()),
@@ -543,11 +540,105 @@ def main(argv: list[str] | None = None) -> int:
         save_scanner_state(state)
         return 0
 
-    LOG.error(
-        "live network bars supplier not wired yet; use --replay-from "
-        "for now"
+    return _run_live(cfg, universe, daily_cache, volume_curve, state)
+
+
+def _run_live(
+    cfg: dict, universe: dict, daily_cache, volume_curve, state,
+) -> int:
+    """Long-running live scan loop. Polls OpenAlgo /api/v2/bars for
+    each universe symbol every scan_interval_seconds, evaluates
+    gates, emits candidate events.
+    """
+    import bowaka_v2_openalgo_client as oa
+    import signal as _signal
+    host, api_key = oa.resolve_host_and_key()
+    http = oa.make_http_client(host, timeout=30.0)
+    sess_cfg = cfg.get("session") or {}
+    scanner_cfg = cfg.get("scanner") or {}
+    interval = int(scanner_cfg.get("scan_interval_seconds", 60))
+    today_et_date = pd.Timestamp.now(tz="America/New_York").date()
+    session_start = pd.Timestamp(
+        f"{today_et_date} {sess_cfg.get('scanner_start', '09:45')}",
+        tz="America/New_York",
     )
-    return 2
+    session_end = pd.Timestamp(
+        f"{today_et_date} {sess_cfg.get('scanner_end', '15:30')}",
+        tz="America/New_York",
+    )
+    LOG.info(
+        "scanner live loop: %d symbols, interval=%ds, window=%s -> %s",
+        len(universe.get("symbols") or []),
+        interval, session_start, session_end,
+    )
+
+    shutdown = {"flag": False}
+    def _handler(_signum, _frame):
+        LOG.info("scanner shutdown signal received")
+        shutdown["flag"] = True
+    try:
+        _signal.signal(_signal.SIGINT, _handler)
+        _signal.signal(_signal.SIGTERM, _handler)
+    except (ValueError, OSError):
+        pass
+
+    def live_bars_supplier(symbol: str, scan_ts):
+        # Fetch this symbol's minute bars from session_start → scan_ts.
+        scan_ts_utc = pd.Timestamp(scan_ts)
+        if scan_ts_utc.tzinfo is None:
+            scan_ts_utc = scan_ts_utc.tz_localize("UTC")
+        # session_start ET → UTC.
+        start_utc = session_start.tz_convert("UTC")
+        venue = "XNAS"
+        for s in universe.get("symbols") or []:
+            if s["symbol"] == symbol:
+                venue = s.get("venue_code", "XNAS")
+                break
+        return oa.fetch_bars(
+            http, api_key,
+            venue_code=venue, symbol=symbol,
+            interval="1m",
+            start=start_utc.to_pydatetime(),
+            end=scan_ts_utc.to_pydatetime(),
+        )
+
+    try:
+        while not shutdown["flag"]:
+            now = pd.Timestamp.now(tz="America/New_York")
+            if now < session_start:
+                LOG.info("waiting for scanner_start (%s)...", session_start)
+                _sleep_or_shutdown(interval, shutdown)
+                continue
+            if now > session_end:
+                LOG.info("past scanner_end (%s); scanner exiting", session_end)
+                break
+            scan_ts = now.tz_convert("UTC").to_pydatetime()
+            try:
+                emitted = evaluate_one_scan(
+                    cfg=cfg, universe_snapshot=universe,
+                    daily_cache=daily_cache, volume_curve=volume_curve,
+                    state=state, scan_ts=scan_ts,
+                    bars_supplier=live_bars_supplier,
+                )
+                LOG.info(
+                    "scan @ %s: emitted=%d events",
+                    scan_ts.isoformat()[:19], len(emitted),
+                )
+            except Exception as e:
+                LOG.exception("scan tick raised: %s", e)
+            save_scanner_state(state)
+            _sleep_or_shutdown(interval, shutdown)
+    finally:
+        http.close()
+    return 0
+
+
+def _sleep_or_shutdown(interval_seconds: int, shutdown: dict) -> None:
+    import time as _time
+    slept = 0.0
+    while slept < interval_seconds and not shutdown["flag"]:
+        _time.sleep(min(1.0, interval_seconds - slept))
+        slept += 1.0
 
 
 def _run_replay(

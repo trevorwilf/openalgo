@@ -871,6 +871,46 @@ def main(argv: list[str] | None = None) -> int:
     switch_dir = Path((cfg.get("paths") or {}).get("kill_switch_dir", "."))
     if not switch_dir.is_absolute():
         switch_dir = paths.REPO_ROOT / switch_dir
+
+    # Live network suppliers (OpenAlgo /api/v2). Only created when
+    # env vars are set; tests without env get a None client and the
+    # consumer uses its synthesized-from-signal-price fallback.
+    quote_supplier = None
+    submit_supplier = None
+    live_client = None
+    try:
+        import bowaka_v2_openalgo_client as oa
+        host, api_key = oa.resolve_host_and_key()
+        live_client = oa.make_http_client(host)
+        venue_by_sym = {}  # cached per-symbol venue lookups
+
+        def _venue_for(symbol: str) -> str:
+            if symbol in venue_by_sym:
+                return venue_by_sym[symbol]
+            v = (cfg.get("execution") or {}).get("default_venue_code", "XNAS")
+            venue_by_sym[symbol] = v
+            return v
+
+        def quote_supplier(symbol: str):  # noqa: F811
+            return oa.fetch_quote(
+                live_client, api_key,
+                venue_code=_venue_for(symbol), symbol=symbol,
+            )
+
+        def submit_supplier(symbol: str, qty: int):  # noqa: F811
+            return oa.submit_market_buy(
+                live_client, api_key,
+                venue_code=_venue_for(symbol), symbol=symbol,
+                qty=qty, time_in_force="DAY",
+            )
+
+        LOG.info("v2 strategy: live OpenAlgo suppliers wired (host=%s)", host)
+    except RuntimeError as e:
+        LOG.warning(
+            "live suppliers NOT wired (%s); running in offline log-only mode",
+            e,
+        )
+
     LOG.info(
         "v2 strategy entering long-running loop "
         "(interval=%ds, kill_switch_dir=%s)", interval, switch_dir,
@@ -881,9 +921,15 @@ def main(argv: list[str] | None = None) -> int:
             state_path.parent.mkdir(parents=True, exist_ok=True)
             state_path.write_text(json.dumps(state, default=str, indent=2),
                                   encoding="utf-8")
+            if live_client:
+                live_client.close()
             return 99
         try:
-            summary = consume_candidate_events(state, cfg)
+            summary = consume_candidate_events(
+                state, cfg,
+                quote_supplier=quote_supplier,
+                submit_supplier=submit_supplier,
+            )
             if summary.get("consumed", 0) > 0:
                 LOG.info("v2 consumer tick: %s", summary)
         except Exception as e:
@@ -900,6 +946,8 @@ def main(argv: list[str] | None = None) -> int:
         while slept < interval and not _shutdown_requested:
             time.sleep(min(0.5, interval - slept))
             slept += 0.5
+    if live_client:
+        live_client.close()
     LOG.info("shutdown complete")
     return 0
 
