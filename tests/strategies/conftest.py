@@ -28,10 +28,17 @@ if str(_STRATEGY_DIR) not in sys.path:
 @pytest.fixture
 def strategy_module(monkeypatch):
     """Reset module-level state between tests (the shutdown flag is
-    a module global)."""
-    import bowaka_strategy as bw
+    a module global).
 
-    monkeypatch.setattr(bw, "_shutdown_requested", False)
+    Post v1-removal: the v1 bowaka_strategy module lives under
+    strategies/scripts/archive/v1_strategy/ and is no longer on
+    sys.path. Tests that depend on it skip via importorskip; the
+    bulk of v1-pinning tests have been moved to
+    tests/strategies/archive/ alongside.
+    """
+    bw = pytest.importorskip("bowaka_strategy")
+    if hasattr(bw, "_shutdown_requested"):
+        monkeypatch.setattr(bw, "_shutdown_requested", False)
     return bw
 
 

@@ -142,6 +142,8 @@ strategies/scripts/*
 !strategies/scripts/bowaka_universe_builder.cron
 !strategies/scripts/run_bowaka_universe_builder.sh
 !strategies/scripts/run_bowaka_universe_builder.bat
+!strategies/scripts/_watchdog_bowaka_v2_strategy.cmd
+!strategies/scripts/_watchdog_bowaka_v2_strategy.sh
 !strategies/scripts/bowaka_intraday_scanner.cron
 !strategies/scripts/run_bowaka_intraday_scanner.sh
 !strategies/scripts/run_bowaka_intraday_scanner.bat

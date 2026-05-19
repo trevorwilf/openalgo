@@ -21,10 +21,9 @@ What this module is NOT:
 - It does NOT use the v1 once-per-session-date branch for entry
   discovery — that sentinel is intentionally absent.
 
-Reusable v1 code (poll_fills, OCO attach, protected-position
-invariant, kill switches, ledger writers, bankroll, sizing,
-ADV-tier caps, reconcile) is imported from ``bowaka_strategy``
-rather than copied. The import surface is intentionally narrow.
+All v2 helpers are local to this module — the v2 strategy is
+self-contained. (Pre-v1-removal commits imported a narrow set of
+helpers from the now-archived v1 strategy module.)
 """
 from __future__ import annotations
 
@@ -50,10 +49,38 @@ import bowaka_v2_features as features  # noqa: E402
 import bowaka_v2_paths as paths  # noqa: E402
 import bowaka_v2_schemas as schemas  # noqa: E402
 
-# Reusable v1 pieces. The strategy module is imported by name so the
-# v1 erasure grep on bowaka_v2_strategy.py finds zero hits for the
-# v1 entry-discovery symbols.
-import bowaka_strategy as _v1_reuse  # noqa: E402
+
+def adv_tier_cap(
+    avg_dollar_volume: float | None, cfg: dict,
+) -> tuple[bool, float]:
+    """Resolve the position dollar cap for ``avg_dollar_volume`` under
+    the tiered ADV policy. Returns ``(allowed, max_position_dollars)``.
+
+    Walks ``cfg.risk.adv_tier_caps`` top-to-bottom (YAML order is the
+    policy). The first tier whose ``max_adv_dollars`` is None or >=
+    the candidate's ADV matches. ``reject_if_below: true`` returns
+    ``(False, 0.0)``. Empty tier list falls back to the legacy flat
+    ``risk.max_position_as_adv_frac``.
+    """
+    if avg_dollar_volume is None or float(avg_dollar_volume) <= 0:
+        return False, 0.0
+    adv = float(avg_dollar_volume)
+    tiers = ((cfg.get("risk") or {}).get("adv_tier_caps") or [])
+    if not tiers:
+        flat = (cfg.get("risk") or {}).get("max_position_as_adv_frac")
+        if flat is None:
+            return True, 0.0
+        return True, adv * float(flat)
+    for tier in tiers:
+        max_adv = tier.get("max_adv_dollars")
+        if max_adv is None or adv <= float(max_adv):
+            if tier.get("reject_if_below"):
+                return False, 0.0
+            frac = tier.get("max_position_as_adv_frac")
+            if frac is None:
+                return True, 0.0
+            return True, adv * float(frac)
+    return False, 0.0
 
 
 LOG = logging.getLogger("bowaka_v2_strategy")
@@ -444,13 +471,10 @@ def _risk_gates(
         if pnl / bankroll <= -float(daily_loss_pct):
             return "kill_switch"
 
-    # ADV cap (simplified — full tier walk lives in the v1
-    # adv_tier_cap helper which is reused via _v1_reuse).
+    # ADV cap — tiered policy via adv_tier_cap (inlined above).
     if candidate_adv is not None and candidate_adv > 0:
         try:
-            allowed, cap_dollars = _v1_reuse.adv_tier_cap(
-                candidate_adv, cfg,
-            )
+            allowed, cap_dollars = adv_tier_cap(candidate_adv, cfg)
             if not allowed or (cap_dollars and target_notional > cap_dollars):
                 return "adv_cap"
         except Exception:
@@ -545,6 +569,7 @@ def consume_candidate_events(
     quote_supplier=None,
     submit_supplier=None,
     now_utc: datetime | None = None,
+    today_iso: str | None = None,
 ) -> dict[str, int]:
     """Read new candidate events since the last consumed offset and
     apply gates → submit entries or emit rejection events. Returns
@@ -552,9 +577,11 @@ def consume_candidate_events(
 
     ``quote_supplier(symbol) -> dict | None`` and ``submit_supplier
     (symbol, qty) -> dict`` are injection points for tests.
+    ``today_iso`` defaults to the wall-clock ET date; pass it
+    explicitly when working from a fixture session date.
     """
     now = now_utc or _now_utc()
-    today_iso = _today_iso()
+    today_iso = today_iso or _today_iso()
 
     cand_path = _resolve(cfg, "candidate_events_path",
                           paths.CANDIDATE_EVENTS_PATH)

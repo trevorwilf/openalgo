@@ -160,7 +160,7 @@ def test_consumer_reads_new_lines_only(tmp_path):
         _candidate("BBB"),
         _candidate("CCC"),
     ])
-    s1 = v2.consume_candidate_events(state, cfg, now_utc=datetime(
+    s1 = v2.consume_candidate_events(state, cfg, today_iso="2026-05-18", now_utc=datetime(
         2026, 5, 18, 19, 0, tzinfo=timezone.utc,
     ))
     assert s1["consumed"] == 3
@@ -169,7 +169,7 @@ def test_consumer_reads_new_lines_only(tmp_path):
         _candidate("DDD"),
         _candidate("EEE"),
     ])
-    s2 = v2.consume_candidate_events(state, cfg, now_utc=datetime(
+    s2 = v2.consume_candidate_events(state, cfg, today_iso="2026-05-18", now_utc=datetime(
         2026, 5, 18, 19, 5, tzinfo=timezone.utc,
     ))
     assert s2["consumed"] == 2
@@ -186,7 +186,7 @@ def test_consumer_drops_expired_signals(tmp_path):
     )
     _write_candidates(cand_path, [expired])
     s = v2.consume_candidate_events(
-        state, cfg,
+        state, cfg, today_iso="2026-05-18",
         now_utc=datetime(2026, 5, 18, 20, 0, tzinfo=timezone.utc),
     )
     assert s["expired"] == 1
@@ -209,7 +209,7 @@ def test_consumer_dedupes_same_symbol(tmp_path):
     }
     _write_candidates(cand_path, [_candidate("AAA")])
     s = v2.consume_candidate_events(
-        state, cfg,
+        state, cfg, today_iso="2026-05-18",
         now_utc=datetime(2026, 5, 18, 19, 0, tzinfo=timezone.utc),
     )
     assert s["dedupe"] == 1
@@ -230,7 +230,7 @@ def test_consumer_invalid_schema_logged_and_dropped(tmp_path):
         + json.dumps({"schema_version": 99, "event_type": "wrong"}) + "\n",
     )
     s = v2.consume_candidate_events(
-        state, cfg,
+        state, cfg, today_iso="2026-05-18",
         now_utc=datetime(2026, 5, 18, 19, 0, tzinfo=timezone.utc),
     )
     # Malformed line dropped at tail; one schema-invalid event counted.
@@ -249,7 +249,7 @@ def test_consumer_writes_entry_decision_for_every_event(tmp_path):
         _candidate("BBB", expiry="2026-05-18T14:40:00Z"),
     ])
     v2.consume_candidate_events(
-        state, cfg,
+        state, cfg, today_iso="2026-05-18",
         now_utc=datetime(2026, 5, 18, 20, 0, tzinfo=timezone.utc),
     )
     import bowaka_v2_paths as p
