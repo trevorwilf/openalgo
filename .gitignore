@@ -136,6 +136,9 @@ strategies/scripts/*
 !strategies/scripts/bowaka_change_log.txt
 !strategies/scripts/bowaka_v2_config.yaml
 !strategies/scripts/bowaka_universe_builder.yaml
+# v2 docs (runbook, migration guide, handoff)
+!strategies/scripts/documentation/
+!strategies/scripts/documentation/**
 !strategies/scripts/bowaka_universe_builder.cron
 !strategies/scripts/run_bowaka_universe_builder.sh
 !strategies/scripts/run_bowaka_universe_builder.bat

@@ -1074,3 +1074,21 @@ be regenerated whenever a new operator-tunable flag is added.
         gap variants. Ablation harness runs the 14-variant suite
         per handoff §8.5. Bucket analysis emits expectancy /
         win-rate per ADV / price / spread bucket.
+
+2026-05-18 | Phase 6 — production hardening
+        | strategies/scripts/bowaka_v2_stream.py
+        | strategies/scripts/bowaka_v2_heartbeat.py
+        | strategies/scripts/bowaka_v2_dashboard.py
+        | strategies/scripts/bowaka_v2_replay.py
+        | strategies/scripts/bowaka_v2_event_stream_versioning.py
+        | strategies/scripts/documentation/V2/bowaka_v2_runbook.md
+        | strategies/scripts/documentation/V2/bowaka_v1_to_v2_migration_guide.md
+        | tests/strategies/test_bowaka_v2_{stream,heartbeat,replay,
+        |   event_stream_versioning,dashboard}.py (13 tests)
+        Behavior: stream client scaffold (default-off, reconnects
+        with backoff, falls back to polling on max failures);
+        heartbeat monitor drops KILL_NEW.flag on stale scanner;
+        dashboard CLI renders live state; replay tool detects
+        config_hash drift loudly; schema-version negotiation
+        refuses unsupported event stream versions; runbook +
+        v1→v2 migration guide checked in.
