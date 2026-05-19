@@ -1028,3 +1028,28 @@ be regenerated whenever a new operator-tunable flag is added.
         live; IEX permitted in research with a loud startup warning.
         Per-symbol dedupe reads strategy's entry_decisions.jsonl.
         Heartbeat emits each scan tick for Phase 6 monitor.
+
+2026-05-18 | Phase 4 — v2 strategy (event consumer)
+        | strategies/scripts/bowaka_v2_strategy.py
+        | tests/strategies/test_bowaka_v2_strategy_{consumer,
+        |   v1_removed,logging_parity}.py (21 tests)
+        Behavior: bowaka_v2_strategy.py consumes
+        candidate_events.jsonl tick-by-tick (tail-read since last
+        offset). Applies quote / price-chase / halt / risk gates,
+        emits entry_decision for every event (accept + reject),
+        and routes accepted entries through the v1 OCO bracket +
+        ledger plumbing imported from bowaka_strategy. v2 strategy
+        source has ZERO grep hits for v1 entry-discovery symbols
+        (run_session_entry_pass / in_play_candidates.json /
+         prefilter_handshake / state["session_date"] != today_iso).
+        v1 baseline (bowaka_strategy.py) untouched per handoff §3.3
+        "keep v1 as a baseline/control".
+
+        11 v1-parity logging streams wired:
+          entry_decisions / rejected_candidates /
+          order_execution_quality / protection_events /
+          shadow_risk_controls / counterfactual_entries /
+          counterfactual_exits / config_snapshots /
+          candidate_minute_bars (scaffold) /
+          per_position_ticks (scaffold) /
+          liquidity_monitor (scaffold, Phase 6 wires actions).
