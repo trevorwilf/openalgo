@@ -782,6 +782,23 @@ def load_config(path: str) -> dict:
     return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
 
 
+_shutdown_requested = False
+
+
+def _install_signal_handlers() -> None:
+    import signal
+    def _handler(signum, _frame):
+        global _shutdown_requested
+        LOG.info("shutdown signal %s received", signum)
+        _shutdown_requested = True
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _handler)
+        except (ValueError, OSError):
+            # Some platforms can't install handlers on non-main threads.
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Bowaka v2 strategy (event consumer)",
@@ -794,6 +811,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--dry-run", action="store_true",
         help="Process one tick of available events and exit.",
+    )
+    parser.add_argument(
+        "--once", action="store_true",
+        help="Run one consume tick then exit (alias for --dry-run "
+             "in the loop semantics; useful for cron-style invocation).",
     )
     args = parser.parse_args(argv)
 
@@ -831,13 +853,102 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.replay_from).resolve()
         )
 
-    summary = consume_candidate_events(state, cfg)
-    LOG.info("v2 consumer tick: %s", summary)
+    one_shot = args.dry_run or args.once or args.replay_from is not None
+    if one_shot:
+        summary = consume_candidate_events(state, cfg)
+        LOG.info("v2 consumer tick: %s", summary)
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(state, default=str, indent=2),
+                              encoding="utf-8")
+        return 0
 
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(state, default=str, indent=2),
-                          encoding="utf-8")
+    # Long-running loop: consume new candidate events every
+    # ``session.loop_interval_seconds`` (default 5) until SIGINT /
+    # SIGTERM. The watchdog only re-launches on non-clean exits.
+    _install_signal_handlers()
+    session_cfg = cfg.get("session") or {}
+    interval = int(session_cfg.get("loop_interval_seconds", 5))
+    switch_dir = Path((cfg.get("paths") or {}).get("kill_switch_dir", "."))
+    if not switch_dir.is_absolute():
+        switch_dir = paths.REPO_ROOT / switch_dir
 
+    # Live network suppliers (OpenAlgo /api/v2). Only created when
+    # env vars are set; tests without env get a None client and the
+    # consumer uses its synthesized-from-signal-price fallback.
+    quote_supplier = None
+    submit_supplier = None
+    live_client = None
+    try:
+        import bowaka_v2_openalgo_client as oa
+        host, api_key = oa.resolve_host_and_key()
+        live_client = oa.make_http_client(host)
+        venue_by_sym = {}  # cached per-symbol venue lookups
+
+        def _venue_for(symbol: str) -> str:
+            if symbol in venue_by_sym:
+                return venue_by_sym[symbol]
+            v = (cfg.get("execution") or {}).get("default_venue_code", "XNAS")
+            venue_by_sym[symbol] = v
+            return v
+
+        def quote_supplier(symbol: str):  # noqa: F811
+            return oa.fetch_quote(
+                live_client, api_key,
+                venue_code=_venue_for(symbol), symbol=symbol,
+            )
+
+        def submit_supplier(symbol: str, qty: int):  # noqa: F811
+            return oa.submit_market_buy(
+                live_client, api_key,
+                venue_code=_venue_for(symbol), symbol=symbol,
+                qty=qty, time_in_force="DAY",
+            )
+
+        LOG.info("v2 strategy: live OpenAlgo suppliers wired (host=%s)", host)
+    except RuntimeError as e:
+        LOG.warning(
+            "live suppliers NOT wired (%s); running in offline log-only mode",
+            e,
+        )
+
+    LOG.info(
+        "v2 strategy entering long-running loop "
+        "(interval=%ds, kill_switch_dir=%s)", interval, switch_dir,
+    )
+    while not _shutdown_requested:
+        if (switch_dir / "KILL_HARD.flag").exists():
+            LOG.error("L3 KILL_HARD flag detected — exiting 99")
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(json.dumps(state, default=str, indent=2),
+                                  encoding="utf-8")
+            if live_client:
+                live_client.close()
+            return 99
+        try:
+            summary = consume_candidate_events(
+                state, cfg,
+                quote_supplier=quote_supplier,
+                submit_supplier=submit_supplier,
+            )
+            if summary.get("consumed", 0) > 0:
+                LOG.info("v2 consumer tick: %s", summary)
+        except Exception as e:
+            LOG.exception("consume_candidate_events raised: %s", e)
+        try:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(
+                json.dumps(state, default=str, indent=2), encoding="utf-8",
+            )
+        except Exception as e:
+            LOG.warning("state write failed: %s", e)
+        # Sleep in small chunks so the shutdown flag is honored quickly.
+        slept = 0.0
+        while slept < interval and not _shutdown_requested:
+            time.sleep(min(0.5, interval - slept))
+            slept += 0.5
+    if live_client:
+        live_client.close()
+    LOG.info("shutdown complete")
     return 0
 
 

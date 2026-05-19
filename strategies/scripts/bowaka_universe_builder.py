@@ -435,6 +435,145 @@ def _resolve_path(cfg: dict, key: str, default: Path) -> Path:
 # ---------------------------------------------------------------- dry-run fixture
 
 
+# ---------------------------------------------------------------- live suppliers
+
+
+def _live_suppliers(cfg: dict):
+    """Wire the universe builder to OpenAlgo's /api/v2/bars + the
+    cached US-equity asset list. Returns (asset_supplier,
+    bars_supplier, http_client) — the caller is responsible for
+    closing the http_client.
+    """
+    import bowaka_v2_openalgo_client as oa  # local import to avoid pandas-on-startup cost
+
+    live = (cfg.get("live_fetch") or {})
+    host = os.environ.get(live.get("host_server_env", "HOST_SERVER"),
+                            "http://127.0.0.1:5000")
+    api_key = os.environ.get(live.get("api_key_env", "OPENALGO_API_KEY"))
+    if not api_key:
+        LOG.error(
+            "OPENALGO_API_KEY env var must be set for live build "
+            "(or pass --dry-run)"
+        )
+        raise SystemExit(2)
+    http = oa.make_http_client(host)
+    lookback_days = int(live.get("daily_bars_lookback_calendar_days", 45))
+    asset_cache_path = live.get(
+        "asset_list_cache", "strategies/scripts/data/universe_us_equity.json",
+    )
+
+    pre_sample_n = (cfg.get("universe") or {}).get("pre_fetch_sample_n")
+    pre_sample_seed = int(
+        (cfg.get("universe") or {}).get("pre_fetch_sample_seed", 42)
+    )
+
+    def asset_supplier() -> list[dict]:
+        cache_path = paths.REPO_ROOT / asset_cache_path
+        if not cache_path.exists():
+            LOG.error(
+                "asset list cache not found at %s. Either run the "
+                "v1 prefilter to refresh it, or copy a recent file there.",
+                cache_path,
+            )
+            return []
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        symbols = cache.get("symbols") or []
+        ex_by_sym = cache.get("exchanges") or {}
+        meta_by_sym = cache.get("asset_meta") or {}
+        # Build rows + immediately apply universe + instrument-class
+        # filters in memory (no HTTP) so the pre-sample picks from
+        # already-eligible symbols.
+        all_rows = []
+        for s in symbols:
+            ex = ex_by_sym.get(s, "")
+            m = meta_by_sym.get(s) or {}
+            row = {
+                "symbol": s,
+                "exchange": ex,
+                "venue_code": _guess_venue_code(ex),
+                "name": m.get("name", ""),
+                "asset_class": m.get("class", "us_equity"),
+                "tradable": m.get("tradable", True),
+                "status": m.get("status", "active"),
+            }
+            # Skip rows that the universe filter would drop anyway.
+            keep, _ = _universe_filter(row, cfg)
+            if not keep:
+                continue
+            classification = classify_instrument(s, row, cfg)
+            if _instrument_class_drop_reason(classification, cfg):
+                continue
+            all_rows.append(row)
+        LOG.info("eligible after universe + class filter: %d/%d",
+                  len(all_rows), len(symbols))
+        if pre_sample_n is not None and len(all_rows) > int(pre_sample_n):
+            import random
+            rng = random.Random(pre_sample_seed)
+            all_rows = rng.sample(all_rows, int(pre_sample_n))
+            LOG.info(
+                "pre-fetch sample: %d symbols (seed=%d)",
+                len(all_rows), pre_sample_seed,
+            )
+        return all_rows
+
+    def bars_supplier(symbol: str) -> pd.DataFrame:
+        venue = _guess_venue_code("")  # default XNAS; refined by per-symbol exchange
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=lookback_days)
+        try:
+            return oa.fetch_bars(
+                http, api_key,
+                venue_code=venue, symbol=symbol,
+                interval="1d", start=start, end=end,
+            )
+        except Exception as e:
+            LOG.warning("daily bars fetch failed for %s: %s", symbol, e)
+            return pd.DataFrame()
+
+    return asset_supplier, bars_supplier, http
+
+
+def build_and_write(
+    cfg: dict, asset_supplier, bars_supplier,
+) -> int:
+    """Run the universe build pipeline against live suppliers + apply
+    the optional cap_to_n_symbols truncation."""
+    snapshot_rows, cache_df, metadata = build_universe(
+        cfg, asset_supplier=asset_supplier, bars_supplier=bars_supplier,
+    )
+    cap = (cfg.get("universe") or {}).get("cap_to_n_symbols")
+    if cap and len(snapshot_rows) > int(cap):
+        # Rank by avg_dollar_volume DESC; keep top N.
+        if not cache_df.empty and "avg_dollar_volume_20d" in cache_df.columns:
+            ranked = cache_df.sort_values(
+                "avg_dollar_volume_20d", ascending=False,
+            )
+            kept = set(ranked["symbol"].iloc[:int(cap)].tolist())
+            snapshot_rows = [r for r in snapshot_rows if r["symbol"] in kept]
+            cache_df = cache_df[cache_df["symbol"].isin(kept)].copy()
+            metadata["capped_to"] = int(cap)
+            metadata["symbols_count"] = len(snapshot_rows)
+            LOG.info("universe capped to %d symbols (by ADV)", cap)
+        else:
+            snapshot_rows = snapshot_rows[:int(cap)]
+            metadata["capped_to"] = int(cap)
+            metadata["symbols_count"] = len(snapshot_rows)
+    snap_path, cache_path = write_outputs(
+        snapshot_rows, cache_df, metadata, cfg,
+    )
+    LOG.info(
+        "universe build complete: kept=%d dropped=%d universe_hash=%s",
+        metadata["symbols_count"], metadata["dropped_count"],
+        metadata["universe_hash"],
+    )
+    LOG.info("snapshot -> %s", snap_path)
+    LOG.info("cache    -> %s", cache_path)
+    return 0
+
+
+# ---------------------------------------------------------------- dry-run fixture
+
+
 def _dry_run_assets() -> list[dict]:
     """Two synthetic symbols for the --dry-run smoke command. One
     passes universe gates; one is a leveraged ETP that should be
@@ -517,15 +656,15 @@ def main(argv: list[str] | None = None) -> int:
         bars_supplier = _dry_run_bars
         LOG.info("dry-run mode: using built-in fixture (no network)")
     else:
-        # Production path — a real Alpaca-backed supplier should be
-        # wired in here. For Phase 2 the supplier is operator-supplied
-        # via env-var BOWAKA_UNIVERSE_ASSET_SUPPLIER (advanced) OR
-        # the dry-run path is the canonical CI smoke.
-        LOG.error(
-            "production network supplier not yet wired (Phase 3 will "
-            "land the Alpaca client). Use --dry-run for now."
-        )
-        return 2
+        asset_supplier, bars_supplier, http_client_ref = _live_suppliers(cfg)
+        try:
+            res = build_and_write(
+                cfg, asset_supplier, bars_supplier,
+            )
+        finally:
+            if http_client_ref:
+                http_client_ref.close()
+        return res
 
     snapshot_rows, cache_df, metadata = build_universe(
         cfg,

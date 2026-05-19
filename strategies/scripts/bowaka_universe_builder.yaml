@@ -39,6 +39,29 @@ universe:
   price_max: 20.0
   avg_dollar_volume_min: 250000
   avg_dollar_volume_max: null
+  # First-paper-test cap: ranks surviving symbols by avg_dollar_volume
+  # (descending) and keeps the top N. The scanner polls minute bars
+  # for every kept symbol every scan_interval_seconds, so the cap
+  # bounds per-tick HTTP load. Set null to disable (full universe).
+  cap_to_n_symbols: 50
+  # PRE-fetch sample cap. The asset cache has 11k+ symbols; fetching
+  # daily bars for all of them via OpenAlgo takes hours. This cap
+  # randomly samples N symbols BEFORE the bar fetch so the build is
+  # bounded. For a smaller paper test set N small. Null = full cache.
+  pre_fetch_sample_n: 500
+  pre_fetch_sample_seed: 42
+
+# Live fetch settings — apply only when --dry-run is NOT set.
+live_fetch:
+  # OpenAlgo /api/v2 endpoint. The universe builder reuses the same
+  # HOST_SERVER + OPENALGO_API_KEY env vars the v1 strategy used.
+  host_server_env: HOST_SERVER
+  api_key_env: OPENALGO_API_KEY
+  daily_bars_lookback_calendar_days: 45
+  # Cache file at strategies/scripts/data/universe_us_equity.json
+  # is used as the asset list. The v1 prefilter built it from
+  # Alpaca direct; reusing it avoids needing alpaca-py credentials.
+  asset_list_cache: "strategies/scripts/data/universe_us_equity.json"
 
 historical_features:
   lookback_days: 20
