@@ -1118,3 +1118,26 @@ be regenerated whenever a new operator-tunable flag is added.
         Behavior: v2 is ready for paper trading once the universe
         builder + scanner + strategy are launched in sequence. Live
         flip requires SIP feed + the §8.10 acceptance gates.
+
+2026-05-18 | V1 fully removed
+        | Archived to strategies/scripts/archive/v1_strategy/:
+        |   bowaka_strategy.py, bowaka_strategy.yaml,
+        |   bowaka_strategy_README.md, bowaka_counterfactuals.py,
+        |   bowaka_analysis.py, _watchdog_bowaka_strategy.{cmd,sh},
+        |   _run_bowaka_strategy_oneshot.{cmd,sh}
+        | New v2 wrappers (point at bowaka_v2_strategy.py +
+        |   bowaka_v2_config.yaml):
+        |   _watchdog_bowaka_v2_strategy.{cmd,sh}
+        |   _run_bowaka_v2_strategy_oneshot.cmd
+        | bowaka_v2_strategy: inlined adv_tier_cap so the module no
+        |   longer depends on the archived bowaka_strategy.
+        | Tests: 23 v1-pinning test files archived to
+        |   tests/strategies/archive/. v2 suite is 113 passes, 0
+        |   failures, 0 skipped.
+        | The user has v1 backed up externally and explicitly asked
+        |   for full removal. Old archive files (under
+        |   archive/v1_prefilter/ and archive/v1_strategy/) remain
+        |   in-tree as recoverable references.
+        Behavior: v1 is no longer part of the live process. The
+        scripts/ root now contains v2 modules only. Watchdog should
+        invoke _watchdog_bowaka_v2_strategy.{cmd,sh}.
