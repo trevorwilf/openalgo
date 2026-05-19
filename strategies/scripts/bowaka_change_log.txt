@@ -1016,3 +1016,15 @@ be regenerated whenever a new operator-tunable flag is added.
         Behavior: universe layer is a "garbage filter" only — no
         signal gates. Names that v1 would reject on RVOL/range/
         close_location now flow through to the (Phase 3) scanner.
+
+2026-05-18 | Phase 3 — intraday scanner (forming-bar feature engine)
+        | strategies/scripts/bowaka_intraday_scanner.py
+        | strategies/scripts/bowaka_v2_volume_curve.py
+        | strategies/scripts/bowaka_intraday_scanner.cron + wrappers
+        | tests/strategies/test_bowaka_intraday_scanner_{features,
+        |   emission,config_gate,state,integration}.py (16 tests)
+        Behavior: scanner emits schema-v3 candidate_signal events to
+        data/bowaka_v2/candidate_events.jsonl. SIP feed required for
+        live; IEX permitted in research with a loud startup warning.
+        Per-symbol dedupe reads strategy's entry_decisions.jsonl.
+        Heartbeat emits each scan tick for Phase 6 monitor.

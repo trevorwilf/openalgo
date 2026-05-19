@@ -29,14 +29,14 @@ strategy:
   analysis_epoch: "bowaka_v2_research_epoch_2026_05_18"
 
 paths:
-  universe_snapshot_path: "data/bowaka_v2/universe_snapshot.json"
-  daily_feature_cache_path: "data/bowaka_v2/daily_feature_cache.parquet"
-  volume_curve_path: "data/bowaka_v2/volume_curve.parquet"
-  candidate_events_path: "data/bowaka_v2/candidate_events.jsonl"
-  entry_decisions_path: "data/bowaka_v2/entry_decisions.jsonl"
-  state_path: "data/bowaka_v2/state.json"
-  trade_ledger_path: "data/bowaka_v2/trade_ledger.jsonl"
-  daily_summary_path: "data/bowaka_v2/daily_summary.jsonl"
+  universe_snapshot_path: "strategies/scripts/data/bowaka_v2/universe_snapshot.json"
+  daily_feature_cache_path: "strategies/scripts/data/bowaka_v2/daily_feature_cache.parquet"
+  volume_curve_path: "strategies/scripts/data/bowaka_v2/volume_curve.parquet"
+  candidate_events_path: "strategies/scripts/data/bowaka_v2/candidate_events.jsonl"
+  entry_decisions_path: "strategies/scripts/data/bowaka_v2/entry_decisions.jsonl"
+  state_path: "strategies/scripts/data/bowaka_v2/state.json"
+  trade_ledger_path: "strategies/scripts/data/bowaka_v2/trade_ledger.jsonl"
+  daily_summary_path: "strategies/scripts/data/bowaka_v2/daily_summary.jsonl"
   log_path: "logs/bowaka_v2_strategy.log"
   kill_switch_dir: "."
 
@@ -259,7 +259,7 @@ logging:
 research:
   candidate_minute_bars:
     enabled: true
-    output_dir: "data/bowaka_v2/candidate_bars"
+    output_dir: "strategies/scripts/data/bowaka_v2/candidate_bars"
     layout: "by_session"
     window:
       premarket_start: "08:00"

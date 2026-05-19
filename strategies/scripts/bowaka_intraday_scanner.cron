@@ -1,0 +1,10 @@
+# Bowaka v2 intraday scanner cron — session-start trigger.
+# Fires at 09:40 ET on weekdays (5 min before scanner_start: 09:45).
+# The scanner exits itself at scanner_end. flock prevents overlap if
+# a previous session's run somehow didn't terminate.
+
+CRON_TZ=America/New_York
+HOME=/home/bowaka
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+40 9 * * 1-5  /usr/bin/flock -n /tmp/bowaka_v2_scanner.lock /opt/bowaka/scripts/run_bowaka_intraday_scanner.sh
