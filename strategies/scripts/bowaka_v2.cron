@@ -1,0 +1,44 @@
+# ============================================================
+# bowaka_v2.cron
+#
+# Reference cron entries for the Bowaka v2 stack on Linux.
+# Mirrors the Windows Task Scheduler entries (BowakaScanner-0730,
+# BowakaUniverseBuilder-0200 / -0900 / -1200) so behavior is
+# identical across platforms.
+#
+# INSTALL:
+#   1. Edit the BOWAKA_ROOT path below if your deploy is not at
+#      /opt/bowaka. (You can also set BOWAKA_ROOT in your shell
+#      env and the launchers will pick it up.)
+#   2. Confirm the launcher scripts exist + are executable:
+#        chmod +x /opt/bowaka/strategies/scripts/_run_bowaka_v2_scanner.sh
+#        chmod +x /opt/bowaka/strategies/scripts/_run_bowaka_universe_builder.sh
+#        chmod +x /opt/bowaka/strategies/scripts/_watchdog_bowaka_v2_scanner.sh
+#   3. Install the cron entries:
+#        crontab /opt/bowaka/strategies/scripts/bowaka_v2.cron
+#      (or merge them into your existing crontab with `crontab -e`).
+#   4. Confirm with `crontab -l` and `journalctl -u cron`.
+#
+# All times are Mountain Time to match the Windows schedule
+# (CRON_TZ controls the parse). 09:00 MT = 11:00 ET (mid-session).
+# 12:00 MT = 14:00 ET (afternoon). 07:30 MT = 09:30 ET (pre-open).
+# ============================================================
+
+CRON_TZ=America/Denver
+HOME=/home/bowaka
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# ---- Universe builder ----
+# Three daily runs. flock prevents overlap if a slow build collides
+# with the next slot. Weekdays only (1-5 = Mon-Fri).
+0  2  * * 1-5  /usr/bin/flock -n /tmp/bowaka_universe_builder.lock /opt/bowaka/strategies/scripts/_run_bowaka_universe_builder.sh
+0  9  * * 1-5  /usr/bin/flock -n /tmp/bowaka_universe_builder.lock /opt/bowaka/strategies/scripts/_run_bowaka_universe_builder.sh
+0  12 * * 1-5  /usr/bin/flock -n /tmp/bowaka_universe_builder.lock /opt/bowaka/strategies/scripts/_run_bowaka_universe_builder.sh
+
+# ---- Scanner watchdog ----
+# Fires 07:30 MT (= 09:30 ET, market open, 15 min before scanner_start
+# at 09:45 ET). The scanner self-exits at scanner_end (15:30 ET);
+# the watchdog respects code=0 and exits with it, so this entry is
+# the daily resurrection point. flock blocks if a previous run is
+# somehow still alive.
+30 7  * * 1-5  /usr/bin/flock -n /tmp/bowaka_v2_scanner.lock /opt/bowaka/strategies/scripts/_run_bowaka_v2_scanner.sh

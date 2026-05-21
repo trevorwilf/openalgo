@@ -236,6 +236,129 @@ def submit_market_buy(
     return parsed
 
 
+def submit_market_sell(
+    http: httpx.Client,
+    api_key: str,
+    *,
+    venue_code: str,
+    symbol: str,
+    qty: int,
+    time_in_force: str = "DAY",
+) -> dict[str, Any]:
+    """POST /api/v2/orders for a single SELL MARKET. Returns the parsed
+    body with ``_http_status`` annotated. Caller validates http_status
+    in (200, 201) before treating as accepted."""
+    body = {
+        "apikey": api_key,
+        "instrument": {
+            "venue_code": venue_code,
+            "canonical_symbol": symbol,
+        },
+        "side": "SELL",
+        "order_type": "MARKET",
+        "quantity": str(qty),
+        "quantity_unit": "WHOLE",
+        "time_in_force": time_in_force,
+        "session": "REGULAR",
+    }
+    r = http.post("/api/v2/orders", json=body, headers=_api_headers(api_key))
+    parsed = r.json() if r.content else {}
+    parsed["_http_status"] = r.status_code
+    return parsed
+
+
+def submit_oco_bracket(
+    http: httpx.Client,
+    api_key: str,
+    *,
+    venue_code: str,
+    symbol: str,
+    qty: int,
+    target_price: float,
+    stop_price: float,
+    link_id: str,
+    time_in_force: str = "GTC",
+) -> dict[str, Any]:
+    """POST /api/v2/orders/combo with an OCO (target LIMIT SELL + stop
+    STOP SELL). Used to bracket an already-filled parent position. The
+    GTC default protects against overnight gaps; pass ``DAY`` only when
+    the bracket is meant to expire at session close.
+    """
+    body = {
+        "apikey": api_key,
+        "combo_type": "OCO",
+        "time_in_force": time_in_force,
+        "session": "REGULAR",
+        "link_id": link_id,
+        "legs": [
+            {
+                "instrument_ref": {
+                    "venue_code": venue_code,
+                    "canonical_symbol": symbol,
+                },
+                "side": "SELL",
+                "quantity": str(qty),
+                "quantity_unit": "WHOLE",
+                "order_type": "LIMIT",
+                "price": str(round(float(target_price), 2)),
+            },
+            {
+                "instrument_ref": {
+                    "venue_code": venue_code,
+                    "canonical_symbol": symbol,
+                },
+                "side": "SELL",
+                "quantity": str(qty),
+                "quantity_unit": "WHOLE",
+                "order_type": "STOP",
+                "trigger_price": str(round(float(stop_price), 2)),
+            },
+        ],
+    }
+    r = http.post("/api/v2/orders/combo",
+                  json=body, headers=_api_headers(api_key))
+    parsed = r.json() if r.content else {}
+    parsed["_http_status"] = r.status_code
+    return parsed
+
+
+def cancel_order(
+    http: httpx.Client, api_key: str, order_id: str,
+) -> dict[str, Any]:
+    """DELETE /api/v2/orders/<id>. Idempotent — treats 404 / already-
+    terminal as success. Raises only on truly unexpected HTTP statuses.
+    """
+    if not order_id:
+        return {"status": "noop", "reason": "no order_id"}
+    r = http.request(
+        "DELETE", f"/api/v2/orders/{order_id}",
+        headers=_api_headers(api_key),
+    )
+    parsed = r.json() if r.content else {}
+    if r.status_code == 200:
+        return {"status": "canceled", "order_id": order_id, "data": parsed}
+    if r.status_code == 404:
+        return {"status": "canceled", "order_id": order_id, "data": parsed}
+    err_msg = ""
+    if isinstance(parsed, dict):
+        err = parsed.get("error") or {}
+        err_msg = (err.get("message") or "").lower()
+    if any(k in err_msg for k in (
+        "already inactive", "already_inactive",
+        "already canceled", "already_canceled",
+        "not found", "not_found",
+    )):
+        return {"status": "canceled", "order_id": order_id, "data": parsed}
+    LOG.warning(
+        "cancel_order(%s) unexpected response HTTP %d: %s",
+        order_id, r.status_code, parsed,
+    )
+    return {
+        "status": "error", "order_id": order_id,
+        "http_status": r.status_code, "data": parsed,
+    }
+
+
 def fetch_positions(http: httpx.Client, api_key: str) -> list[dict]:
     r = http.get("/api/v2/positions", headers=_api_headers(api_key))
     r.raise_for_status()
@@ -248,5 +371,14 @@ def fetch_open_orders(
     r = http.get("/api/v2/orders",
                  headers=_api_headers(api_key),
                  params={"status": status})
+    r.raise_for_status()
+    return r.json().get("data", {}).get("orders", []) or []
+
+
+def fetch_all_orders(http: httpx.Client, api_key: str) -> list[dict]:
+    """GET /api/v2/orders?status=all — used by poll_fills."""
+    r = http.get("/api/v2/orders",
+                 headers=_api_headers(api_key),
+                 params={"status": "all"})
     r.raise_for_status()
     return r.json().get("data", {}).get("orders", []) or []

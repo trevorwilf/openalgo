@@ -98,6 +98,11 @@ historical_features:
 
 scanner:
   enabled: true
+  # Diagnostic: dump per-symbol gate-eval results to
+  # data/bowaka_v2/scanner_gate_dump.jsonl on every scan. Leave on only
+  # while triaging "why is nothing emitting"; the file grows ~1KB per
+  # symbol per scan (~38KB per scan tick at 38-symbol universe).
+  debug_gate_dump: true
   scan_interval_seconds: 60
   full_universe_refresh_interval_minutes: 5
   in_play_refresh_interval_seconds: 60
@@ -110,13 +115,13 @@ scanner:
   require_fresh_intraday_bar: true
 
 signals:
-  rvol_so_far_min: 1.50
-  projected_full_day_rvol_min: 1.50
+  rvol_so_far_min: 0.7              # for SIP change to 1.50 - IEX is 0.7 because of partial tape bias; SIP should be 1.50 for microcaps
+  projected_full_day_rvol_min: 0.5  # for SIP change to 1.50 - IEX is 0.5 because of partial tape bias; SIP should be 1.50 for microcaps
   prior_atr_pct_min: 0.06
-  range_expansion_so_far_min: 1.25
+  range_expansion_so_far_min: 0.5   # for SIP change to 1.25 - IEX is 0.5 because of partial tape bias; SIP should be 1.25 for microcaps
   close_location_so_far_min: 0.60
-  ema_distance_min: 0.0
-  ema_slope_min: 0.0
+  ema_distance_min: -0.05         # for SIP change to 0.0 - IEX relaxed for paper testing
+  ema_slope_min: -0.05            # for SIP change to 0.0 - IEX relaxed for paper testing
 
   # Universe-layer thresholds mirrored here so apply_v2_gates can
   # evaluate them against the candidate's current price / ADV.

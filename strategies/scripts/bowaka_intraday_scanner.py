@@ -381,12 +381,31 @@ def evaluate_one_scan(
         json.dumps(cfg, sort_keys=True, default=str).encode()
     ).hexdigest()[:16]
 
+    # Diagnostic: when scanner.debug_gate_dump is true, write one
+    # per-symbol JSONL row each scan with feature values + gate-by-
+    # gate pass/fail. Lets the operator see WHY symbols miss without
+    # waiting for a candidate to actually emit.
+    debug_dump = bool(scanner_cfg.get("debug_gate_dump", False))
+    dump_path = paths.SCANNER_GATE_DUMP_PATH if debug_dump else None
+    if dump_path is not None:
+        dump_path.parent.mkdir(parents=True, exist_ok=True)
+        dump_fh = open(dump_path, "a", encoding="utf-8")
+    else:
+        dump_fh = None
+
     passing: list[tuple[float, dict]] = []
     for symbol, meta in universe_meta_by_sym.items():
         if symbol in entered:
             continue
         baselines = cache_by_sym.get(symbol)
         if not baselines:
+            if dump_fh is not None:
+                dump_fh.write(json.dumps({
+                    "ts": _iso(_now_utc()),
+                    "scan_timestamp": _iso(scan_ts),
+                    "symbol": symbol,
+                    "skipped": "no_baselines",
+                }, default=str) + "\n")
             continue
         adv = baselines.get("avg_dollar_volume_20d")
         prior_atr_pct = baselines.get("prior_atr_pct")
@@ -403,8 +422,23 @@ def evaluate_one_scan(
             bars = bars_supplier(symbol, scan_ts)
         except Exception as e:
             LOG.debug("bars fetch failed for %s: %s", symbol, e)
+            if dump_fh is not None:
+                dump_fh.write(json.dumps({
+                    "ts": _iso(_now_utc()),
+                    "scan_timestamp": _iso(scan_ts),
+                    "symbol": symbol,
+                    "skipped": "bars_fetch_failed",
+                    "error": str(e)[:200],
+                }, default=str) + "\n")
             continue
         if bars is None or len(bars) == 0:
+            if dump_fh is not None:
+                dump_fh.write(json.dumps({
+                    "ts": _iso(_now_utc()),
+                    "scan_timestamp": _iso(scan_ts),
+                    "symbol": symbol,
+                    "skipped": "no_bars",
+                }, default=str) + "\n")
             continue
         sess = features.aggregate_forming_session_bar(bars)
         feats = features.compute_forming_session_features(
@@ -418,6 +452,46 @@ def evaluate_one_scan(
             ema_slope_prior=ema_slope,
             instrument_class=meta.get("instrument_class"),
         )
+        if dump_fh is not None:
+            failing = sorted(k for k, v in (gates or {}).items() if not v)
+            dump_fh.write(json.dumps({
+                "ts": _iso(_now_utc()),
+                "scan_timestamp": _iso(scan_ts),
+                "symbol": symbol,
+                "ok": bool(ok),
+                "failing_gates": failing,
+                "gate_results": gates,
+                "features": {
+                    "rvol_so_far": feats.get("rvol_so_far"),
+                    "projected_full_day_rvol": feats.get(
+                        "projected_full_day_rvol",
+                    ),
+                    "range_expansion_so_far": feats.get(
+                        "range_expansion_so_far",
+                    ),
+                    "close_location_so_far": feats.get(
+                        "close_location_so_far",
+                    ),
+                    "ema_distance": feats.get("ema_distance"),
+                    "gap_pct": feats.get("gap_pct"),
+                    "current_return_pct": feats.get("current_return_pct"),
+                },
+                "baselines": {
+                    "prior_close": baselines.get("prior_close"),
+                    "prior_atr_pct": prior_atr_pct,
+                    "ema_slope_prior": ema_slope,
+                    "avg_dollar_volume_20d": adv,
+                },
+                "session_bar": {
+                    "open": sess.get("session_open"),
+                    "high": sess.get("session_high"),
+                    "low": sess.get("session_low"),
+                    "last": sess.get("last_price"),
+                    "volume": sess.get("session_volume"),
+                },
+                "volume_curve_fraction": vcf,
+                "instrument_class": meta.get("instrument_class"),
+            }, default=str) + "\n")
         if not ok:
             continue
         score = features.compute_signal_strength(
@@ -463,6 +537,12 @@ def evaluate_one_scan(
         "passed_gates_this_scan": len(passing),
         "emitted_count": len(emitted),
     }, heartbeat_path)
+    if dump_fh is not None:
+        try:
+            dump_fh.flush()
+            dump_fh.close()
+        except Exception:
+            pass
     return emitted
 
 
@@ -543,12 +623,31 @@ def main(argv: list[str] | None = None) -> int:
     return _run_live(cfg, universe, daily_cache, volume_curve, state)
 
 
+def _file_mtime(p: Path) -> float:
+    """Return the on-disk mtime of ``p`` (epoch seconds), or 0.0 if
+    the file doesn't exist."""
+    try:
+        return p.stat().st_mtime
+    except FileNotFoundError:
+        return 0.0
+    except OSError:
+        return 0.0
+
+
 def _run_live(
     cfg: dict, universe: dict, daily_cache, volume_curve, state,
 ) -> int:
     """Long-running live scan loop. Polls OpenAlgo /api/v2/bars for
     each universe symbol every scan_interval_seconds, evaluates
     gates, emits candidate events.
+
+    Hot-reload: each tick checks the mtime of universe_snapshot.json,
+    daily_feature_cache.parquet, and volume_curve.parquet. When the
+    universe builder writes a fresh snapshot (atomic rename via
+    os.replace), the scanner picks up the new files at the next scan
+    without a process restart. The live_bars_supplier closure
+    captures ``universe`` by name, so a rebind here propagates to
+    the supplier automatically.
     """
     import bowaka_v2_openalgo_client as oa
     import signal as _signal
@@ -557,6 +656,18 @@ def _run_live(
     sess_cfg = cfg.get("session") or {}
     scanner_cfg = cfg.get("scanner") or {}
     interval = int(scanner_cfg.get("scan_interval_seconds", 60))
+
+    # Resolved input paths + initial mtimes. Used by the per-tick
+    # hot-reload check below.
+    uni_path = _resolve(cfg, "universe_snapshot_path",
+                          paths.UNIVERSE_SNAPSHOT_PATH)
+    dfc_path = _resolve(cfg, "daily_feature_cache_path",
+                          paths.DAILY_FEATURE_CACHE_PATH)
+    vc_path = _resolve(cfg, "volume_curve_path",
+                        paths.VOLUME_CURVE_PATH)
+    last_uni_mtime = _file_mtime(uni_path)
+    last_dfc_mtime = _file_mtime(dfc_path)
+    last_vc_mtime = _file_mtime(vc_path)
     today_et_date = pd.Timestamp.now(tz="America/New_York").date()
     session_start = pd.Timestamp(
         f"{today_et_date} {sess_cfg.get('scanner_start', '09:45')}",
@@ -612,6 +723,61 @@ def _run_live(
             if now > session_end:
                 LOG.info("past scanner_end (%s); scanner exiting", session_end)
                 break
+
+            # Hot-reload check. If the universe builder dropped a
+            # fresh snapshot / cache / volume curve since the last
+            # check, swap them in before this scan tick. Reads are
+            # safe against the builder's atomic write (os.replace).
+            new_uni_mtime = _file_mtime(uni_path)
+            if new_uni_mtime > last_uni_mtime:
+                try:
+                    fresh_uni = load_universe_snapshot(cfg)
+                    prev_hash = (universe or {}).get("universe_hash")
+                    new_hash = fresh_uni.get("universe_hash")
+                    universe = fresh_uni
+                    last_uni_mtime = new_uni_mtime
+                    LOG.info(
+                        "universe snapshot reloaded: hash %s -> %s, "
+                        "symbols=%d",
+                        prev_hash, new_hash,
+                        len(universe.get("symbols") or []),
+                    )
+                except Exception as e:
+                    LOG.warning(
+                        "universe reload failed (continuing with old): %s",
+                        e,
+                    )
+            new_dfc_mtime = _file_mtime(dfc_path)
+            if new_dfc_mtime > last_dfc_mtime:
+                try:
+                    daily_cache = load_daily_feature_cache(cfg)
+                    last_dfc_mtime = new_dfc_mtime
+                    LOG.info(
+                        "daily_feature_cache reloaded (rows=%d)",
+                        len(daily_cache),
+                    )
+                except Exception as e:
+                    LOG.warning(
+                        "daily_feature_cache reload failed "
+                        "(continuing with old): %s", e,
+                    )
+            new_vc_mtime = _file_mtime(vc_path)
+            if new_vc_mtime > last_vc_mtime:
+                try:
+                    fresh_vc = load_volume_curve(cfg)
+                    if fresh_vc is not None:
+                        volume_curve = fresh_vc
+                        LOG.info(
+                            "volume_curve reloaded (rows=%d)",
+                            len(volume_curve),
+                        )
+                    last_vc_mtime = new_vc_mtime
+                except Exception as e:
+                    LOG.warning(
+                        "volume_curve reload failed "
+                        "(continuing with old): %s", e,
+                    )
+
             scan_ts = now.tz_convert("UTC").to_pydatetime()
             try:
                 emitted = evaluate_one_scan(

@@ -49,6 +49,7 @@ PER_POSITION_TICKS_DIR      = _DATA_ROOT / "ticks"
 LIQUIDITY_MONITOR_PATH      = _DATA_ROOT / "liquidity_monitor.jsonl"
 SCANNER_HEARTBEAT_PATH      = _DATA_ROOT / "scanner_heartbeat.jsonl"
 SCANNER_STATE_PATH          = _DATA_ROOT / "scanner_state.json"
+SCANNER_GATE_DUMP_PATH      = _DATA_ROOT / "scanner_gate_dump.jsonl"
 
 # ---- Backtest / replay outputs ---------------------------------------
 
@@ -95,6 +96,7 @@ __all__ = [
     "LIQUIDITY_MONITOR_PATH",
     "SCANNER_HEARTBEAT_PATH",
     "SCANNER_STATE_PATH",
+    "SCANNER_GATE_DUMP_PATH",
     "BACKTEST_REPORTS_DIR",
     "COUNTERFACTUAL_REPORTS_DIR",
     "REPLAY_REPORTS_DIR",
