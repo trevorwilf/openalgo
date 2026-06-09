@@ -441,6 +441,28 @@ def _risk_gates(
     risk_cfg = cfg.get("risk") or {}
     sizing_cfg = cfg.get("sizing") or {}
 
+    # bankroll floor — halt ALL new entries once compounding equity has
+    # fallen to/below floor_fraction*base. Checked FIRST so it dominates
+    # even at negative equity, ahead of the bankroll>0 guarded gates
+    # below. No-op unless sizing.compounding.enabled. Exit/management
+    # paths never call _risk_gates, so open lots are still managed.
+    if _below_floor(state, cfg):
+        if not _FLOOR_HALT_WARNED["v"]:
+            base = _compounding_base(cfg)
+            ff = float((sizing_cfg.get("compounding") or {}).get(
+                "floor_fraction", 0.50))
+            LOG.warning(
+                "bankroll floor halt: effective equity %.2f <= floor %.2f "
+                "(%.0f%% of base %.2f) — refusing NEW entries until "
+                "realized PnL recovers", _effective_equity(state, cfg),
+                ff * base, ff * 100.0, base,
+            )
+            _FLOOR_HALT_WARNED["v"] = True
+        return "bankroll_floor_halt"
+    # Recovered above the floor — re-arm the once-per-episode warning so a
+    # later dip back below the floor logs again.
+    _FLOOR_HALT_WARNED["v"] = False
+
     # max_concurrent_positions
     max_concurrent = int(sizing_cfg.get("max_concurrent_positions", 18))
     open_count = len(state.get("open_positions") or {})
@@ -472,10 +494,19 @@ def _risk_gates(
             return "kill_switch"
 
     # ADV cap — tiered policy via adv_tier_cap (inlined above).
+    # Enforced on the AGGREGATE position in this symbol (existing lots
+    # + this candidate) so stacking lots across days cannot blow
+    # through the symbol's liquidity limit.
     if candidate_adv is not None and candidate_adv > 0:
         try:
             allowed, cap_dollars = adv_tier_cap(candidate_adv, cfg)
-            if not allowed or (cap_dollars and target_notional > cap_dollars):
+            projected_notional = (
+                _symbol_open_notional(state, ev.get("symbol", ""))
+                + target_notional
+            )
+            if not allowed or (
+                cap_dollars and projected_notional > cap_dollars
+            ):
                 return "adv_cap"
         except Exception:
             pass
@@ -516,14 +547,120 @@ def _shadow_risk_check(
 
 # ---- sizing ----
 
+# Module-level once-per-process guard for the bankroll-floor-halt
+# warning (so the WARNING is not re-emitted every candidate every tick).
+# Deliberately NOT persisted to state -> nothing to reset on rollover.
+_FLOOR_HALT_WARNED = {"v": False}
+
+
+def _compounding_base(cfg: dict) -> float:
+    """Starting bankroll the floor/cap multiples are measured against.
+    Defaults to sizing.bankroll_fixed_dollars; sizing.compounding.
+    base_dollars overrides when explicitly set (non-null)."""
+    sizing_cfg = cfg.get("sizing") or {}
+    comp = sizing_cfg.get("compounding") or {}
+    base = comp.get("base_dollars")
+    if base is None:
+        base = sizing_cfg.get("bankroll_fixed_dollars", 90000)
+    return float(base)
+
+
+def _effective_equity(state: dict, cfg: dict) -> float:
+    """base + lifetime realized strategy PnL (closed trades only)."""
+    base = _compounding_base(cfg)
+    cum = float((state or {}).get("cumulative_realized_pnl_strategy", 0.0) or 0.0)
+    return base + cum
+
+
+def _ledger_realized_sum(cfg: dict) -> float:
+    """Authoritative lifetime realized PnL: sum of realized_pnl over
+    every closure record in the append-only daily-summary ledger. Used
+    to reconcile the in-state cumulative on load so a torn/lost
+    state.json, a .bak restore, or the crash window between a closure's
+    ledger append and the next state write cannot silently mis-state the
+    compounding bankroll. Returns 0.0 on any read/parse failure."""
+    path = _resolve(cfg, "daily_summary_path", paths.V2_DAILY_SUMMARY_PATH)
+    total = 0.0
+    try:
+        if not path.exists():
+            return 0.0
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if rec.get("record_type") == "closure":
+                rp = rec.get("realized_pnl")
+                # bool is a subclass of int — exclude it so a corrupted
+                # `realized_pnl: true` can't silently add 1.0.
+                if isinstance(rp, (int, float)) and not isinstance(rp, bool):
+                    total += float(rp)
+    except Exception:
+        return 0.0
+    return total
+
+
+def _sizing_bankroll(state: dict, cfg: dict) -> float:
+    """Bankroll used for equal-slice sizing. The fixed base unless
+    sizing.compounding.enabled, in which case it compounds on cumulative
+    realized PnL, clamped to [0, cap_multiple*base]. Realized profit
+    beyond the cap stays in the account but does not grow sizing."""
+    sizing_cfg = cfg.get("sizing") or {}
+    comp = sizing_cfg.get("compounding") or {}
+    base = _compounding_base(cfg)
+    if not comp.get("enabled"):
+        return base
+    cap_multiple = float(comp.get("cap_multiple", 4.0))
+    effective = _effective_equity(state, cfg)
+    return max(0.0, min(effective, cap_multiple * base))
+
+
+def _below_floor(state: dict, cfg: dict) -> bool:
+    """True when compounding is enabled AND effective equity has fallen
+    to/below floor_fraction*base -> halt ALL new entries. Exit and
+    position-management paths never call this, so open lots are still
+    managed and exited while new entries are refused."""
+    sizing_cfg = cfg.get("sizing") or {}
+    comp = sizing_cfg.get("compounding") or {}
+    if not comp.get("enabled"):
+        return False
+    base = _compounding_base(cfg)
+    floor_fraction = float(comp.get("floor_fraction", 0.50))
+    return _effective_equity(state, cfg) <= floor_fraction * base
+
+
+def _reconcile_cumulative_from_ledger(state: dict, cfg: dict) -> None:
+    """Authoritatively (re)set the in-state lifetime realized PnL from the
+    closure ledger (source of truth). OVERWRITE, not add — so a torn or
+    stale state.json, a .bak restore, or the crash window between a
+    closure append and the next state write all heal to the true sum on
+    load. Legacy state with no field is seeded from the ledger."""
+    state["cumulative_realized_pnl_strategy"] = _ledger_realized_sum(cfg)
+
+
+def _write_state_atomic(state: dict, path: Path) -> None:
+    """Persist state via a tmp file + os.replace so a crash mid-write
+    cannot corrupt the live state.json (which now also carries the
+    compounding cumulative). Mirrors persist_config_snapshot's pattern."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(state, default=str, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
 
 def size_position(
     ev: dict, cfg: dict, *, current_price: float,
+    state: dict | None = None,
 ) -> tuple[int, float]:
     """Equal-slice sizing per cfg.sizing. Returns (qty,
-    target_notional). Honors min_order_notional."""
+    target_notional). Honors min_order_notional. When
+    sizing.compounding.enabled the bankroll compounds on cumulative
+    realized PnL (clamped to the cap); otherwise it is the fixed base."""
     sizing_cfg = cfg.get("sizing") or {}
-    bankroll = float(sizing_cfg.get("bankroll_fixed_dollars", 90000))
+    bankroll = _sizing_bankroll(state or {}, cfg)
     n_slots = int(sizing_cfg.get("max_concurrent_positions", 18))
     frac = float(sizing_cfg.get("equal_slice_bankroll_fraction", 0.80))
     target_notional = frac * bankroll / n_slots
@@ -557,6 +694,52 @@ def _symbol_already_entered_today(state: dict, symbol: str) -> bool:
             except Exception:
                 pass
     return False
+
+
+def lots_for_symbol(state: dict, symbol: str) -> list[dict]:
+    """All open-position lots currently held for ``symbol``. With the
+    link_id-keyed ``open_positions`` a symbol may hold several lots
+    (one per entry day, capped by ``risk.max_lots_per_symbol``)."""
+    return [
+        p for p in (state.get("open_positions") or {}).values()
+        if p.get("symbol") == symbol
+    ]
+
+
+def _symbol_open_notional(state: dict, symbol: str) -> float:
+    """Aggregate dollar exposure already held in ``symbol`` across all
+    its open lots. Used so the ADV cap is enforced on the combined
+    position, not per-lot."""
+    total = 0.0
+    for pos in lots_for_symbol(state, symbol):
+        qty = float(pos.get("qty") or 0)
+        price = pos.get("entry_price") or pos.get("candidate_close") or 0.0
+        try:
+            total += qty * float(price)
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
+def _migrate_open_positions(open_positions: dict) -> dict:
+    """Re-key ``open_positions`` by each lot's unique ``link_id`` so one
+    symbol can hold multiple lots. Idempotent — a no-op once the dict is
+    already link_id-keyed. Converts the legacy symbol-keyed shape
+    (``{"RUM": {...}}``) to the multi-lot shape
+    (``{"BOWAKAv2-RUM-1779375137": {...}}``)."""
+    rekeyed: dict = {}
+    changed = False
+    for k, pos in (open_positions or {}).items():
+        new_key = pos.get("link_id") or k
+        if new_key != k:
+            changed = True
+        rekeyed[new_key] = pos
+    if changed:
+        LOG.info(
+            "migrated open_positions to link_id keying (%d lot(s))",
+            len(rekeyed),
+        )
+    return rekeyed
 
 
 # ---- consumer entry point ----
@@ -600,6 +783,13 @@ def consume_candidate_events(
         state["daily_realized_pnl_strategy"] = 0.0
         state["gross_exposure_dollars"] = 0.0
 
+    # Normalize open_positions to the link_id-keyed multi-lot shape
+    # (idempotent — converts legacy symbol-keyed state on first load).
+    if state.get("open_positions"):
+        state["open_positions"] = _migrate_open_positions(
+            state["open_positions"]
+        )
+
     cand_path = _resolve(cfg, "candidate_events_path",
                           paths.CANDIDATE_EVENTS_PATH)
     last_offset = int(state.get("last_consumed_event_offset", 0))
@@ -637,12 +827,25 @@ def consume_candidate_events(
             continue
 
         symbol = ev["symbol"]
-        # Same-symbol dedupe.
+        # Same-symbol dedupe — at most one entry per symbol per day.
         if _symbol_already_entered_today(state, symbol):
             summary["dedupe"] += 1
             rec = build_rejection_record(
                 ev, reason="same_symbol_already_entered_today",
                 decision_ts=now,
+            )
+            emit_entry_decision_v2(cfg, rec)
+            emit_rejected_candidate(cfg, rec)
+            continue
+
+        # Multi-lot cap. A symbol may be re-entered on consecutive days
+        # (same-day re-entry is blocked above) up to
+        # risk.max_lots_per_symbol concurrent lots.
+        max_lots = int((cfg.get("risk") or {}).get("max_lots_per_symbol", 3))
+        if len(lots_for_symbol(state, symbol)) >= max_lots:
+            summary["dedupe"] += 1
+            rec = build_rejection_record(
+                ev, reason="max_lots_per_symbol", decision_ts=now,
             )
             emit_entry_decision_v2(cfg, rec)
             emit_rejected_candidate(cfg, rec)
@@ -655,7 +858,7 @@ def consume_candidate_events(
             "avg_dollar_volume_20d"
         )
         qty, target_notional = size_position(
-            ev, cfg, current_price=signal_price or 1.0,
+            ev, cfg, current_price=signal_price or 1.0, state=state,
         )
         if qty <= 0:
             summary["rejected"] += 1
@@ -684,12 +887,11 @@ def consume_candidate_events(
             )
 
         risk_snapshot = {
-            "bankroll": (state.get("bankroll") or {}).get(
-                "current_dollars",
-                (cfg.get("sizing") or {}).get(
-                    "bankroll_fixed_dollars", 90000,
-                ),
-            ),
+            # Telemetry only — the actual bankroll used for sizing
+            # (compounded when enabled, else base). The risk gates above
+            # are deliberately NOT driven by this; they stay anchored to
+            # the base via their own fixed fallback.
+            "bankroll": _sizing_bankroll(state, cfg),
             "gross_exposure_dollars": float(state.get(
                 "gross_exposure_dollars", 0.0,
             )),
@@ -775,7 +977,9 @@ def consume_candidate_events(
         venue_code = (cfg.get("execution") or {}).get(
             "default_venue_code", "XNAS",
         )
-        link_id = f"BOWAKAv2-{symbol}-{int(time.time())}"
+        # link_id is the open_positions primary key — use nanosecond
+        # resolution so two entries can never collide on the same key.
+        link_id = f"BOWAKAv2-{symbol}-{time.time_ns()}"
         record_pending_position(
             state,
             symbol=symbol, qty=qty, venue_code=venue_code,
@@ -909,12 +1113,15 @@ def record_pending_position(
         "trough_since_entry": None,
         "oco_attach_attempts": 0,
     }
-    state.setdefault("open_positions", {})[symbol] = pos
+    # Keyed by the unique link_id, never by symbol — this is what lets
+    # a symbol hold multiple lots, and what makes a re-entry physically
+    # unable to overwrite (orphan) an existing lot.
+    state.setdefault("open_positions", {})[link_id] = pos
     return pos
 
 
 def _build_order_index_v2(state: dict) -> dict[str, tuple[str, str]]:
-    """Map order_id -> (symbol, role) for active orders only.
+    """Map order_id -> (pos_id, role) for active orders only.
 
     Mirrors v1's _build_order_index. We only index the parent
     while the position is in a pre-fill state so a duplicate broker
@@ -922,17 +1129,17 @@ def _build_order_index_v2(state: dict) -> dict[str, tuple[str, str]]:
     handling.
     """
     idx: dict[str, tuple[str, str]] = {}
-    for symbol, pos in (state.get("open_positions") or {}).items():
+    for pos_id, pos in (state.get("open_positions") or {}).items():
         if pos.get("status") in {"pending_fill", "submitted", "pending_entry"}:
             pid = pos.get("parent_order_id")
             if pid:
-                idx[pid] = (symbol, "parent")
+                idx[pid] = (pos_id, "parent")
         for role, oid in (pos.get("child_order_ids") or {}).items():
             if oid:
-                idx[oid] = (symbol, role)
+                idx[oid] = (pos_id, role)
         eid = pos.get("exit_order_id")
         if eid:
-            idx[eid] = (symbol, "exit")
+            idx[eid] = (pos_id, "exit")
     return idx
 
 
@@ -1030,7 +1237,8 @@ def submit_pending_oco_children_v2(
     bracket and submit one. Returns the list of symbols that received
     a fresh bracket this call."""
     out: list[str] = []
-    for symbol, pos in list((state.get("open_positions") or {}).items()):
+    for pos_id, pos in list((state.get("open_positions") or {}).items()):
+        symbol = pos.get("symbol", "")
         if pos.get("status") != "filled":
             continue
         children = pos.get("child_order_ids") or {}
@@ -1073,10 +1281,11 @@ def poll_fills_v2(
         oid = row.get("id") or row.get("order_id") or ""
         if oid not in idx:
             continue
-        symbol, role = idx[oid]
-        pos = open_positions.get(symbol)
+        pos_id, role = idx[oid]
+        pos = open_positions.get(pos_id)
         if pos is None:
             continue
+        symbol = pos.get("symbol", "")
         native_status = row.get("native_status") or row.get("status") or ""
         canonical = (
             row.get("canonical_status") or native_status or ""
@@ -1092,7 +1301,7 @@ def poll_fills_v2(
         except (ValueError, TypeError):
             filled_avg_f = None
         ev = {
-            "symbol": symbol, "order_id": oid, "role": role,
+            "symbol": symbol, "pos_id": pos_id, "order_id": oid, "role": role,
             "status": canonical, "filled_qty": filled_qty,
             "filled_avg_price": filled_avg_f, "raw": row,
         }
@@ -1134,7 +1343,7 @@ def poll_fills_v2(
                         "parent %s ended in %s — dropping position",
                         symbol, canonical,
                     )
-                    open_positions.pop(symbol, None)
+                    open_positions.pop(pos_id, None)
                     _emit_ledger_v2(cfg, "parent_terminal", {
                         "symbol": symbol, "order_id": oid,
                         "status": canonical,
@@ -1174,7 +1383,7 @@ def _trading_days_since(entry_iso: str, today_et: date) -> int:
 
 
 def close_position_v2(
-    symbol: str,
+    pos_id: str,
     state: dict,
     cfg: dict,
     *,
@@ -1182,10 +1391,12 @@ def close_position_v2(
     reason: str,
 ) -> dict | None:
     """Compute realized PnL, append a closure record to the v2 daily
-    summary + ledger, then drop the position from state."""
-    pos = (state.get("open_positions") or {}).get(symbol)
+    summary + ledger, then drop the lot from state. ``pos_id`` is the
+    link_id-keyed open_positions key — one lot, not the whole symbol."""
+    pos = (state.get("open_positions") or {}).get(pos_id)
     if pos is None:
         return None
+    symbol = pos.get("symbol", "")
     entry_price = float(pos.get("entry_price") or 0.0)
     qty = int(pos.get("qty") or 0)
     realized = (float(exit_price) - entry_price) * qty
@@ -1237,11 +1448,18 @@ def close_position_v2(
     state["daily_realized_pnl_strategy"] = float(
         state.get("daily_realized_pnl_strategy", 0.0)
     ) + realized
+    # Lifetime realized PnL — drives the compounding sizing bankroll.
+    # Kept in sync in-memory here; reconciled authoritatively from the
+    # closure ledger on load (main()), which heals any crash-window gap
+    # before the next state write. NOT reset on daily session rollover.
+    state["cumulative_realized_pnl_strategy"] = float(
+        state.get("cumulative_realized_pnl_strategy", 0.0)
+    ) + realized
     notional = entry_price * qty
     state["gross_exposure_dollars"] = max(
         0.0, float(state.get("gross_exposure_dollars", 0.0)) - notional,
     )
-    state["open_positions"].pop(symbol, None)
+    state["open_positions"].pop(pos_id, None)
     LOG.info(
         "closed %s: %s pnl=%.2f hold_td=%s entry=%.4f exit=%.4f",
         symbol, reason, realized, hold_trading_days,
@@ -1257,15 +1475,15 @@ def process_fill_events_v2(
     out: list[dict] = []
     open_positions = state.get("open_positions") or {}
     for ev in events:
-        symbol = ev["symbol"]
-        pos = open_positions.get(symbol)
+        pos_id = ev["pos_id"]
+        pos = open_positions.get(pos_id)
         if pos is None:
             continue
         role = ev["role"]
         if role == "target" and ev["status"] in {"FILLED"}:
             price = ev["filled_avg_price"] or pos.get("target_price") or 0.0
             rec = close_position_v2(
-                symbol, state, cfg,
+                pos_id, state, cfg,
                 exit_price=float(price), reason="target_hit",
             )
             if rec:
@@ -1273,7 +1491,7 @@ def process_fill_events_v2(
         elif role == "stop" and ev["status"] in {"FILLED"}:
             price = ev["filled_avg_price"] or pos.get("stop_price") or 0.0
             rec = close_position_v2(
-                symbol, state, cfg,
+                pos_id, state, cfg,
                 exit_price=float(price), reason="stop_hit",
             )
             if rec:
@@ -1285,7 +1503,7 @@ def process_fill_events_v2(
             )
             exit_reason = pos.get("exit_reason") or "time_stop"
             rec = close_position_v2(
-                symbol, state, cfg,
+                pos_id, state, cfg,
                 exit_price=float(price), reason=exit_reason,
             )
             if rec:
@@ -1391,7 +1609,8 @@ def run_time_stop_pass_v2(
     out: list[str] = []
     max_hold = int((cfg.get("exits") or {}).get("max_hold_days", 3))
     today_et = pd.Timestamp.now(tz="America/New_York").date()
-    for symbol, pos in dict(state.get("open_positions") or {}).items():
+    for pos_id, pos in dict(state.get("open_positions") or {}).items():
+        symbol = pos.get("symbol", "")
         if pos.get("status") != "filled":
             continue
         entry_iso = pos.get("entry_timestamp") or ""
@@ -1415,7 +1634,8 @@ def execute_kill_l2_v2(
     pending-fill positions, best-effort cancel parent + children."""
     state["kill_switch_state"] = "L2"
     out: list[str] = []
-    for symbol, pos in dict(state.get("open_positions") or {}).items():
+    for pos_id, pos in dict(state.get("open_positions") or {}).items():
+        symbol = pos.get("symbol", "")
         if pos.get("status") == "exiting":
             continue
         if pos.get("status") != "filled":
@@ -1434,7 +1654,7 @@ def execute_kill_l2_v2(
                     oa_client.cancel_order(http, api_key, parent)
                 except Exception:
                     LOG.exception("L2 cancel parent %s failed", symbol)
-            state["open_positions"].pop(symbol, None)
+            state["open_positions"].pop(pos_id, None)
             out.append(symbol)
             continue
         ok = trigger_exit_v2(
@@ -1458,7 +1678,8 @@ def execute_kill_l3_v2(
     caller exits 99."""
     state["kill_switch_state"] = "L3"
     out: list[str] = []
-    for symbol, pos in dict(state.get("open_positions") or {}).items():
+    for pos_id, pos in dict(state.get("open_positions") or {}).items():
+        symbol = pos.get("symbol", "")
         if pos.get("status") == "filled":
             try:
                 trigger_exit_v2(
@@ -1507,7 +1728,8 @@ def enforce_protected_position_invariant_v2(
     flatten = bool(pp.get("flatten_if_unprotected", True))
     out: list[str] = []
     now = _now_utc()
-    for symbol, pos in dict(state.get("open_positions") or {}).items():
+    for pos_id, pos in dict(state.get("open_positions") or {}).items():
+        symbol = pos.get("symbol", "")
         if pos.get("status") != "filled":
             continue
         children = pos.get("child_order_ids") or {}
@@ -1620,6 +1842,18 @@ def main(argv: list[str] | None = None) -> int:
     state.setdefault("entered_today", [])
     state.setdefault("daily_entries_count", 0)
     state.setdefault("open_positions", {})
+    # Compounding bankroll: reconcile lifetime realized PnL from the
+    # append-only closure ledger (the source of truth). Heals a torn or
+    # lost state.json, a .bak restore, and the closure-append/state-write
+    # crash window — any of which would otherwise silently mis-state the
+    # sizing bankroll and the floor-halt decision. On first upgrade this
+    # seeds the lifetime sum from existing trade history.
+    _reconcile_cumulative_from_ledger(state, cfg)
+    # Migrate legacy symbol-keyed open_positions to link_id keying so a
+    # symbol can carry multiple lots without overwriting (orphaning) one.
+    state["open_positions"] = _migrate_open_positions(
+        state.get("open_positions") or {}
+    )
 
     if args.replay_from:
         # Point the consumer at a different candidate-events file.
@@ -1631,9 +1865,7 @@ def main(argv: list[str] | None = None) -> int:
     if one_shot:
         summary = consume_candidate_events(state, cfg)
         LOG.info("v2 consumer tick: %s", summary)
-        state_path.parent.mkdir(parents=True, exist_ok=True)
-        state_path.write_text(json.dumps(state, default=str, indent=2),
-                              encoding="utf-8")
+        _write_state_atomic(state, state_path)
         return 0
 
     # Long-running loop: consume new candidate events every
@@ -1709,10 +1941,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 except Exception:
                     LOG.exception("L3 cleanup raised (continuing to exit)")
-            state_path.parent.mkdir(parents=True, exist_ok=True)
-            state_path.write_text(
-                json.dumps(state, default=str, indent=2), encoding="utf-8",
-            )
+            _write_state_atomic(state, state_path)
             if live_client:
                 live_client.close()
             return 99
@@ -1792,10 +2021,7 @@ def main(argv: list[str] | None = None) -> int:
                 LOG.exception("run_time_stop_pass_v2 raised")
 
         try:
-            state_path.parent.mkdir(parents=True, exist_ok=True)
-            state_path.write_text(
-                json.dumps(state, default=str, indent=2), encoding="utf-8",
-            )
+            _write_state_atomic(state, state_path)
         except Exception as e:
             LOG.warning("state write failed: %s", e)
         # Sleep in small chunks so the shutdown flag is honored quickly.

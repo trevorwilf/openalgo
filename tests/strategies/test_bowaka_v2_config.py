@@ -31,11 +31,22 @@ def test_v2_config_loads_yaml() -> None:
         assert section in cfg, f"missing top-level section {section!r}"
 
 
-def test_v2_config_defaults_iex_and_research_flag() -> None:
+def test_v2_config_defaults_sip_after_cutover() -> None:
     cfg = _load_cfg()
-    assert cfg["data"]["feed"] == "iex"
-    assert cfg["data"]["allow_non_sip_for_research_only"] is True
+    # SIP cutover 2026-06-04: feed flipped to the consolidated tape and
+    # the research-only escape hatch re-armed off.
+    assert cfg["data"]["feed"] == "sip"
+    assert cfg["data"]["allow_non_sip_for_research_only"] is False
     assert cfg["data"]["live_requires_sip"] is True
+
+
+def test_v2_config_compounding_block_defaults() -> None:
+    cfg = _load_cfg()
+    comp = cfg["sizing"]["compounding"]
+    assert comp["enabled"] is True
+    assert comp["base_dollars"] is None
+    assert comp["floor_fraction"] == pytest.approx(0.50)
+    assert comp["cap_multiple"] == pytest.approx(4.0)
 
 
 def test_v2_config_environment_is_paper() -> None:

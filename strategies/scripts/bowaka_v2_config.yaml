@@ -42,8 +42,8 @@ paths:
 
 data:
   provider: "alpaca"
-  feed: "iex"                              # operator override; SIP target
-  allow_non_sip_for_research_only: true    # operator override
+  feed: "sip"                              # SIP cutover 2026-06-04; consolidated NMS tape
+  allow_non_sip_for_research_only: false   # re-armed: SIP entitlement live
   live_requires_sip: true                  # Phase 4 startup gate refuses live unless SIP
   daily_timeframe: "1D"
   intraday_timeframe: "1m"
@@ -115,13 +115,13 @@ scanner:
   require_fresh_intraday_bar: true
 
 signals:
-  rvol_so_far_min: 0.7              # for SIP change to 1.50 - IEX is 0.7 because of partial tape bias; SIP should be 1.50 for microcaps
-  projected_full_day_rvol_min: 0.5  # for SIP change to 1.50 - IEX is 0.5 because of partial tape bias; SIP should be 1.50 for microcaps
+  rvol_so_far_min: 0.65            # 2026-06-08: just below lowest of the 5 winners >=7% (RUM 0.72, SIP-recomputed). BLMN +4.8% (rvol 0.41) intentionally EXCLUDED to keep a real volume filter. Was 1.50 (handoff prior, blocked all winners).
+  projected_full_day_rvol_min: 0.65 # 2026-06-08: == rvol floor (algebraically identical to rvol_so_far in feature engine)
   prior_atr_pct_min: 0.06
-  range_expansion_so_far_min: 0.5   # for SIP change to 1.25 - IEX is 0.5 because of partial tape bias; SIP should be 1.25 for microcaps
+  range_expansion_so_far_min: 0.60  # 2026-06-08: just below lowest of the 5 winners >=7% (PCT 0.67, SIP-recomputed). BLMN (0.58) intentionally EXCLUDED. Was 1.25 (handoff prior).
   close_location_so_far_min: 0.60
-  ema_distance_min: -0.05         # for SIP change to 0.0 - IEX relaxed for paper testing
-  ema_slope_min: -0.05            # for SIP change to 0.0 - IEX relaxed for paper testing
+  ema_distance_min: 0.0           # SIP (2026-06-04): was -0.05 (relaxed for IEX paper testing)
+  ema_slope_min: -0.05            # 2026-06-08: lowered to admit winners NUAI 5/28 (-0.019) & RUM 5/21 (-0.024), SIP-recomputed
 
   # Universe-layer thresholds mirrored here so apply_v2_gates can
   # evaluate them against the candidate's current price / ADV.
@@ -178,11 +178,31 @@ sizing:
   min_order_notional: 500
   max_per_trade_dollars: null
 
+  # Compounding bankroll (2026-06-09). When enabled, the equal-slice
+  # sizing bankroll = base + cumulative realized PnL, clamped to
+  # [floor_fraction*base, cap_multiple*base]. At/below the floor, ALL new
+  # entries are refused (open positions are still managed and exited).
+  # Realized profit beyond the cap stays in the account but does not grow
+  # sizing. Risk controls (daily_loss_pct, gross/ADV caps) remain anchored
+  # to the base, NOT the compounded bankroll, by design.
+  compounding:
+    enabled: true             # false => fixed bankroll_fixed_dollars sizing (legacy)
+    base_dollars: null        # null => use bankroll_fixed_dollars (90000) as base
+    floor_fraction: 0.50      # effective_equity <= 0.50*base ($45k) => HALT new entries
+    cap_multiple: 4.0         # sizing bankroll = min(effective_equity, 4*base) ($360k)
+
 risk:
   daily_loss_pct: 0.03
   strategy_slice_loss_pct: 0.025
   max_gross_exposure_pct: 0.80
   max_total_entries_per_day: 10
+
+  # Multi-lot accumulation. One entry per symbol per day, allowed on
+  # consecutive days, capped at this many concurrent lots per symbol.
+  # Kept equal to exits.max_hold_days so accumulation matches the hold
+  # window — a lot ages out as the next day's lot can be added.
+  max_lots_per_symbol: 3
+
   max_stopouts_per_day: 2
   stop_trading_after_consecutive_stopouts: 2
 
@@ -217,7 +237,9 @@ risk:
         max_position_as_adv_frac: 0.010
 
 exits:
-  stop_pct: 0.08
+  # 2026-05-26: tightened from 0.08 to 0.025 per-stock per operator.
+  # Per-lot OCO stop = entry_price * (1 - stop_pct).
+  stop_pct: 0.025
   target_pct: 0.15
   max_hold_days: 3
 

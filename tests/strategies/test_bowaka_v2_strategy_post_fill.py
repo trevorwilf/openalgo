@@ -117,7 +117,7 @@ def test_record_pending_position_writes_state(tmp_path):
         stop_pct=0.05, target_pct=0.10, max_hold_days=2,
         candidate_event_id="evt-1",
     )
-    pos = state["open_positions"]["AAA"]
+    pos = state["open_positions"]["L-1"]
     assert pos["status"] == "pending_fill"
     assert pos["parent_order_id"] == "P-1"
     assert pos["qty"] == 100
@@ -152,7 +152,7 @@ def test_poll_fills_v2_parent_fill_marks_position_filled(tmp_path):
     )
     assert len(events) == 1
     assert events[0]["role"] == "parent"
-    pos = state["open_positions"]["AAA"]
+    pos = state["open_positions"]["L-1"]
     assert pos["status"] == "filled"
     assert pos["entry_price"] == 10.50
     assert pos["parent_fill_processed"] is True
@@ -179,7 +179,7 @@ def test_poll_fills_v2_duplicate_parent_fill_is_idempotent(tmp_path):
         "filled_qty": 100, "filled_avg_price": "10.50",
     }]
     v2.poll_fills_v2(state, cfg, oa_client=oa, api_key="k", http=None)
-    pos = state["open_positions"]["AAA"]
+    pos = state["open_positions"]["L-1"]
     pos["peak_since_entry"] = 11.20  # drift the peak
     pos["status"] = "filled"
     events2 = v2.poll_fills_v2(
@@ -208,7 +208,7 @@ def test_poll_fills_v2_parent_rejected_drops_position(tmp_path):
         "filled_qty": 0, "filled_avg_price": None,
     }]
     v2.poll_fills_v2(state, cfg, oa_client=oa, api_key="k", http=None)
-    assert "AAA" not in state["open_positions"]
+    assert "L-1" not in state["open_positions"]
 
 
 # ---------- submit_oco_children_v2 ----------
@@ -225,7 +225,7 @@ def test_submit_oco_children_v2_attaches_bracket(tmp_path):
         stop_pct=0.05, target_pct=0.10, max_hold_days=2,
         candidate_event_id="evt-1",
     )
-    pos = state["open_positions"]["AAA"]
+    pos = state["open_positions"]["L-1"]
     pos["status"] = "filled"
     pos["entry_price"] = 10.00
     oa = FakeOAClient()
@@ -333,7 +333,7 @@ def test_close_position_v2_writes_closure_and_drops_pos(tmp_path):
 def test_process_fill_events_v2_target_closes_position(tmp_path):
     cfg = _cfg(tmp_path)
     state = {"open_positions": {
-        "AAA": {
+        "L-1": {
             "symbol": "AAA", "qty": 100, "venue_code": "XNAS",
             "entry_price": 10.00, "status": "filled",
             "entry_timestamp": "2026-05-15T13:30:00Z",
@@ -344,20 +344,20 @@ def test_process_fill_events_v2_target_closes_position(tmp_path):
         },
     }}
     events = [{
-        "symbol": "AAA", "order_id": "T-1", "role": "target",
+        "symbol": "AAA", "pos_id": "L-1", "order_id": "T-1", "role": "target",
         "status": "FILLED", "filled_qty": 100,
         "filled_avg_price": 11.00, "raw": {},
     }]
     closures = v2.process_fill_events_v2(events, state, cfg)
     assert len(closures) == 1
     assert closures[0]["reason"] == "target_hit"
-    assert "AAA" not in state["open_positions"]
+    assert "L-1" not in state["open_positions"]
 
 
 def test_process_fill_events_v2_stop_closes_position(tmp_path):
     cfg = _cfg(tmp_path)
     state = {"open_positions": {
-        "AAA": {
+        "L-1": {
             "symbol": "AAA", "qty": 100, "venue_code": "XNAS",
             "entry_price": 10.00, "status": "filled",
             "entry_timestamp": "2026-05-15T13:30:00Z",
@@ -368,7 +368,7 @@ def test_process_fill_events_v2_stop_closes_position(tmp_path):
         },
     }}
     events = [{
-        "symbol": "AAA", "order_id": "S-1", "role": "stop",
+        "symbol": "AAA", "pos_id": "L-1", "order_id": "S-1", "role": "stop",
         "status": "FILLED", "filled_qty": 100,
         "filled_avg_price": 9.50, "raw": {},
     }]
@@ -675,7 +675,7 @@ def test_consumer_records_parent_order_id_from_submit(tmp_path, monkeypatch):
         now_utc=datetime(2026, 5, 18, 18, 35, tzinfo=timezone.utc),
     )
     assert s["accepted"] == 1
-    pos = state["open_positions"]["AAA"]
+    pos = v2.lots_for_symbol(state, "AAA")[0]
     assert pos["parent_order_id"] == "PARENT-AAA"
     assert pos["status"] == "pending_fill"
     assert pos["qty"] > 0
