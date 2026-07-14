@@ -34,7 +34,7 @@ import logging
 import os
 import sys
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -1237,19 +1237,44 @@ def submit_oco_children_v2(
     data = parsed.get("data") or {}
     native = data.get("native_response") or {}
     legs = native.get("legs") or []
-    parent_response_id = native.get("id") or native.get("order_id") or ""
+    # Strict leg parsing — a stop leg classifies first (covers
+    # stop_limit), a plain limit leg is the target. No guessing: a
+    # missing or duplicated id means we do NOT know which order is the
+    # stop, and storing a wrong id would let trigger_exit cancel the
+    # wrong leg later. Treat as attach failure and let the retry
+    # sweep / protected-position flatten handle it.
     target_id = ""
     stop_id = ""
     for leg in legs:
         otype = (leg.get("order_type") or leg.get("type") or "").lower()
-        if "limit" in otype and not target_id:
-            target_id = leg.get("id") or leg.get("order_id") or ""
-        elif "stop" in otype and not stop_id:
-            stop_id = leg.get("id") or leg.get("order_id") or ""
-    if not target_id and parent_response_id:
-        target_id = parent_response_id
-    if not stop_id and len(legs) >= 1:
-        stop_id = legs[0].get("id") or ""
+        leg_id = leg.get("id") or leg.get("order_id") or ""
+        if "stop" in otype:
+            if not stop_id:
+                stop_id = leg_id
+        elif "limit" in otype:
+            if not target_id:
+                target_id = leg_id
+    if not target_id or not stop_id or target_id == stop_id:
+        _emit_ledger_v2(cfg, "bracket_attach_ambiguous", {
+            "symbol": symbol, "link_id": pos.get("link_id"),
+            "target_id": target_id, "stop_id": stop_id,
+            "legs": legs,
+        })
+        emit_protection_state(cfg, {
+            "ts": _iso(_now_utc()), "symbol": symbol,
+            "event": "bracket_attach_ambiguous",
+            "target_id": target_id, "stop_id": stop_id,
+            "legs": legs,
+        })
+        LOG.error(
+            "OCO attach for %s returned ambiguous legs "
+            "(target=%r stop=%r legs=%r) — treating as FAILED",
+            symbol, target_id, stop_id, legs,
+        )
+        return {
+            "error": {"code": "bracket_attach_ambiguous"},
+            "status": "ambiguous_legs",
+        }
     pos["child_order_ids"] = {"target": target_id, "stop": stop_id}
     pos["target_price"] = target_price
     pos["stop_price"] = stop_price
@@ -1579,10 +1604,58 @@ def close_position_v2(
     return record
 
 
+def _positive_price(v) -> float | None:
+    """float(v) when it is a usable positive price, else None."""
+    if isinstance(v, bool):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f > 0 else None
+
+
+def _resolve_exit_price(ev: dict, pos: dict, role: str) -> float | None:
+    """Best usable exit price for a fill event: the broker's
+    filled_avg_price, then the role-appropriate stored price. None
+    when no positive price is available — the caller must defer the
+    closure rather than book a 0.0 exit (−100% phantom PnL)."""
+    if role == "target":
+        chain = (ev.get("filled_avg_price"), pos.get("target_price"))
+    elif role == "stop":
+        chain = (ev.get("filled_avg_price"), pos.get("stop_price"))
+    else:  # exit (market sell)
+        chain = (ev.get("filled_avg_price"), pos.get("exit_fill_price"))
+    for candidate in chain:
+        price = _positive_price(candidate)
+        if price is not None:
+            return price
+    return None
+
+
+def _defer_closure_no_price(cfg: dict, pos: dict, ev: dict) -> None:
+    """Mark the lot as awaiting a usable exit price; the next poll's
+    broker echo should carry filled_avg_price. Ledger event emitted
+    once per lot."""
+    pos["exit_price_pending"] = True
+    if not pos.get("closure_deferred_logged"):
+        pos["closure_deferred_logged"] = True
+        _emit_ledger_v2(cfg, "closure_deferred_no_price", {
+            "symbol": pos.get("symbol"), "link_id": pos.get("link_id"),
+            "role": ev.get("role"), "order_id": ev.get("order_id"),
+        })
+    LOG.warning(
+        "no usable exit price for %s (%s fill, order %s) — closure "
+        "deferred until the broker echo carries filled_avg_price",
+        pos.get("symbol"), ev.get("role"), ev.get("order_id"),
+    )
+
+
 def process_fill_events_v2(
     events: list[dict], state: dict, cfg: dict,
 ) -> list[dict]:
-    """Map child/exit fill events to closures."""
+    """Map child/exit fill events to closures. A fill with no usable
+    price defers the closure (never books exit_price=0.0)."""
     out: list[dict] = []
     open_positions = state.get("open_positions") or {}
     for ev in events:
@@ -1592,30 +1665,36 @@ def process_fill_events_v2(
             continue
         role = ev["role"]
         if role == "target" and ev["status"] in {"FILLED"}:
-            price = ev["filled_avg_price"] or pos.get("target_price") or 0.0
+            price = _resolve_exit_price(ev, pos, "target")
+            if price is None:
+                _defer_closure_no_price(cfg, pos, ev)
+                continue
             rec = close_position_v2(
                 pos_id, state, cfg,
-                exit_price=float(price), reason="target_hit",
+                exit_price=price, reason="target_hit",
             )
             if rec:
                 out.append(rec)
         elif role == "stop" and ev["status"] in {"FILLED"}:
-            price = ev["filled_avg_price"] or pos.get("stop_price") or 0.0
+            price = _resolve_exit_price(ev, pos, "stop")
+            if price is None:
+                _defer_closure_no_price(cfg, pos, ev)
+                continue
             rec = close_position_v2(
                 pos_id, state, cfg,
-                exit_price=float(price), reason="stop_hit",
+                exit_price=price, reason="stop_hit",
             )
             if rec:
                 out.append(rec)
         elif role == "exit" and ev["status"] in {"FILLED"}:
-            price = (
-                ev["filled_avg_price"]
-                or pos.get("exit_fill_price") or 0.0
-            )
+            price = _resolve_exit_price(ev, pos, "exit")
+            if price is None:
+                _defer_closure_no_price(cfg, pos, ev)
+                continue
             exit_reason = pos.get("exit_reason") or "time_stop"
             rec = close_position_v2(
                 pos_id, state, cfg,
-                exit_price=float(price), reason=exit_reason,
+                exit_price=price, reason=exit_reason,
             )
             if rec:
                 out.append(rec)
@@ -1644,18 +1723,37 @@ def trigger_exit_v2(
     pos["status"] = "exit_pending"
     pos["exit_reason_pending"] = reason
     pos["exit_pending_at"] = _iso(_now_utc())
+    # Every existing child must be CONFIRMED canceled before the
+    # market sell goes out — a still-live stop/target plus a market
+    # sell would leave the account short after both fill. Any cancel
+    # failure aborts the exit; the next tick retries.
     children = pos.get("child_order_ids") or {}
     for role in ("target", "stop"):
         oid = children.get(role)
         if not oid:
             continue
         try:
-            oa_client.cancel_order(http, api_key, oid)
+            res = oa_client.cancel_order(http, api_key, oid)
         except Exception as e:
-            LOG.warning(
-                "cancel %s child %s failed (continuing): %s",
-                symbol, role, e,
+            LOG.error("cancel %s child %s raised: %s", symbol, role, e)
+            res = {"status": "error", "order_id": oid,
+                   "exception": str(e)}
+        status = res.get("status") if isinstance(res, dict) else None
+        if status not in ("canceled", "noop"):
+            pos["status"] = "filled"
+            pos.pop("exit_reason_pending", None)
+            pos.pop("exit_pending_at", None)
+            _emit_ledger_v2(cfg, "exit_aborted_cancel_failed", {
+                "symbol": symbol, "link_id": pos.get("link_id"),
+                "role": role, "order_id": oid, "reason": reason,
+                "cancel_response": res,
+            })
+            LOG.error(
+                "exit for %s aborted: cancel of %s child %s not "
+                "confirmed (%r) — will retry next tick",
+                symbol, role, oid, res,
             )
+            return False
     venue = pos.get("venue_code") or (cfg.get("execution") or {}).get(
         "default_venue_code", "XNAS",
     )
@@ -1710,16 +1808,52 @@ def trigger_exit_v2(
     return True
 
 
+def _parse_hhmm(value, fallback: dt_time) -> dt_time:
+    """Parse an "HH:MM" config string to a time; fallback on garbage."""
+    try:
+        hh, mm = str(value).split(":")
+        return dt_time(int(hh), int(mm))
+    except Exception:
+        return fallback
+
+
+def _in_time_stop_window(now_et, cfg: dict) -> bool:
+    """True only inside the end-of-session time-stop window: a
+    business day, at/after ``exits.time_stop.exit_time`` (default
+    15:15) and at/before ``session.end`` (default 15:55) ET. Time
+    stops must fire as in-session market sells — never overnight
+    (which would cancel OCO protection while the market is closed and
+    queue a sell for the open)."""
+    ts_cfg = (cfg.get("exits") or {}).get("time_stop") or {}
+    if not ts_cfg.get("enabled", True):
+        return False
+    if now_et.weekday() >= 5:
+        return False
+    start = _parse_hhmm(ts_cfg.get("exit_time", "15:15"),
+                        dt_time(15, 15))
+    end = _parse_hhmm((cfg.get("session") or {}).get("end", "15:55"),
+                      dt_time(15, 55))
+    return start <= now_et.time() <= end
+
+
 def run_time_stop_pass_v2(
     state: dict, cfg: dict, *,
     oa_client, api_key: str, http,
+    now_et=None,
 ) -> list[str]:
     """Walk filled positions; exit those whose hold has reached
-    max_hold_days. Returns the list of symbols time-stopped this
-    pass."""
+    max_hold_days. Fires only inside the in-session time-stop window
+    (see _in_time_stop_window) — kill switches and the protected-
+    position invariant remain 24/7 elsewhere. ``now_et`` is an
+    injectable ET timestamp for tests. Returns the list of symbols
+    time-stopped this pass."""
     out: list[str] = []
+    if now_et is None:
+        now_et = pd.Timestamp.now(tz="America/New_York")
+    if not _in_time_stop_window(now_et, cfg):
+        return out
     max_hold = int((cfg.get("exits") or {}).get("max_hold_days", 3))
-    today_et = pd.Timestamp.now(tz="America/New_York").date()
+    today_et = now_et.date()
     for pos_id, pos in dict(state.get("open_positions") or {}).items():
         symbol = pos.get("symbol", "")
         if pos.get("status") != "filled":
