@@ -442,13 +442,14 @@ def test_trigger_exit_v2_reverts_on_broker_rejection(tmp_path):
 
 def test_run_time_stop_pass_v2_exits_after_max_hold(tmp_path):
     cfg = _cfg(tmp_path)  # max_hold_days = 2
-    # Entry 5 trading days ago — must trip the time stop.
-    long_ago = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    # Entry 6 trading days before the injected now — must trip the
+    # time stop. now_et = Monday 2026-05-18 15:20 ET, inside the
+    # 15:15-15:55 in-session window.
     state = {"open_positions": {
         "AAA": {
             "symbol": "AAA", "qty": 100, "venue_code": "XNAS",
             "status": "filled", "entry_price": 10.00,
-            "entry_timestamp": long_ago,
+            "entry_timestamp": "2026-05-08T13:30:00Z",
             "child_order_ids": {"target": "T-1", "stop": "S-1"},
             "link_id": "L-1",
         },
@@ -456,6 +457,7 @@ def test_run_time_stop_pass_v2_exits_after_max_hold(tmp_path):
     oa = FakeOAClient()
     out = v2.run_time_stop_pass_v2(
         state, cfg, oa_client=oa, api_key="k", http=None,
+        now_et=datetime(2026, 5, 18, 15, 20),
     )
     assert out == ["AAA"]
     assert state["open_positions"]["AAA"]["status"] == "exiting"
@@ -464,12 +466,11 @@ def test_run_time_stop_pass_v2_exits_after_max_hold(tmp_path):
 
 def test_run_time_stop_pass_v2_skips_recent_entries(tmp_path):
     cfg = _cfg(tmp_path)
-    fresh = datetime.now(timezone.utc).isoformat()
     state = {"open_positions": {
         "AAA": {
             "symbol": "AAA", "qty": 100, "venue_code": "XNAS",
             "status": "filled", "entry_price": 10.00,
-            "entry_timestamp": fresh,
+            "entry_timestamp": "2026-05-18T13:30:00Z",  # same day
             "child_order_ids": {"target": "T-1", "stop": "S-1"},
             "link_id": "L-1",
         },
@@ -477,6 +478,7 @@ def test_run_time_stop_pass_v2_skips_recent_entries(tmp_path):
     oa = FakeOAClient()
     out = v2.run_time_stop_pass_v2(
         state, cfg, oa_client=oa, api_key="k", http=None,
+        now_et=datetime(2026, 5, 18, 15, 20),
     )
     assert out == []
 
