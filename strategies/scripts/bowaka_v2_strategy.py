@@ -384,6 +384,11 @@ def _quote_gate(quote: dict | None, cfg: dict) -> str | None:
         if not (isinstance(bid, (int, float)) and bid > 0
                 and isinstance(ask, (int, float)) and ask > 0):
             return "quote_stale"
+    # Crossed book (bid > ask) is a halt/stale-feed proxy — a sane
+    # live NBBO never crosses. Reject even without real halt status.
+    if (isinstance(bid, (int, float)) and isinstance(ask, (int, float))
+            and bid > 0 and ask > 0 and bid > ask):
+        return "quote_stale"
     spread_pct = quote.get("spread_pct")
     if spread_pct is None and bid and ask:
         mid = (bid + ask) / 2.0
@@ -418,14 +423,33 @@ def _price_chase_gate(
     return None
 
 
+_HALT_STATUSES = frozenset({
+    "halted", "pending_review", "luld_pause", "inactive",
+})
+
+
 def _halt_gate(symbol_status: str | None, cfg: dict) -> str | None:
     hg = (cfg.get("execution") or {}).get("halt_gate") or {}
     if not hg.get("enabled", True):
         return None
     if not symbol_status:
         return None
-    bad = {"halted", "pending_review", "luld_pause"}
-    if symbol_status.lower() in bad:
+    if symbol_status.lower() in _HALT_STATUSES:
+        return "halt_or_pending_review"
+    return None
+
+
+def _recent_pause_gate(state: dict, symbol: str, cfg: dict) -> str | None:
+    """halt_gate.block_on_recent_luld_pause — once a halt/pause status
+    was observed for a symbol this session, block re-entry for the
+    rest of the session even after the status clears (LULD pauses
+    cluster). The memory map is purged on session rollover."""
+    hg = (cfg.get("execution") or {}).get("halt_gate") or {}
+    if not hg.get("enabled", True):
+        return None
+    if not hg.get("block_on_recent_luld_pause", False):
+        return None
+    if symbol in (state.get("luld_pauses") or {}):
         return "halt_or_pending_review"
     return None
 
@@ -951,8 +975,10 @@ def consume_candidate_events(
                 s: c for s, c in cooldowns.items()
                 if _symbol_in_cooldown({"cooldowns": {s: c}}, s, now)
             }
-        # Per-scan accept counters are session-scoped.
+        # Per-scan accept counters and the LULD-pause memory are
+        # session-scoped.
         state.pop("scan_accept_counts", None)
+        state.pop("luld_pauses", None)
         # Gross exposure is NOT a per-day counter — lots held overnight
         # keep their exposure. Recompute from the open lots instead of
         # zeroing (which under-counted risk gates all next session).
@@ -1108,11 +1134,32 @@ def consume_candidate_events(
                 "mid": signal_price, "spread_pct": 0.0,
                 "quote_timestamp": _iso(now), "quote_age_seconds": 0,
             }
+        # LULD/halt memory: any halt-shaped status observed for the
+        # symbol is remembered for the rest of the session. When the
+        # adapter reports no status at all, note (once per session)
+        # that true halt detection is degraded to the quote proxies.
+        symbol_status = quote.get("symbol_status")
+        if (symbol_status
+                and str(symbol_status).lower() in _HALT_STATUSES):
+            state.setdefault("luld_pauses", {})[symbol] = _iso(now)
+        elif (not symbol_status
+                and (cfg.get("execution") or {}).get(
+                    "halt_gate", {}).get("enabled", True)
+                and state.get(
+                    "halt_status_unavailable_logged_on") != today_iso):
+            state["halt_status_unavailable_logged_on"] = today_iso
+            LOG.info(
+                "quotes carry no trading status — halt gate is running "
+                "on crossed/zero-quote proxies only this session",
+            )
+
         rejection = _quote_gate(quote, cfg)
         if rejection is None:
             rejection = _price_chase_gate(quote, signal_price or 0.0, cfg)
         if rejection is None:
-            rejection = _halt_gate(quote.get("symbol_status"), cfg)
+            rejection = _halt_gate(symbol_status, cfg)
+        if rejection is None:
+            rejection = _recent_pause_gate(state, symbol, cfg)
         if rejection is None:
             # Risk gates.
             rejection = _risk_gates(

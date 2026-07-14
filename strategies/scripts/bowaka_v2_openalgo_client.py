@@ -248,12 +248,20 @@ def _normalize_quote(q: dict) -> dict:
             age_s = (pd.Timestamp.now(tz="UTC") - t).total_seconds()
         except Exception:
             pass
+    # Trading status: the promoted /api/v2/quotes payload carries it
+    # in metadata.status (adapter-populated, e.g. Alpaca assets
+    # endpoint); a top-level status wins when present.
+    status = q.get("status")
+    if not status:
+        meta = q.get("metadata")
+        if isinstance(meta, dict):
+            status = meta.get("status")
     return {
         "bid": bid, "ask": ask, "mid": mid,
         "spread_pct": spread_pct,
         "quote_timestamp": str(ts) if ts else None,
         "quote_age_seconds": age_s,
-        "symbol_status": q.get("status"),
+        "symbol_status": status,
     }
 
 

@@ -58,12 +58,30 @@ def _auth() -> AlpacaAuth:
     )
 
 
-def _data_client(auth: AlpacaAuth, payload: dict | None = None) -> httpx.Client:
+@pytest.fixture(autouse=True)
+def _clear_asset_status_cache():
+    """The trading-status lookup is TTL-cached module-wide; isolate
+    tests from one another."""
+    import broker.alpaca.api.quote_api as qa
+    qa._ASSET_STATUS_CACHE.clear()
+    yield
+    qa._ASSET_STATUS_CACHE.clear()
+
+
+def _data_client(
+    auth: AlpacaAuth,
+    payload: dict | None = None,
+    asset_payload: dict | None = None,
+) -> httpx.Client:
     body = payload if payload is not None else SNAPSHOT_PAYLOAD
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.url.path == "/v2/stocks/AAPL/snapshot":
             return httpx.Response(200, json=body)
+        if req.url.path == "/v2/assets/AAPL":
+            if asset_payload is None:
+                return httpx.Response(404, json={"message": "not found"})
+            return httpx.Response(200, json=asset_payload)
         return httpx.Response(404, json={"message": "not found"})
 
     return httpx.Client(
@@ -165,3 +183,66 @@ def test_unknown_venue_raises_unsupported():
             _FakeInstrument("RELIANCE", "NSE"),
             AccountContext(broker_code="alpaca"),
         )
+
+
+# ---- trading status via the assets endpoint --------------------------------
+
+
+def _quote_with_asset(asset_payload):
+    auth = _auth()
+    with _data_client(auth, asset_payload=asset_payload) as c:
+        adapter = AlpacaQuoteAdapter(auth=auth, client=c)
+        return adapter.get_quote(
+            _FakeInstrument("AAPL", "XNAS"),
+            AccountContext(broker_code="alpaca"),
+        )
+
+
+def test_active_tradable_asset_reports_active_status():
+    q = _quote_with_asset({"status": "active", "tradable": True})
+    assert q.metadata["status"] == "active"
+
+
+def test_untradable_asset_reports_halted_status():
+    q = _quote_with_asset({"status": "active", "tradable": False})
+    assert q.metadata["status"] == "halted"
+
+
+def test_inactive_asset_reports_inactive_status():
+    q = _quote_with_asset({"status": "inactive", "tradable": False})
+    assert q.metadata["status"] == "inactive"
+
+
+def test_asset_lookup_failure_reports_none_status():
+    """404 / network failure on the assets endpoint must degrade to
+    status=None (status-unknown), never break the quote itself."""
+    q = _quote_with_asset(None)                  # handler 404s
+    assert q.metadata["status"] is None
+    assert q.bid is not None                     # quote still whole
+
+
+def test_asset_status_is_ttl_cached():
+    auth = _auth()
+    calls = {"assets": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/v2/stocks/AAPL/snapshot":
+            return httpx.Response(200, json=SNAPSHOT_PAYLOAD)
+        if req.url.path == "/v2/assets/AAPL":
+            calls["assets"] += 1
+            return httpx.Response(
+                200, json={"status": "active", "tradable": True})
+        return httpx.Response(404, json={})
+
+    with httpx.Client(
+        base_url=auth.data_base_url,
+        headers=dict(auth.headers),
+        transport=httpx.MockTransport(handler),
+    ) as c:
+        adapter = AlpacaQuoteAdapter(auth=auth, client=c)
+        for _ in range(3):
+            adapter.get_quote(
+                _FakeInstrument("AAPL", "XNAS"),
+                AccountContext(broker_code="alpaca"),
+            )
+    assert calls["assets"] == 1                  # cached after first
