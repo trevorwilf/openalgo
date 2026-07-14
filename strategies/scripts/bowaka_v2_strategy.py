@@ -3170,40 +3170,134 @@ def _parse_hhmm(value, fallback: dt_time) -> dt_time:
         return fallback
 
 
-def _in_time_stop_window(now_et, cfg: dict) -> bool:
-    """True only inside the end-of-session time-stop window: a
-    business day, at/after ``exits.time_stop.exit_time`` (default
-    15:15) and at/before ``session.end`` (default 15:55) ET. Time
+# Venue session-timings cache: {ET date_iso: timings dict | None}.
+# None = the last fetch failed; retried no more often than every
+# _TIMINGS_RETRY_S seconds. Old dates are pruned on each lookup.
+_SESSION_TIMINGS_CACHE: dict[str, dict | None] = {}
+_TIMINGS_LAST_ATTEMPT: dict[str, float] = {}
+_TIMINGS_RETRY_S = 300.0
+
+#: The regular US-equity close the configured absolute times are
+#: anchored to — exit_time / session.end become offsets from this.
+_REGULAR_CLOSE = dt_time(16, 0)
+
+
+def _session_timings_for_today(
+    cfg: dict, *, oa_client, api_key: str, http, now_et,
+) -> dict | None:
+    """Venue session timings for now_et's ET date, cached per date.
+    Fetch failures cache None and are retried no more often than
+    every ``_TIMINGS_RETRY_S`` seconds. Returns None when the client
+    has no ``fetch_calendar_timings`` (legacy surrogates) — callers
+    fall back to the legacy fixed window."""
+    date_iso = now_et.date().isoformat()
+    if date_iso in _SESSION_TIMINGS_CACHE:
+        cached = _SESSION_TIMINGS_CACHE[date_iso]
+        if cached is not None:
+            return cached
+        if (time.monotonic() - _TIMINGS_LAST_ATTEMPT.get(date_iso, 0.0)
+                < _TIMINGS_RETRY_S):
+            return None
+    fetch = getattr(oa_client, "fetch_calendar_timings", None)
+    if not callable(fetch):
+        return None
+    _TIMINGS_LAST_ATTEMPT[date_iso] = time.monotonic()
+    venue = (cfg.get("execution") or {}).get("default_venue_code", "XNAS")
+    try:
+        timings = fetch(http, api_key, venue_code=venue,
+                        date_iso=date_iso)
+    except Exception as e:
+        LOG.warning("session timings fetch raised: %s", e)
+        timings = None
+    _SESSION_TIMINGS_CACHE[date_iso] = (
+        timings if isinstance(timings, dict) else None
+    )
+    for stale in [k for k in _SESSION_TIMINGS_CACHE if k != date_iso]:
+        _SESSION_TIMINGS_CACHE.pop(stale, None)
+        _TIMINGS_LAST_ATTEMPT.pop(stale, None)
+    return _SESSION_TIMINGS_CACHE[date_iso]
+
+
+def _in_time_stop_window(now_et, cfg: dict, timings: dict | None = None,
+                          ) -> bool:
+    """True only inside the end-of-session time-stop window. Time
     stops must fire as in-session market sells — never overnight
     (which would cancel OCO protection while the market is closed and
-    queue a sell for the open)."""
+    queue a sell for the open).
+
+    With venue ``timings`` available the window anchors to the ACTUAL
+    session close: the configured ``exits.time_stop.exit_time``
+    (15:15) and ``session.end`` (15:55) are interpreted as offsets
+    from the regular 16:00 close (⇒ close−45m .. close−5m), so an
+    early close shifts the window (13:00 close ⇒ 12:15–12:55) and a
+    holiday (``is_open`` false) fires nothing. Without timings the
+    legacy weekday + absolute-times window applies as the fail-safe."""
     ts_cfg = (cfg.get("exits") or {}).get("time_stop") or {}
     if not ts_cfg.get("enabled", True):
         return False
+    start_t = _parse_hhmm(ts_cfg.get("exit_time", "15:15"),
+                          dt_time(15, 15))
+    end_t = _parse_hhmm((cfg.get("session") or {}).get("end", "15:55"),
+                        dt_time(15, 55))
+    if isinstance(timings, dict):
+        if not timings.get("is_open", False):
+            return False
+        close_raw = timings.get("session_close")
+        if close_raw:
+            try:
+                close = pd.Timestamp(close_raw)
+                if close.tzinfo is None:
+                    close = close.tz_localize("UTC")
+                now_ts = pd.Timestamp(now_et)
+                if now_ts.tzinfo is None:
+                    now_ts = now_ts.tz_localize("America/New_York")
+                anchor = datetime(2000, 1, 3, _REGULAR_CLOSE.hour,
+                                  _REGULAR_CLOSE.minute)
+                start_off = anchor - datetime(
+                    2000, 1, 3, start_t.hour, start_t.minute,
+                )
+                end_off = anchor - datetime(
+                    2000, 1, 3, end_t.hour, end_t.minute,
+                )
+                return (close - start_off) <= now_ts <= (close - end_off)
+            except Exception:
+                LOG.warning(
+                    "unusable session_close %r — using the legacy "
+                    "fixed window", close_raw,
+                )
+        # is_open true but no usable close → legacy window below.
     if now_et.weekday() >= 5:
         return False
-    start = _parse_hhmm(ts_cfg.get("exit_time", "15:15"),
-                        dt_time(15, 15))
-    end = _parse_hhmm((cfg.get("session") or {}).get("end", "15:55"),
-                      dt_time(15, 55))
-    return start <= now_et.time() <= end
+    return start_t <= now_et.time() <= end_t
 
 
 def run_time_stop_pass_v2(
     state: dict, cfg: dict, *,
     oa_client, api_key: str, http,
-    now_et=None,
+    now_et=None, timings=None,
 ) -> list[str]:
     """Walk filled positions; exit those whose hold has reached
     max_hold_days. Fires only inside the in-session time-stop window
     (see _in_time_stop_window) — kill switches and the protected-
-    position invariant remain 24/7 elsewhere. ``now_et`` is an
-    injectable ET timestamp for tests. Returns the list of symbols
-    time-stopped this pass."""
+    position invariant remain 24/7 elsewhere. ``now_et`` and
+    ``timings`` are injectable for tests; when ``timings`` is None
+    the per-date cache fetches the venue session once per day
+    (holiday + early-close aware), falling back to the legacy fixed
+    window on any failure. Returns the symbols time-stopped this
+    pass."""
     out: list[str] = []
     if now_et is None:
         now_et = pd.Timestamp.now(tz="America/New_York")
-    if not _in_time_stop_window(now_et, cfg):
+    if timings is None:
+        try:
+            timings = _session_timings_for_today(
+                cfg, oa_client=oa_client, api_key=api_key, http=http,
+                now_et=now_et,
+            )
+        except Exception:
+            LOG.exception("session timings lookup raised")
+            timings = None
+    if not _in_time_stop_window(now_et, cfg, timings):
         return out
     max_hold = int((cfg.get("exits") or {}).get("max_hold_days", 3))
     today_et = now_et.date()

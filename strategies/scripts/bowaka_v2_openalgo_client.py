@@ -542,6 +542,37 @@ def cancel_order(
     }
 
 
+def fetch_calendar_timings(
+    http: httpx.Client, api_key: str, *,
+    venue_code: str, date_iso: str,
+) -> dict | None:
+    """GET /api/v2/calendar/timings?venue_code=&date= — venue session
+    window for one date. Returns the timings dict ``{is_open,
+    session_open?, session_close?, timezone}`` or None on ANY failure
+    (network, non-200, unparseable body) — callers fail safe to their
+    legacy behavior."""
+    try:
+        r = http.get(
+            "/api/v2/calendar/timings",
+            headers=_api_headers(api_key),
+            params={"venue_code": venue_code, "date": date_iso},
+        )
+    except httpx.HTTPError as e:
+        LOG.warning("calendar timings fetch failed: %s", e)
+        return None
+    if r.status_code != 200:
+        LOG.warning(
+            "calendar timings fetch %d: %s",
+            r.status_code, (r.text or "")[:200],
+        )
+        return None
+    try:
+        data = r.json().get("data")
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def fetch_positions(http: httpx.Client, api_key: str) -> list[dict]:
     r = http.get("/api/v2/positions", headers=_api_headers(api_key))
     r.raise_for_status()
