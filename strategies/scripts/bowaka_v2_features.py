@@ -469,6 +469,13 @@ def apply_v2_gates(
         features.get("range_expansion_so_far"),
         _to_float(s.get("range_expansion_so_far_max")),
     )
+    # Blow-off guard on the day's run-up so far — a candidate already
+    # up more than current_return_pct_max is late-chase (fix Phase 7:
+    # this key existed in config but was never wired to a gate).
+    gates["max_current_return_gate"] = _le(
+        features.get("current_return_pct"),
+        _to_float(s.get("current_return_pct_max")),
+    )
 
     # Instrument class.
     gates["instrument_gate"] = (

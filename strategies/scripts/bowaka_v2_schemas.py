@@ -161,6 +161,13 @@ CANONICAL_REJECTION_REASONS: frozenset[str] = frozenset({
     # Fix Phase 4 — entries blocked while a submit's outcome is
     # unknown (resolver adjudicating a raised / id-less submit).
     "unresolved_order_outcome",
+    # Fix Phase 7 — reasons emitted by live gates that predated the
+    # canonical set, plus the sizing relabel and the wired
+    # protected-position entry block.
+    "bankroll_floor_halt",
+    "max_lots_per_symbol",
+    "sizing_zero_qty",
+    "protection_violation",
 })
 
 

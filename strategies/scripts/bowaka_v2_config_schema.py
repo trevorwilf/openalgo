@@ -58,7 +58,6 @@ KNOWN_KEYS: dict[str, Any] = {
         "state_path": LEAF,
         "trade_ledger_path": LEAF,
         "daily_summary_path": LEAF,
-        "log_path": LEAF,
         "kill_switch_dir": LEAF,
     },
     "data": {
@@ -74,7 +73,6 @@ KNOWN_KEYS: dict[str, Any] = {
         "require_split_adjustment": LEAF,
         "fail_on_missing_baseline": LEAF,
         "max_bar_age_seconds": LEAF,
-        "max_quote_age_seconds": LEAF,
     },
     "session": {
         "timezone": LEAF,
@@ -124,14 +122,11 @@ KNOWN_KEYS: dict[str, Any] = {
         "bar_source": LEAF,
         "alpaca_chunk_size": LEAF,
         "alpaca_fetch_concurrency": LEAF,
-        "full_universe_refresh_interval_minutes": LEAF,
-        "in_play_refresh_interval_seconds": LEAF,
         "max_candidates_per_scan": LEAF,
         "max_entries_per_scan": LEAF,
         "signal_expiry_seconds": LEAF,
         "same_symbol_entries_per_day": LEAF,
         "symbol_cooldown_minutes": LEAF,
-        "require_prior_daily_baseline": LEAF,
         "require_fresh_intraday_bar": LEAF,
     },
     "signals": {
@@ -217,6 +212,7 @@ KNOWN_KEYS: dict[str, Any] = {
             "daily_loss_pct": LEAF,
             "max_gross_exposure_pct": LEAF,
             "max_total_entries_per_day": LEAF,
+            "max_unrealized_loss_pct": LEAF,
             "adv_tier_caps": ("list_of", _ADV_TIER_SCHEMA),
         },
     },
@@ -255,9 +251,6 @@ KNOWN_KEYS: dict[str, Any] = {
     },
     "logging": {
         "level": LEAF,
-        "file": LEAF,
-        "intraday_tick_interval_seconds": LEAF,
-        "emit_candidate_events": LEAF,
         "emit_entry_decisions": LEAF,
         "emit_rejected_candidates": LEAF,
         "emit_feature_snapshots": LEAF,

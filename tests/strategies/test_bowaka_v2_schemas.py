@@ -162,6 +162,10 @@ def test_canonical_rejection_reasons_complete() -> None:
         "strategy_slice_loss", "max_entries_per_scan",
         # Fix Phase 4 — idempotency guard.
         "unresolved_order_outcome",
+        # Fix Phase 7 — previously-uncanonical live reasons + the
+        # sizing relabel + the wired protected-position block.
+        "bankroll_floor_halt", "max_lots_per_symbol",
+        "sizing_zero_qty", "protection_violation",
     }
     assert set(schemas.CANONICAL_REJECTION_REASONS) == expected
 
