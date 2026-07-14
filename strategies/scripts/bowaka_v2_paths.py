@@ -38,6 +38,7 @@ V2_LOG_PATH                 = _LOGS_ROOT / "bowaka_v2_strategy.log"
 # ---- Observability (v1 parity) ---------------------------------------
 
 REJECTED_CANDIDATES_PATH    = _DATA_ROOT / "rejected_candidates.jsonl"
+FEATURE_SNAPSHOTS_PATH      = _DATA_ROOT / "feature_snapshots.jsonl"
 ORDER_EXEC_QUALITY_PATH     = _DATA_ROOT / "order_execution_quality.jsonl"
 PROTECTION_EVENTS_PATH      = _DATA_ROOT / "protection_events.jsonl"
 SHADOW_RISK_PATH            = _DATA_ROOT / "shadow_risk_controls.jsonl"
@@ -86,6 +87,7 @@ __all__ = [
     "V2_DAILY_SUMMARY_PATH",
     "V2_LOG_PATH",
     "REJECTED_CANDIDATES_PATH",
+    "FEATURE_SNAPSHOTS_PATH",
     "ORDER_EXEC_QUALITY_PATH",
     "PROTECTION_EVENTS_PATH",
     "SHADOW_RISK_PATH",
