@@ -328,6 +328,70 @@ def submit_market_sell(
     return parsed
 
 
+def submit_limit_buy(
+    http: httpx.Client,
+    api_key: str,
+    *,
+    venue_code: str,
+    symbol: str,
+    qty: int,
+    price: float,
+    time_in_force: str = "DAY",
+) -> dict[str, Any]:
+    """POST /api/v2/orders for a LIMIT BUY (marketable-limit entry).
+    Returns the parsed body with ``_http_status`` annotated."""
+    body = {
+        "apikey": api_key,
+        "instrument": {
+            "venue_code": venue_code,
+            "canonical_symbol": symbol,
+        },
+        "side": "BUY",
+        "order_type": "LIMIT",
+        "quantity": str(qty),
+        "quantity_unit": "WHOLE",
+        "price": str(round(float(price), 2)),
+        "time_in_force": time_in_force,
+        "session": "REGULAR",
+    }
+    r = http.post("/api/v2/orders", json=body, headers=_api_headers(api_key))
+    parsed = r.json() if r.content else {}
+    parsed["_http_status"] = r.status_code
+    return parsed
+
+
+def submit_limit_sell(
+    http: httpx.Client,
+    api_key: str,
+    *,
+    venue_code: str,
+    symbol: str,
+    qty: int,
+    price: float,
+    time_in_force: str = "DAY",
+) -> dict[str, Any]:
+    """POST /api/v2/orders for a LIMIT SELL (marketable-limit exit).
+    Returns the parsed body with ``_http_status`` annotated."""
+    body = {
+        "apikey": api_key,
+        "instrument": {
+            "venue_code": venue_code,
+            "canonical_symbol": symbol,
+        },
+        "side": "SELL",
+        "order_type": "LIMIT",
+        "quantity": str(qty),
+        "quantity_unit": "WHOLE",
+        "price": str(round(float(price), 2)),
+        "time_in_force": time_in_force,
+        "session": "REGULAR",
+    }
+    r = http.post("/api/v2/orders", json=body, headers=_api_headers(api_key))
+    parsed = r.json() if r.content else {}
+    parsed["_http_status"] = r.status_code
+    return parsed
+
+
 def submit_stop_sell(
     http: httpx.Client,
     api_key: str,

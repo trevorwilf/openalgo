@@ -888,6 +888,23 @@ def _migrate_open_positions(open_positions: dict) -> dict:
 # ---- consumer entry point ----
 
 
+def _supplier_accepts_quote(supplier) -> bool:
+    """True when a submit_supplier accepts a third (quote) parameter.
+    Determined once via signature inspection so a TypeError raised
+    INSIDE the supplier is never mistaken for a 2-arg signature."""
+    import inspect
+    try:
+        params = inspect.signature(supplier).parameters
+    except (TypeError, ValueError):
+        return False
+    positional = [
+        p for p in params.values()
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+    ]
+    has_var = any(p.kind == p.VAR_POSITIONAL for p in params.values())
+    return has_var or len(positional) >= 3
+
+
 def consume_candidate_events(
     state: dict,
     cfg: dict,
@@ -1185,10 +1202,16 @@ def consume_candidate_events(
             scan_accepts[scan_key] = scan_accepts.get(scan_key, 0) + 1
             continue
 
-        # Submit order (injection point).
+        # Submit order (injection point). Suppliers that accept a
+        # third parameter receive the live quote so marketable-limit
+        # entries can price off the ask; 2-arg test suppliers keep
+        # their legacy signature.
         parent_order_id = ""
         try:
-            submit_resp = submit_supplier(symbol, qty)
+            if _supplier_accepts_quote(submit_supplier):
+                submit_resp = submit_supplier(symbol, qty, quote)
+            else:
+                submit_resp = submit_supplier(symbol, qty)
         except Exception as e:
             LOG.warning("submit_supplier raised for %s: %s", symbol, e)
             summary["rejected"] += 1
@@ -1232,6 +1255,10 @@ def consume_candidate_events(
             recorded_exposure=target_notional,
             equity_at_entry=risk_snapshot.get("bankroll"),
             entry_features=ev.get("features"),
+            prior_daily_baselines=ev.get("prior_daily_baselines"),
+            parent_order_style=(cfg.get("execution") or {}).get(
+                "parent_order_style", "market",
+            ),
             stop_pct=float(exits_cfg.get("stop_pct", 0.08)),
             target_pct=float(exits_cfg.get("target_pct", 0.15)),
             max_hold_days=int(exits_cfg.get("max_hold_days", 3)),
@@ -1339,6 +1366,8 @@ def record_pending_position(
     max_hold_days: int,
     candidate_event_id: str | None,
     recorded_exposure: float | None = None,
+    prior_daily_baselines: dict | None = None,
+    parent_order_style: str = "market",
 ) -> dict:
     """Write a pending-fill position dict into state['open_positions'].
     Returns the position dict. Called immediately after a successful
@@ -1346,7 +1375,10 @@ def record_pending_position(
     the candidate. ``recorded_exposure`` is the notional this entry
     added to ``gross_exposure_dollars`` — the janitor and closure paths
     subtract exactly this amount so the exposure ledger stays symmetric.
+    ``prior_daily_baselines`` is stored so the signal-fade pass can
+    rebuild the forming-session score intraday.
     """
+    now_iso = _iso(_now_utc())
     pos = {
         "symbol": symbol,
         "qty": qty,
@@ -1357,11 +1389,14 @@ def record_pending_position(
         "status": "pending_fill",
         "recorded_exposure": recorded_exposure,
         "entry_price": None,
-        "entry_timestamp": _iso(_now_utc()),
+        "entry_timestamp": now_iso,
+        "parent_submitted_at": now_iso,
+        "parent_order_style": parent_order_style,
         "candidate_close": candidate_close,
         "signal_strength": signal_strength,
         "equity_at_entry": equity_at_entry,
         "entry_features": entry_features or {},
+        "prior_daily_baselines": prior_daily_baselines or {},
         "stop_pct": stop_pct,
         "target_pct": target_pct,
         "max_hold_days": max_hold_days,
@@ -1688,10 +1723,16 @@ def expire_stale_pending_fills(
     fill echo, cancel the parent order, drop the lot, and restore the
     exposure it reserved. Runs each loop tick after ``poll_fills_v2``,
     so a fill echo that arrives first wins — the janitor only acts on
-    lots still ``pending_fill`` at check time. Returns the symbols
-    expired this pass."""
-    timeout_s = float((cfg.get("execution") or {}).get(
+    lots still ``pending_fill`` at check time. Marketable-limit
+    parents use the (much shorter)
+    ``execution.marketable_limit_timeout_seconds`` instead. Returns
+    the symbols expired this pass."""
+    exec_cfg = cfg.get("execution") or {}
+    default_timeout_s = float(exec_cfg.get(
         "pending_fill_timeout_seconds", 900,
+    ))
+    ml_timeout_s = float(exec_cfg.get(
+        "marketable_limit_timeout_seconds", 30,
     ))
     now = now_utc or _now_utc()
     out: list[str] = []
@@ -1699,6 +1740,11 @@ def expire_stale_pending_fills(
     for pos_id, pos in list(open_positions.items()):
         if pos.get("status") != "pending_fill":
             continue
+        timeout_s = (
+            ml_timeout_s
+            if pos.get("parent_order_style") == "marketable_limit"
+            else default_timeout_s
+        )
         entry_iso = pos.get("entry_timestamp")
         try:
             ts = pd.Timestamp(entry_iso)
@@ -2099,10 +2145,15 @@ def trigger_exit_v2(
     oa_client, api_key: str, http,
     reason: str = "time_stop",
     time_in_force: str = "DAY",
+    order_style: str = "market",
+    limit_price: float | None = None,
 ) -> bool:
-    """Cancel any OCO children and submit a SELL MARKET exit.
-    Returns True iff the broker accepted the market-sell. Idempotent:
-    no-op when status != 'filled'."""
+    """Cancel any OCO children and submit a SELL exit. Default style
+    is a MARKET sell; ``order_style="marketable_limit"`` with a
+    positive ``limit_price`` submits a LIMIT sell at that price
+    (signal-fade exits), falling back to market when no usable price
+    was supplied. Returns True iff the broker accepted the exit.
+    Idempotent: no-op when status != 'filled'."""
     if pos.get("status") != "filled":
         LOG.info(
             "exit for %s already in flight (status=%s reason=%s) — skipping",
@@ -2147,14 +2198,25 @@ def trigger_exit_v2(
     venue = pos.get("venue_code") or (cfg.get("execution") or {}).get(
         "default_venue_code", "XNAS",
     )
+    use_limit = (
+        order_style == "marketable_limit"
+        and limit_price is not None and float(limit_price) > 0
+    )
     try:
-        resp = oa_client.submit_market_sell(
-            http, api_key, venue_code=venue, symbol=symbol,
-            qty=int(pos["qty"]), time_in_force=time_in_force,
-        )
+        if use_limit:
+            resp = oa_client.submit_limit_sell(
+                http, api_key, venue_code=venue, symbol=symbol,
+                qty=int(pos["qty"]), price=float(limit_price),
+                time_in_force=time_in_force,
+            )
+        else:
+            resp = oa_client.submit_market_sell(
+                http, api_key, venue_code=venue, symbol=symbol,
+                qty=int(pos["qty"]), time_in_force=time_in_force,
+            )
     except Exception as e:
         LOG.exception(
-            "market-sell submission failed for %s: %s", symbol, e,
+            "exit submission failed for %s: %s", symbol, e,
         )
         pos["status"] = "filled"
         pos.pop("exit_reason_pending", None)
@@ -2259,6 +2321,281 @@ def run_time_stop_pass_v2(
             if ok:
                 out.append(symbol)
     return out
+
+
+def _fade_severity(fade_magnitude: float, thresholds: dict) -> str:
+    """Highest severity whose threshold <= fade_magnitude, else
+    'none'. Severities rank by their threshold value (soft < hard <
+    critical in the shipped config)."""
+    best_name = "none"
+    best_thr = None
+    for name, thr in (thresholds or {}).items():
+        try:
+            thr_f = float(thr)
+        except (TypeError, ValueError):
+            continue
+        if fade_magnitude >= thr_f and (best_thr is None
+                                        or thr_f >= best_thr):
+            best_name, best_thr = str(name), thr_f
+    return best_name
+
+
+def _et_session_datetime(now_et, t: dt_time):
+    """Build an ET tz-aware timestamp for today's session at time t."""
+    d = now_et.date()
+    return pd.Timestamp(
+        year=d.year, month=d.month, day=d.day,
+        hour=t.hour, minute=t.minute, tz="America/New_York",
+    )
+
+
+def _signal_fade_eval(
+    state: dict, cfg: dict, sf: dict, *,
+    active: bool, now_et, phase: str,
+    oa_client, api_key: str, http,
+) -> list[str]:
+    """Score every filled lot's current forming-session signal against
+    its entry score. Telemetry rows always; exits only when ``active``
+    and the severity is in ``exit_on``."""
+    exited: list[str] = []
+    score_cfg = cfg.get("score") or {}
+    thresholds = sf.get("score_thresholds") or {}
+    exit_on = set(sf.get("exit_on") or [])
+    fallback_share = float(
+        ((cfg.get("historical_features") or {}).get("volume_curve")
+         or {}).get("fallback_opening_15m_share", 0.08),
+    )
+    start_et = _et_session_datetime(now_et, dt_time(9, 45))
+    end_ts = pd.Timestamp(now_et)
+    if end_ts.tzinfo is None:
+        end_ts = end_ts.tz_localize("America/New_York")
+    for pos_id, pos in dict(state.get("open_positions") or {}).items():
+        if pos.get("status") != "filled":
+            continue
+        symbol = pos.get("symbol", "")
+        try:
+            entry_score = float(pos.get("signal_strength"))
+        except (TypeError, ValueError):
+            entry_score = 0.0
+        if entry_score <= 0:
+            LOG.info(
+                "signal fade: %s has no usable entry score — skipped",
+                symbol,
+            )
+            continue
+        baselines = pos.get("prior_daily_baselines")
+        if not isinstance(baselines, dict) or not baselines:
+            LOG.info(
+                "signal fade: %s lot predates baseline capture — "
+                "skipped", symbol,
+            )
+            continue
+        venue = pos.get("venue_code") or (cfg.get("execution") or {}).get(
+            "default_venue_code", "XNAS",
+        )
+        try:
+            bars = oa_client.fetch_bars(
+                http, api_key, venue_code=venue, symbol=symbol,
+                interval="1m", start=start_et, end=end_ts,
+            )
+        except Exception as e:
+            LOG.warning(
+                "signal fade: bars fetch failed for %s: %s", symbol, e,
+            )
+            continue
+        if bars is None or len(bars) == 0:
+            LOG.warning(
+                "signal fade: no session bars for %s — skipped", symbol,
+            )
+            continue
+        sess = features.aggregate_forming_session_bar(bars)
+        # Fallback volume curve: the strategy process doesn't load the
+        # parquet curve; compute_volume_curve_fraction(None, ...) uses
+        # the flat-rate fallback which is adequate for a relative
+        # entry-vs-now score comparison.
+        vcf = features.compute_volume_curve_fraction(
+            None, end_ts, "fallback",
+            fallback_opening_15m_share=fallback_share,
+        )
+        feats = features.compute_forming_session_features(
+            sess, baselines, vcf,
+        )
+        current_score = features.compute_signal_strength(
+            feats, score_cfg,
+            ema_slope_prior=baselines.get("ema_slope_prior"),
+        )
+        fade = max(0.0, 1.0 - float(current_score) / entry_score)
+        severity = _fade_severity(fade, thresholds)
+        would_exit = severity in exit_on
+        row = {
+            "ts": _iso(_now_utc()), "phase": phase, "symbol": symbol,
+            "link_id": pos.get("link_id"),
+            "entry_score": entry_score,
+            "current_score": float(current_score),
+            "fade_magnitude": fade, "severity": severity,
+            "would_exit": would_exit, "mode": (
+                "active" if active else "telemetry"
+            ),
+        }
+        emit_counterfactual_exit(cfg, row)
+        _emit_ledger_v2(cfg, "signal_fade_telemetry", row)
+        if not (active and would_exit):
+            continue
+        limit_price = None
+        if sf.get("order_style") == "marketable_limit":
+            quote = None
+            try:
+                quote = oa_client.fetch_quote(
+                    http, api_key, venue_code=venue, symbol=symbol,
+                )
+            except Exception:
+                LOG.exception(
+                    "signal fade: quote fetch raised for %s", symbol,
+                )
+            bid = (quote or {}).get("bid")
+            if isinstance(bid, (int, float)) and bid > 0:
+                offset = float(sf.get(
+                    "marketable_limit_offset_pct", 0.005,
+                ))
+                limit_price = round(float(bid) * (1.0 - offset), 2)
+        ok = trigger_exit_v2(
+            symbol, pos, cfg,
+            oa_client=oa_client, api_key=api_key, http=http,
+            reason="signal_fade", time_in_force="DAY",
+            order_style=sf.get("order_style", "market"),
+            limit_price=limit_price,
+        )
+        if ok:
+            exited.append(symbol)
+    return exited
+
+
+def _capture_candidate_minute_bars(
+    state: dict, cfg: dict, *,
+    oa_client, api_key: str, http, now_et,
+) -> list[Path]:
+    """research.candidate_minute_bars — once per session (post-close
+    pass) write each entered symbol's 1m bars over
+    [window.premarket_start, window.session_end] to
+    ``<output_dir>/<session_date>/<symbol>.parquet``. ``on_missing:
+    warn`` logs and continues; never raises."""
+    rc = ((cfg.get("research") or {}).get("candidate_minute_bars")
+          or {})
+    if not rc.get("enabled", False):
+        return []
+    window = rc.get("window") or {}
+    pm_start = _parse_hhmm(window.get("premarket_start", "08:00"),
+                           dt_time(8, 0))
+    sess_end = _parse_hhmm(window.get("session_end", "16:00"),
+                           dt_time(16, 0))
+    columns = list(rc.get("columns") or [])
+    out_base = rc.get("output_dir")
+    if out_base:
+        base_dir = Path(out_base)
+        if not base_dir.is_absolute():
+            base_dir = paths.REPO_ROOT / base_dir
+    else:
+        base_dir = paths.CANDIDATE_MINUTE_BARS_DIR
+    session_date = now_et.date().isoformat()
+    venue = (cfg.get("execution") or {}).get(
+        "default_venue_code", "XNAS",
+    )
+    start_ts = _et_session_datetime(now_et, pm_start)
+    end_ts = _et_session_datetime(now_et, sess_end)
+    written: list[Path] = []
+    for symbol in dict.fromkeys(state.get("entered_today") or []):
+        try:
+            bars = oa_client.fetch_bars(
+                http, api_key, venue_code=venue, symbol=symbol,
+                interval="1m", start=start_ts, end=end_ts,
+            )
+        except Exception as e:
+            LOG.warning(
+                "candidate bars capture: fetch failed for %s: %s",
+                symbol, e,
+            )
+            continue
+        if bars is None or len(bars) == 0:
+            LOG.warning(
+                "candidate bars capture: no bars for %s on %s",
+                symbol, session_date,
+            )
+            continue
+        keep = [c for c in columns if c in bars.columns]
+        frame = bars[keep] if keep else bars
+        out_path = base_dir / session_date / f"{symbol}.parquet"
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            frame.to_parquet(out_path)
+        except Exception:
+            LOG.exception(
+                "candidate bars capture: write failed for %s", symbol,
+            )
+            continue
+        written.append(out_path)
+    if written:
+        LOG.info(
+            "candidate minute bars captured for %d symbol(s) -> %s",
+            len(written), base_dir / session_date,
+        )
+    return written
+
+
+def run_signal_fade_pass_v2(
+    state: dict, cfg: dict, *,
+    oa_client, api_key: str, http,
+    now_et=None,
+) -> list[str]:
+    """exits.signal_fade — telemetry-first fade evaluation.
+
+    Two once-per-session passes on business days:
+    - at/after ``eval_time`` (15:45): score each filled lot; exits
+      fire ONLY when ``signal_fade.active`` is true (default false —
+      ``initial_mode: telemetry_then_active_after_validation``).
+    - at/after ``telemetry_time`` (16:05): post-close telemetry-only
+      snapshot for research, plus the candidate-minute-bars capture.
+
+    Returns symbols exited by the eval pass (always [] in telemetry
+    mode)."""
+    sf = (cfg.get("exits") or {}).get("signal_fade") or {}
+    if not sf.get("enabled", False):
+        return []
+    if now_et is None:
+        now_et = pd.Timestamp.now(tz="America/New_York")
+    if now_et.weekday() >= 5:
+        return []
+    session_date = now_et.date().isoformat()
+    exited: list[str] = []
+    eval_time = _parse_hhmm(sf.get("eval_time", "15:45"),
+                            dt_time(15, 45))
+    telemetry_time = _parse_hhmm(sf.get("telemetry_time", "16:05"),
+                                 dt_time(16, 5))
+    if (now_et.time() >= eval_time
+            and state.get("signal_fade_evaluated_on") != session_date):
+        state["signal_fade_evaluated_on"] = session_date
+        exited = _signal_fade_eval(
+            state, cfg, sf,
+            active=bool(sf.get("active", False)),
+            now_et=now_et, phase="eval",
+            oa_client=oa_client, api_key=api_key, http=http,
+        )
+    if (now_et.time() >= telemetry_time
+            and state.get("signal_fade_telemetry_on") != session_date):
+        state["signal_fade_telemetry_on"] = session_date
+        _signal_fade_eval(
+            state, cfg, sf, active=False, now_et=now_et,
+            phase="post_close",
+            oa_client=oa_client, api_key=api_key, http=http,
+        )
+        try:
+            _capture_candidate_minute_bars(
+                state, cfg,
+                oa_client=oa_client, api_key=api_key, http=http,
+                now_et=now_et,
+            )
+        except Exception:
+            LOG.exception("candidate minute bars capture raised")
+    return exited
 
 
 def execute_kill_l2_v2(
@@ -2641,7 +2978,23 @@ def main(argv: list[str] | None = None) -> int:
                 venue_code=_venue_for(symbol), symbol=symbol,
             )
 
-        def submit_supplier(symbol: str, qty: int):  # noqa: F811
+        def submit_supplier(symbol: str, qty: int, quote=None):  # noqa: F811
+            exec_cfg = cfg.get("execution") or {}
+            style = exec_cfg.get("parent_order_style", "market")
+            ask = (quote or {}).get("ask")
+            if (style == "marketable_limit"
+                    and isinstance(ask, (int, float)) and ask > 0):
+                slippage = float(exec_cfg.get(
+                    "marketable_limit_slippage_pct", 0.005,
+                ))
+                return oa.submit_limit_buy(
+                    live_client, api_key,
+                    venue_code=_venue_for(symbol), symbol=symbol,
+                    qty=qty,
+                    price=round(float(ask) * (1.0 + slippage), 2),
+                    time_in_force="DAY",
+                )
+            # Default (and marketable-limit-without-a-quote fallback).
             return oa.submit_market_buy(
                 live_client, api_key,
                 venue_code=_venue_for(symbol), symbol=symbol,
@@ -2786,6 +3139,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
             except Exception:
                 LOG.exception("run_time_stop_pass_v2 raised")
+            try:
+                run_signal_fade_pass_v2(
+                    state, cfg,
+                    oa_client=oa_module, api_key=api_key, http=live_client,
+                )
+            except Exception:
+                LOG.exception("run_signal_fade_pass_v2 raised")
 
         try:
             _write_state_atomic(state, state_path)
