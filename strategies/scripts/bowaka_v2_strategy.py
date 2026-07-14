@@ -2931,6 +2931,10 @@ def main(argv: list[str] | None = None) -> int:
                        .get("level", "INFO").upper(), logging.INFO),
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    # httpx logs one INFO line per request — the 5s poll loop turns
+    # that into tens of MB/day of noise in the err log.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     try:
         import bowaka_v2_config_schema as config_schema
         config_schema.validate_config(cfg)
