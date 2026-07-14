@@ -651,6 +651,94 @@ def _write_state_atomic(state: dict, path: Path) -> None:
     os.replace(tmp, path)
 
 
+def load_state_with_recovery(state_path: Path) -> tuple[dict, bool]:
+    """Load state.json with recovery fallbacks: the primary file, then
+    the atomic-write ``.tmp`` sibling, then the newest daily
+    ``.bak_YYYYMMDD`` backup. Returns ``(state, parse_failed)`` where
+    ``parse_failed`` is True when the primary existed but NO source
+    could be parsed — the caller must then refuse to trade blind if
+    the broker reports open positions."""
+    if not state_path.exists():
+        return {}, False
+    candidates: list[tuple[str, Path]] = [("state.json", state_path)]
+    tmp = state_path.with_suffix(state_path.suffix + ".tmp")
+    if tmp.exists():
+        candidates.append(("state.json.tmp", tmp))
+    baks = sorted(
+        state_path.parent.glob(state_path.name + ".bak_*"),
+        reverse=True,
+    )
+    candidates.extend((b.name, b) for b in baks)
+    for label, p in candidates:
+        try:
+            state = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as e:
+            LOG.error("state source %s unreadable: %s", label, e)
+            continue
+        if not isinstance(state, dict):
+            LOG.error("state source %s is not a dict — skipping", label)
+            continue
+        if label != "state.json":
+            LOG.warning(
+                "state.json corrupt — recovered state from %s", label,
+            )
+        return state, False
+    LOG.error(
+        "state.json corrupt and no usable .tmp/.bak fallback — "
+        "starting with empty state (reconciliation will refuse to "
+        "trade if the broker holds positions)",
+    )
+    return {}, True
+
+
+def _recompute_gross_exposure(state: dict) -> float:
+    """Sum of open-lot exposure: each lot's recorded_exposure, falling
+    back to qty x (entry_price or candidate_close). Used on session
+    rollover and startup so gross_exposure_dollars reflects the lots
+    actually held instead of being zeroed under live positions."""
+    total = 0.0
+    for pos in (state.get("open_positions") or {}).values():
+        exp = pos.get("recorded_exposure")
+        if (isinstance(exp, (int, float)) and not isinstance(exp, bool)
+                and exp > 0):
+            total += float(exp)
+            continue
+        qty = pos.get("qty") or 0
+        price = pos.get("entry_price") or pos.get("candidate_close") or 0.0
+        try:
+            total += float(qty) * float(price)
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
+def backup_state_daily(
+    state: dict, state_path: Path, *, now_et=None, keep: int = 5,
+) -> Path | None:
+    """Once per ET session date, write ``state.json.bak_<YYYYMMDD>``
+    (atomic) and prune to the ``keep`` newest backups. Returns the
+    backup path when one was written this call, else None."""
+    if now_et is None:
+        now_et = pd.Timestamp.now(tz="America/New_York")
+    stamp = now_et.date().isoformat().replace("-", "")
+    bak = state_path.with_name(state_path.name + f".bak_{stamp}")
+    if bak.exists():
+        return None
+    try:
+        _write_state_atomic(state, bak)
+    except Exception:
+        LOG.exception("daily state backup failed")
+        return None
+    baks = sorted(state_path.parent.glob(state_path.name + ".bak_*"))
+    for old in baks[:-keep] if len(baks) > keep else []:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    LOG.info("daily state backup written: %s", bak.name)
+    return bak
+
+
 def size_position(
     ev: dict, cfg: dict, *, current_price: float,
     state: dict | None = None,
@@ -781,7 +869,10 @@ def consume_candidate_events(
         state["entered_today"] = []
         state["daily_entries_count"] = 0
         state["daily_realized_pnl_strategy"] = 0.0
-        state["gross_exposure_dollars"] = 0.0
+        # Gross exposure is NOT a per-day counter — lots held overnight
+        # keep their exposure. Recompute from the open lots instead of
+        # zeroing (which under-counted risk gates all next session).
+        state["gross_exposure_dollars"] = _recompute_gross_exposure(state)
 
     # Normalize open_positions to the link_id-keyed multi-lot shape
     # (idempotent — converts legacy symbol-keyed state on first load).
@@ -1328,6 +1419,33 @@ def submit_pending_oco_children_v2(
     return out
 
 
+def _true_up_recorded_exposure(state: dict, pos: dict) -> None:
+    """On parent fill, replace the lot's estimated recorded_exposure
+    (signal-price notional) with the actual fill notional, adjusting
+    gross_exposure_dollars by the delta so entries and closures stay
+    symmetric."""
+    try:
+        entry_price = float(pos.get("entry_price") or 0.0)
+        qty = float(pos.get("qty") or 0)
+    except (TypeError, ValueError):
+        return
+    if entry_price <= 0 or qty <= 0:
+        return
+    new_exposure = entry_price * qty
+    old = pos.get("recorded_exposure")
+    old_f = (
+        float(old)
+        if isinstance(old, (int, float)) and not isinstance(old, bool)
+        else 0.0
+    )
+    state["gross_exposure_dollars"] = max(
+        0.0,
+        float(state.get("gross_exposure_dollars", 0.0))
+        + new_exposure - old_f,
+    )
+    pos["recorded_exposure"] = new_exposure
+
+
 def poll_fills_v2(
     state: dict, cfg: dict, *,
     oa_client, api_key: str, http,
@@ -1385,6 +1503,7 @@ def poll_fills_v2(
                     pos["qty"] = filled_qty
                 pos["parent_fill_processed"] = True
                 pos["parent_fill_processed_at"] = _iso(_now_utc())
+                _true_up_recorded_exposure(state, pos)
                 ep = pos.get("entry_price")
                 if ep is not None and pos.get("peak_since_entry") is None:
                     pos["peak_since_entry"] = float(ep)
@@ -1406,6 +1525,7 @@ def poll_fills_v2(
                     pos["qty"] = filled_qty
                     pos["parent_fill_processed"] = True
                     pos["parent_fill_processed_at"] = _iso(_now_utc())
+                    _true_up_recorded_exposure(state, pos)
                     events.append(ev)
                 else:
                     LOG.info(
@@ -1501,6 +1621,126 @@ def expire_stale_pending_fills(
     return out
 
 
+def _broker_position_rows(rows: list[dict]) -> dict[str, float]:
+    """Normalize /api/v2/positions rows into {symbol: qty}, dropping
+    flat rows. Field names parsed defensively across payload shapes."""
+    out: dict[str, float] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        sym = (
+            row.get("symbol")
+            or row.get("canonical_symbol")
+            or (row.get("instrument") or {}).get("canonical_symbol")
+            or ""
+        )
+        if not sym:
+            continue
+        qty_raw = row.get("qty")
+        if qty_raw is None:
+            qty_raw = row.get("quantity")
+        if qty_raw is None:
+            qty_raw = row.get("net_quantity")
+        try:
+            qty = float(qty_raw)
+        except (TypeError, ValueError):
+            continue
+        if qty != 0:
+            out[str(sym)] = out.get(str(sym), 0.0) + qty
+    return out
+
+
+def reconcile_with_broker(
+    state: dict, cfg: dict, *,
+    oa_client, api_key: str, http,
+    state_parse_failed: bool = False,
+) -> int | None:
+    """Startup broker-truth reconciliation. Compares broker positions
+    against state['open_positions'].
+
+    - Broker position with no state lot (orphan): ERROR + protection
+      event ``orphan_position_detected``; when
+      ``reconcile.halt_on_orphans`` (default true) return exit code 7
+      so the process refuses to trade blind.
+    - State lot with no broker position: mark
+      ``pos['broker_missing']`` and WARN (likely closed while down;
+      the order echo on the next poll resolves it — never auto-drop).
+    - When the state file failed to parse entirely AND the broker
+      holds positions: always return 7 regardless of the flag.
+
+    Returns an exit code to abort with, or None to continue.
+    """
+    try:
+        broker_rows = oa_client.fetch_positions(http, api_key)
+    except Exception as e:
+        LOG.warning(
+            "broker reconciliation skipped: positions fetch failed (%s)",
+            e,
+        )
+        return None
+    try:
+        order_count = len(oa_client.fetch_all_orders(http, api_key))
+    except Exception:
+        order_count = None
+    broker_pos = _broker_position_rows(broker_rows)
+    state_symbols: dict[str, list[dict]] = {}
+    for pos in (state.get("open_positions") or {}).values():
+        state_symbols.setdefault(pos.get("symbol", ""), []).append(pos)
+    LOG.info(
+        "broker reconciliation: broker holds %d symbol(s), state holds "
+        "%d lot(s)%s", len(broker_pos),
+        len(state.get("open_positions") or {}),
+        f", {order_count} order rows" if order_count is not None else "",
+    )
+
+    if state_parse_failed and broker_pos:
+        LOG.error(
+            "state.json was unrecoverable and the broker reports %d open "
+            "position(s) (%s) — refusing to trade blind (exit 7)",
+            len(broker_pos), sorted(broker_pos),
+        )
+        return 7
+
+    orphans = [s for s in broker_pos if s not in state_symbols]
+    for sym in orphans:
+        LOG.error(
+            "orphan broker position: %s qty=%s has no state lot",
+            sym, broker_pos[sym],
+        )
+        emit_protection_state(cfg, {
+            "ts": _iso(_now_utc()), "symbol": sym,
+            "event": "orphan_position_detected",
+            "broker_qty": broker_pos[sym],
+        })
+    for sym, lots in state_symbols.items():
+        if sym and sym not in broker_pos:
+            for pos in lots:
+                if pos.get("status") in {"pending_fill", "submitted",
+                                          "pending_entry"}:
+                    continue  # not expected at the broker yet
+                pos["broker_missing"] = True
+                LOG.warning(
+                    "state lot %s (%s) not present at broker — marked "
+                    "broker_missing; awaiting order echo",
+                    pos.get("link_id"), sym,
+                )
+    if orphans:
+        halt = bool((cfg.get("reconcile") or {}).get(
+            "halt_on_orphans", True,
+        ))
+        if halt:
+            LOG.error(
+                "reconcile.halt_on_orphans=true and %d orphan(s) found — "
+                "exit 7 (watchdog will NOT restart)", len(orphans),
+            )
+            return 7
+        LOG.warning(
+            "continuing despite %d orphan position(s) "
+            "(reconcile.halt_on_orphans=false)", len(orphans),
+        )
+    return None
+
+
 def _trading_days_since(entry_iso: str, today_et: date) -> int:
     """Coarse trading-days-elapsed using pd.bdate_range (Mon-Fri,
     no holiday calendar). Good enough for max_hold_days policy; v2's
@@ -1591,9 +1831,15 @@ def close_position_v2(
     state["cumulative_realized_pnl_strategy"] = float(
         state.get("cumulative_realized_pnl_strategy", 0.0)
     ) + realized
-    notional = entry_price * qty
+    # Subtract exactly what the entry added (recorded_exposure, trued
+    # up on fill); legacy lots without it fall back to fill notional.
+    exposure = pos.get("recorded_exposure")
+    if (not isinstance(exposure, (int, float))
+            or isinstance(exposure, bool) or exposure <= 0):
+        exposure = entry_price * qty
     state["gross_exposure_dollars"] = max(
-        0.0, float(state.get("gross_exposure_dollars", 0.0)) - notional,
+        0.0,
+        float(state.get("gross_exposure_dollars", 0.0)) - float(exposure),
     )
     state["open_positions"].pop(pos_id, None)
     LOG.info(
@@ -2076,13 +2322,7 @@ def main(argv: list[str] | None = None) -> int:
     persist_config_snapshot(cfg)
 
     state_path = _resolve(cfg, "state_path", paths.V2_STATE_PATH)
-    if state_path.exists():
-        try:
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-        except Exception:
-            state = {}
-    else:
-        state = {}
+    state, state_parse_failed = load_state_with_recovery(state_path)
     state.setdefault("last_consumed_event_offset", 0)
     state.setdefault("entered_today", [])
     state.setdefault("daily_entries_count", 0)
@@ -2099,6 +2339,9 @@ def main(argv: list[str] | None = None) -> int:
     state["open_positions"] = _migrate_open_positions(
         state.get("open_positions") or {}
     )
+    # Recompute gross exposure from the lots actually held (heals a
+    # zeroed or drifted value from an older build).
+    state["gross_exposure_dollars"] = _recompute_gross_exposure(state)
 
     if args.replay_from:
         # Point the consumer at a different candidate-events file.
@@ -2108,6 +2351,14 @@ def main(argv: list[str] | None = None) -> int:
 
     one_shot = args.dry_run or args.once or args.replay_from is not None
     if one_shot:
+        if state_parse_failed:
+            # Never overwrite an unrecoverable state.json with an empty
+            # one from a one-shot invocation — leave it for triage.
+            LOG.error(
+                "state.json unrecoverable — one-shot run aborted "
+                "without writing state (exit 7)",
+            )
+            return 7
         summary = consume_candidate_events(state, cfg)
         LOG.info("v2 consumer tick: %s", summary)
         _write_state_atomic(state, state_path)
@@ -2168,6 +2419,29 @@ def main(argv: list[str] | None = None) -> int:
         import bowaka_v2_openalgo_client as oa_module  # type: ignore
     except Exception:
         oa_module = None
+
+    # Broker-truth reconciliation before the first trade decision.
+    # Exit code 7 = refuse to trade blind (watchdog must NOT restart).
+    if live_client and oa_module is not None:
+        try:
+            rc = reconcile_with_broker(
+                state, cfg,
+                oa_client=oa_module, api_key=api_key, http=live_client,
+                state_parse_failed=state_parse_failed,
+            )
+        except Exception:
+            LOG.exception("broker reconciliation raised (continuing)")
+            rc = None
+        if rc is not None:
+            _write_state_atomic(state, state_path)
+            live_client.close()
+            return rc
+    elif state_parse_failed:
+        LOG.error(
+            "state.json unrecoverable and no live client to verify "
+            "broker positions — refusing to run (exit 7)",
+        )
+        return 7
 
     LOG.info(
         "v2 strategy entering long-running loop "
@@ -2276,6 +2550,10 @@ def main(argv: list[str] | None = None) -> int:
             _write_state_atomic(state, state_path)
         except Exception as e:
             LOG.warning("state write failed: %s", e)
+        try:
+            backup_state_daily(state, state_path)
+        except Exception:
+            LOG.exception("daily state backup raised")
         # Sleep in small chunks so the shutdown flag is honored quickly.
         slept = 0.0
         while slept < interval and not _shutdown_requested:
