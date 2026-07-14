@@ -493,6 +493,32 @@ def _risk_gates(
         if pnl / bankroll <= -float(daily_loss_pct):
             return "kill_switch"
 
+    # Stop-out circuit breakers (v1 parity). daily_stopout_count and
+    # consecutive_stopout_count are maintained by close_position_v2.
+    max_stopouts = risk_cfg.get("max_stopouts_per_day")
+    if max_stopouts is not None:
+        if int(state.get("daily_stopout_count", 0) or 0) >= int(max_stopouts):
+            return "max_stopouts_per_day"
+    max_consecutive = risk_cfg.get("stop_trading_after_consecutive_stopouts")
+    if max_consecutive is not None:
+        if (int(state.get("consecutive_stopout_count", 0) or 0)
+                >= int(max_consecutive)):
+            return "consecutive_stopouts"
+
+    # strategy_slice_loss_pct — v1 archive semantics: block new entries
+    # once the day's realized PnL crosses -X% of the daily slice
+    # (bankroll / max_hold_days). Tighter stop than daily_loss_pct
+    # because the slice basis is smaller.
+    slice_loss_pct = risk_cfg.get("strategy_slice_loss_pct")
+    if slice_loss_pct is not None and bankroll and bankroll > 0:
+        max_hold = max(1, int(
+            (cfg.get("exits") or {}).get("max_hold_days") or 1,
+        ))
+        slice_basis = float(bankroll) / float(max_hold)
+        pnl = float(state.get("daily_realized_pnl_strategy") or 0.0)
+        if slice_basis > 0 and pnl / slice_basis <= -float(slice_loss_pct):
+            return "strategy_slice_loss"
+
     # ADV cap — tiered policy via adv_tier_cap (inlined above).
     # Enforced on the AGGREGATE position in this symbol (existing lots
     # + this candidate) so stacking lots across days cannot blow
@@ -742,9 +768,12 @@ def backup_state_daily(
 def size_position(
     ev: dict, cfg: dict, *, current_price: float,
     state: dict | None = None,
+    stop_pct: float | None = None,
 ) -> tuple[int, float]:
     """Equal-slice sizing per cfg.sizing. Returns (qty,
-    target_notional). Honors min_order_notional. When
+    target_notional). Honors min_order_notional, then the
+    max_per_trade_dollars notional cap, then the target_risk_dollars
+    qty cap (stop_pct x qty x price <= target_risk_dollars). When
     sizing.compounding.enabled the bankroll compounds on cumulative
     realized PnL (clamped to the cap); otherwise it is the fixed base."""
     sizing_cfg = cfg.get("sizing") or {}
@@ -755,33 +784,59 @@ def size_position(
     min_order_notional = float(sizing_cfg.get("min_order_notional", 500))
     if target_notional < min_order_notional:
         target_notional = min_order_notional
+    max_per_trade = sizing_cfg.get("max_per_trade_dollars")
+    if max_per_trade is not None:
+        target_notional = min(target_notional, float(max_per_trade))
     if current_price <= 0:
         return 0, 0.0
     qty = int(target_notional // current_price)
+    target_risk = sizing_cfg.get("target_risk_dollars")
+    if target_risk is not None and stop_pct and float(stop_pct) > 0:
+        risk_per_share = float(stop_pct) * current_price
+        if risk_per_share > 0:
+            qty = min(qty, int(float(target_risk) // risk_per_share))
     return qty, qty * current_price
 
 
 # ---- per-symbol dedupe ----
 
 
-def _symbol_already_entered_today(state: dict, symbol: str) -> bool:
-    entered = set(state.get("entered_today") or [])
-    if symbol in entered:
-        return True
+def _symbol_already_entered_today(
+    state: dict, symbol: str, cfg: dict | None = None,
+) -> bool:
+    """True when the symbol has used up its
+    scanner.same_symbol_entries_per_day allowance (default 1).
+    entered_today records one element per entry, so a count supports
+    N > 1."""
+    limit = max(1, int(((cfg or {}).get("scanner") or {}).get(
+        "same_symbol_entries_per_day", 1,
+    ) or 1))
+    entered = list(state.get("entered_today") or [])
+    return entered.count(symbol) >= limit
+
+
+def _symbol_in_cooldown(state: dict, symbol: str, now=None) -> bool:
+    """True while the symbol's post-stopout cooldown
+    (scanner.symbol_cooldown_minutes, written on stop_hit closures)
+    is still active."""
     cooldowns = state.get("cooldowns") or {}
-    if symbol in cooldowns:
-        until = cooldowns[symbol].get("until")
-        if until:
-            try:
-                u = pd.Timestamp(until)
-                now = pd.Timestamp.now(tz="UTC")
-                if u.tzinfo is None:
-                    u = u.tz_localize("UTC")
-                if now < u:
-                    return True
-            except Exception:
-                pass
-    return False
+    entry = cooldowns.get(symbol)
+    if not entry:
+        return False
+    until = entry.get("until")
+    if not until:
+        return False
+    try:
+        u = pd.Timestamp(until)
+        if u.tzinfo is None:
+            u = u.tz_localize("UTC")
+        n = (pd.Timestamp(now) if now is not None
+             else pd.Timestamp.now(tz="UTC"))
+        if n.tzinfo is None:
+            n = n.tz_localize("UTC")
+        return n < u
+    except Exception:
+        return False
 
 
 def lots_for_symbol(state: dict, symbol: str) -> list[dict]:
@@ -869,6 +924,18 @@ def consume_candidate_events(
         state["entered_today"] = []
         state["daily_entries_count"] = 0
         state["daily_realized_pnl_strategy"] = 0.0
+        state["daily_stopout_count"] = 0
+        # consecutive_stopout_count deliberately NOT reset by rollover —
+        # only a non-stop closure clears the streak (v1 parity).
+        # Purge expired symbol cooldowns; keep any still active.
+        cooldowns = state.get("cooldowns") or {}
+        if cooldowns:
+            state["cooldowns"] = {
+                s: c for s, c in cooldowns.items()
+                if _symbol_in_cooldown({"cooldowns": {s: c}}, s, now)
+            }
+        # Per-scan accept counters are session-scoped.
+        state.pop("scan_accept_counts", None)
         # Gross exposure is NOT a per-day counter — lots held overnight
         # keep their exposure. Recompute from the open lots instead of
         # zeroing (which under-counted risk gates all next session).
@@ -890,6 +957,24 @@ def consume_candidate_events(
         "consumed": 0, "accepted": 0, "rejected": 0,
         "expired": 0, "stale": 0, "dedupe": 0, "invalid": 0,
     }
+
+    # scanner.max_entries_per_scan — accept at most N candidates per
+    # scan batch, lowest candidate_rank first. Counters persist in
+    # state so a scan burst split across two consume ticks still
+    # honors the cap; pruned on session rollover.
+    max_per_scan = (cfg.get("scanner") or {}).get("max_entries_per_scan")
+    scan_accepts: dict[str, int] = state.setdefault(
+        "scan_accept_counts", {},
+    )
+
+    def _rank_key(e: dict):
+        try:
+            rank = float(e.get("candidate_rank"))
+        except (TypeError, ValueError):
+            rank = float("inf")
+        return (str(e.get("scan_timestamp") or ""), rank)
+
+    events = sorted(events, key=_rank_key)
 
     for ev in events:
         summary["consumed"] += 1
@@ -918,12 +1003,23 @@ def consume_candidate_events(
             continue
 
         symbol = ev["symbol"]
-        # Same-symbol dedupe — at most one entry per symbol per day.
-        if _symbol_already_entered_today(state, symbol):
+        # Same-symbol dedupe — scanner.same_symbol_entries_per_day
+        # entries per symbol per day (default 1).
+        if _symbol_already_entered_today(state, symbol, cfg):
             summary["dedupe"] += 1
             rec = build_rejection_record(
                 ev, reason="same_symbol_already_entered_today",
                 decision_ts=now,
+            )
+            emit_entry_decision_v2(cfg, rec)
+            emit_rejected_candidate(cfg, rec)
+            continue
+
+        # Post-stopout cooldown (scanner.symbol_cooldown_minutes).
+        if _symbol_in_cooldown(state, symbol, now):
+            summary["rejected"] += 1
+            rec = build_rejection_record(
+                ev, reason="symbol_cooldown", decision_ts=now,
             )
             emit_entry_decision_v2(cfg, rec)
             emit_rejected_candidate(cfg, rec)
@@ -964,6 +1060,7 @@ def consume_candidate_events(
         )
         qty, target_notional = size_position(
             ev, cfg, current_price=signal_price, state=state,
+            stop_pct=(cfg.get("exits") or {}).get("stop_pct"),
         )
         if qty <= 0:
             summary["rejected"] += 1
@@ -1035,6 +1132,21 @@ def consume_candidate_events(
             emit_rejected_candidate(cfg, rec)
             continue
 
+        # scanner.max_entries_per_scan — checked after all other gates
+        # so rejected candidates don't consume scan slots. Events are
+        # processed lowest candidate_rank first (sorted above).
+        scan_key = str(ev.get("scan_timestamp") or "")
+        if (max_per_scan is not None
+                and scan_accepts.get(scan_key, 0) >= int(max_per_scan)):
+            summary["rejected"] += 1
+            rec = build_rejection_record(
+                ev, reason="max_entries_per_scan", decision_ts=now,
+                risk_snapshot=risk_snapshot, quote=quote,
+            )
+            emit_entry_decision_v2(cfg, rec)
+            emit_rejected_candidate(cfg, rec)
+            continue
+
         # Accepted. Build the entry-decision record + emit shadow risk.
         exits_cfg = cfg.get("exits") or {}
         accept = build_acceptance_record(
@@ -1070,6 +1182,7 @@ def consume_candidate_events(
 
         if submit_supplier is None:
             summary["accepted"] += 1
+            scan_accepts[scan_key] = scan_accepts.get(scan_key, 0) + 1
             continue
 
         # Submit order (injection point).
@@ -1125,10 +1238,21 @@ def consume_candidate_events(
             candidate_event_id=ev.get("event_id"),
         )
         summary["accepted"] += 1
-        entered = list(state.get("entered_today") or [])
-        if symbol not in entered:
-            entered.append(symbol)
-        state["entered_today"] = entered
+        scan_accepts[scan_key] = scan_accepts.get(scan_key, 0) + 1
+        # One element per entry (not a set) so
+        # same_symbol_entries_per_day > 1 can count correctly.
+        state["entered_today"] = list(
+            state.get("entered_today") or []
+        ) + [symbol]
+        if (cfg.get("logging") or {}).get("emit_feature_snapshots", False):
+            _append_jsonl(paths.FEATURE_SNAPSHOTS_PATH, {
+                "ts": _iso(now), "symbol": symbol,
+                "session_date": ev.get("session_date"),
+                "candidate_event_id": ev.get("event_id"),
+                "link_id": link_id,
+                "features": ev.get("features"),
+                "prior_daily_baselines": ev.get("prior_daily_baselines"),
+            })
         state["daily_entries_count"] = int(
             state.get("daily_entries_count", 0)
         ) + 1
@@ -1820,6 +1944,26 @@ def close_position_v2(
     }
     _append_closure_summary(cfg, record)
     _emit_ledger_v2(cfg, "closure", record)
+    # Stop-out circuit-breaker counters (v1 parity): any stop_hit
+    # bumps both counters and starts the post-stopout cooldown; any
+    # non-stop closure resets the consecutive streak.
+    if reason == "stop_hit":
+        state["daily_stopout_count"] = int(
+            state.get("daily_stopout_count", 0) or 0,
+        ) + 1
+        state["consecutive_stopout_count"] = int(
+            state.get("consecutive_stopout_count", 0) or 0,
+        ) + 1
+        cooldown_min = (cfg.get("scanner") or {}).get(
+            "symbol_cooldown_minutes",
+        )
+        if cooldown_min:
+            until = _now_utc() + timedelta(minutes=float(cooldown_min))
+            state.setdefault("cooldowns", {})[symbol] = {
+                "until": _iso(until), "reason": "stop_hit",
+            }
+    else:
+        state["consecutive_stopout_count"] = 0
     # Update strategy-tracked PnL + gross exposure.
     state["daily_realized_pnl_strategy"] = float(
         state.get("daily_realized_pnl_strategy", 0.0)
@@ -2217,6 +2361,8 @@ def enforce_protected_position_invariant_v2(
         return []
     max_unprotected = float(pp.get("max_unprotected_seconds", 10))
     flatten = bool(pp.get("flatten_if_unprotected", True))
+    max_attempts = pp.get("max_oco_attach_attempts")
+    fallback_stop = bool(pp.get("fallback_stop_enabled", False))
     out: list[str] = []
     now = _now_utc()
     for pos_id, pos in dict(state.get("open_positions") or {}).items():
@@ -2225,6 +2371,33 @@ def enforce_protected_position_invariant_v2(
             continue
         children = pos.get("child_order_ids") or {}
         if children.get("target") and children.get("stop"):
+            continue
+        # OCO attach retries exhausted: act immediately — don't wait
+        # for max_unprotected_seconds while attach keeps failing.
+        attempts = int(pos.get("oco_attach_attempts", 0) or 0)
+        exhausted = (max_attempts is not None
+                     and attempts >= int(max_attempts))
+        if exhausted and flatten:
+            emit_protection_state(cfg, {
+                "ts": _iso(now), "symbol": symbol,
+                "event": "oco_attach_attempts_exhausted",
+                "attempts": attempts,
+            })
+            ok = trigger_exit_v2(
+                symbol, pos, cfg,
+                oa_client=oa_client, api_key=api_key, http=http,
+                reason="protected_position_flatten",
+                time_in_force="DAY",
+            )
+            if ok:
+                out.append(symbol)
+            continue
+        if (exhausted and not flatten and fallback_stop
+                and not pos.get("fallback_stop_attached")):
+            _attach_fallback_stop(
+                symbol, pos, cfg,
+                oa_client=oa_client, api_key=api_key, http=http,
+            )
             continue
         # Use parent_fill_processed_at if present, else entry_timestamp.
         ts_iso = pos.get("parent_fill_processed_at") or pos.get(
@@ -2260,6 +2433,68 @@ def enforce_protected_position_invariant_v2(
             "symbols": out, "count": len(out),
         })
     return out
+
+
+def _attach_fallback_stop(
+    symbol: str, pos: dict, cfg: dict, *,
+    oa_client, api_key: str, http,
+) -> bool:
+    """Attach a standalone STOP sell at entry x (1 - stop_pct) after
+    the OCO attach exhausted its retries and flattening is disabled
+    (protected_position.fallback_stop_enabled). Records the id as
+    child_order_ids['stop'] so the exit machinery manages it."""
+    entry_price = pos.get("entry_price")
+    qty = int(pos.get("qty") or 0)
+    stop_pct = float(pos.get("stop_pct") or 0.08)
+    if not entry_price or float(entry_price) <= 0 or qty <= 0:
+        return False
+    trigger = round(float(entry_price) * (1.0 - stop_pct), 2)
+    venue = pos.get("venue_code") or (cfg.get("execution") or {}).get(
+        "default_venue_code", "XNAS",
+    )
+    tif = (cfg.get("exits") or {}).get("oco_time_in_force", "GTC")
+    try:
+        resp = oa_client.submit_stop_sell(
+            http, api_key, venue_code=venue, symbol=symbol, qty=qty,
+            trigger_price=trigger, time_in_force=tif,
+        )
+    except Exception:
+        LOG.exception("fallback stop submission raised for %s", symbol)
+        return False
+    status = (resp or {}).get("_http_status") if isinstance(
+        resp, dict,
+    ) else None
+    if status not in (200, 201):
+        LOG.error(
+            "fallback stop rejected for %s (status=%s): %s",
+            symbol, status, resp,
+        )
+        return False
+    data = (resp.get("data") or {}) if isinstance(resp, dict) else {}
+    stop_id = data.get("order_id") or data.get("id") or ""
+    if not stop_id:
+        LOG.error(
+            "fallback stop accepted for %s but no order_id surfaced: %s",
+            symbol, resp,
+        )
+        return False
+    pos.setdefault("child_order_ids", {})["stop"] = stop_id
+    pos["stop_price"] = trigger
+    pos["fallback_stop_attached"] = True
+    _emit_ledger_v2(cfg, "fallback_stop_attached", {
+        "symbol": symbol, "link_id": pos.get("link_id"),
+        "stop_id": stop_id, "trigger_price": trigger,
+    })
+    emit_protection_state(cfg, {
+        "ts": _iso(_now_utc()), "symbol": symbol,
+        "event": "fallback_stop_attached",
+        "stop_id": stop_id, "trigger_price": trigger,
+    })
+    LOG.warning(
+        "fallback STOP attached for %s at %.2f (OCO attach exhausted)",
+        symbol, trigger,
+    )
+    return True
 
 
 # ---------------------------------------------------------------- main
@@ -2312,6 +2547,12 @@ def main(argv: list[str] | None = None) -> int:
                        .get("level", "INFO").upper(), logging.INFO),
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    try:
+        import bowaka_v2_config_schema as config_schema
+        config_schema.validate_config(cfg)
+    except Exception as e:
+        LOG.error("config validation error: %s", e)
+        return 5
     try:
         validate_startup_config(cfg)
     except ConfigError as e:

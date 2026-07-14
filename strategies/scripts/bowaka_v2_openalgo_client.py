@@ -328,6 +328,39 @@ def submit_market_sell(
     return parsed
 
 
+def submit_stop_sell(
+    http: httpx.Client,
+    api_key: str,
+    *,
+    venue_code: str,
+    symbol: str,
+    qty: int,
+    trigger_price: float,
+    time_in_force: str = "GTC",
+) -> dict[str, Any]:
+    """POST /api/v2/orders for a standalone STOP SELL (fallback
+    protection when the OCO attach has exhausted its retries). Returns
+    the parsed body with ``_http_status`` annotated."""
+    body = {
+        "apikey": api_key,
+        "instrument": {
+            "venue_code": venue_code,
+            "canonical_symbol": symbol,
+        },
+        "side": "SELL",
+        "order_type": "STOP",
+        "quantity": str(qty),
+        "quantity_unit": "WHOLE",
+        "trigger_price": str(round(float(trigger_price), 2)),
+        "time_in_force": time_in_force,
+        "session": "REGULAR",
+    }
+    r = http.post("/api/v2/orders", json=body, headers=_api_headers(api_key))
+    parsed = r.json() if r.content else {}
+    parsed["_http_status"] = r.status_code
+    return parsed
+
+
 def submit_oco_bracket(
     http: httpx.Client,
     api_key: str,

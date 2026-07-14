@@ -147,7 +147,8 @@ def test_candidate_schema_rejects_wrong_event_type() -> None:
 
 def test_canonical_rejection_reasons_complete() -> None:
     """Asserts the set equals the handoff §5.5 spec exactly, plus the
-    hardening-phase additions (invalid_signal_price)."""
+    hardening-phase additions (invalid_signal_price and the Phase 4
+    risk-control reasons)."""
     expected = {
         "data_feed_mismatch", "stale_bar", "missing_daily_baseline",
         "instrument_ineligible", "halt_or_pending_review",
@@ -157,6 +158,8 @@ def test_canonical_rejection_reasons_complete() -> None:
         "quote_stale", "price_chase_band", "lost_signal_before_entry",
         "past_last_entry_time", "kill_switch", "broker_reject",
         "invalid_signal_price",
+        "max_stopouts_per_day", "consecutive_stopouts",
+        "strategy_slice_loss", "max_entries_per_scan",
     }
     assert set(schemas.CANONICAL_REJECTION_REASONS) == expected
 

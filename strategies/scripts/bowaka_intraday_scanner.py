@@ -327,6 +327,30 @@ def append_heartbeat(payload: dict, out_path: Path | None = None) -> None:
 # ---------------------------------------------------------------- one scan
 
 
+def _fresh_bar_ok(last_bar_ts, scan_ts, max_age_seconds: float) -> bool:
+    """Fresh-intraday-bar gate (scanner.require_fresh_intraday_bar +
+    data.max_bar_age_seconds). Minute bars are stamped at bar START,
+    so staleness is measured from the bar's END (start + 60s): an
+    actively-printing symbol's newest completed bar is always <= 60s
+    stale and passes, while a symbol that stopped printing fails once
+    the print gap exceeds the configured age. Missing or unparseable
+    timestamps fail closed."""
+    if not last_bar_ts:
+        return False
+    try:
+        ts = pd.Timestamp(last_bar_ts)
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        bar_end = ts + pd.Timedelta(seconds=60)
+        now = pd.Timestamp(scan_ts)
+        if now.tzinfo is None:
+            now = now.tz_localize("UTC")
+        age = (now - bar_end).total_seconds()
+    except Exception:
+        return False
+    return max(0.0, age) <= float(max_age_seconds)
+
+
 def evaluate_one_scan(
     *,
     cfg: dict,
@@ -366,6 +390,12 @@ def evaluate_one_scan(
     entered = set(state.get("entered_symbols_today") or [])
     max_candidates = int(
         scanner_cfg.get("max_candidates_per_scan", 25)
+    )
+    require_fresh = bool(
+        scanner_cfg.get("require_fresh_intraday_bar", False)
+    )
+    max_bar_age_s = float(
+        (cfg.get("data") or {}).get("max_bar_age_seconds", 90)
     )
 
     universe_meta_by_sym = {
@@ -452,6 +482,16 @@ def evaluate_one_scan(
             ema_slope_prior=ema_slope,
             instrument_class=meta.get("instrument_class"),
         )
+        # Fresh-bar gate is scanner-side (bar-age is a data-transport
+        # concern, not a feature) so apply_v2_gates stays pure; the
+        # result merges into gate_results for the event + gate dump.
+        if require_fresh:
+            fresh_ok = _fresh_bar_ok(
+                sess.get("last_bar_timestamp"), scan_ts, max_bar_age_s,
+            )
+            gates = dict(gates or {})
+            gates["fresh_bar_gate"] = fresh_ok
+            ok = bool(ok) and fresh_ok
         if dump_fh is not None:
             failing = sorted(k for k, v in (gates or {}).items() if not v)
             dump_fh.write(json.dumps({
@@ -586,6 +626,12 @@ def main(argv: list[str] | None = None) -> int:
                        .get("level", "INFO").upper(), logging.INFO),
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    try:
+        import bowaka_v2_config_schema as config_schema
+        config_schema.validate_config(cfg)
+    except Exception as e:
+        LOG.error("config validation error: %s", e)
+        return 5
     try:
         validate_startup_config(cfg)
     except ConfigError as e:

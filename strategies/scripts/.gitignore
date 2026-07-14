@@ -45,3 +45,4 @@ __pycache__/
 !bowaka_v2_openalgo_client.py
 !bowaka_v2_alpaca_data.py
 !bowaka_gate_dump_rotate.py
+!bowaka_v2_config_schema.py
