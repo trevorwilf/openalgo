@@ -854,11 +854,25 @@ def consume_candidate_events(
         signal_price = (
             ev.get("forming_session_bar", {}).get("last_price")
         )
+        # A missing/zero signal price must reject outright — never mask
+        # it with a $1.00 sizing fallback (which would size a maximal
+        # qty off a fictitious price).
+        if (not isinstance(signal_price, (int, float))
+                or isinstance(signal_price, bool)
+                or float(signal_price) <= 0):
+            summary["rejected"] += 1
+            rec = build_rejection_record(
+                ev, reason="invalid_signal_price", decision_ts=now,
+            )
+            emit_entry_decision_v2(cfg, rec)
+            emit_rejected_candidate(cfg, rec)
+            continue
+        signal_price = float(signal_price)
         adv = (ev.get("prior_daily_baselines") or {}).get(
             "avg_dollar_volume_20d"
         )
         qty, target_notional = size_position(
-            ev, cfg, current_price=signal_price or 1.0, state=state,
+            ev, cfg, current_price=signal_price, state=state,
         )
         if qty <= 0:
             summary["rejected"] += 1
@@ -868,12 +882,27 @@ def consume_candidate_events(
             emit_rejected_candidate(cfg, rec)
             continue
 
-        # Quote gate.
-        quote = (quote_supplier(symbol) if quote_supplier else None) or {
-            "bid": signal_price, "ask": signal_price,
-            "mid": signal_price, "spread_pct": 0.0,
-            "quote_timestamp": _iso(now), "quote_age_seconds": 0,
-        }
+        # Quote gate. Live mode (quote_supplier wired): a failed fetch
+        # rejects the candidate — never synthesize a perfect quote
+        # around a real order. Offline (quote_supplier is None): a
+        # synthesized quote is acceptable because no order can be
+        # placed without a submit_supplier.
+        if quote_supplier is not None:
+            quote = quote_supplier(symbol)
+            if quote is None:
+                summary["rejected"] += 1
+                rec = build_rejection_record(
+                    ev, reason="quote_stale", decision_ts=now,
+                )
+                emit_entry_decision_v2(cfg, rec)
+                emit_rejected_candidate(cfg, rec)
+                continue
+        else:
+            quote = {
+                "bid": signal_price, "ask": signal_price,
+                "mid": signal_price, "spread_pct": 0.0,
+                "quote_timestamp": _iso(now), "quote_age_seconds": 0,
+            }
         rejection = _quote_gate(quote, cfg)
         if rejection is None:
             rejection = _price_chase_gate(quote, signal_price or 0.0, cfg)
@@ -928,6 +957,12 @@ def consume_candidate_events(
             target_pct=float(exits_cfg.get("target_pct", 0.15)),
             max_hold_days=int(exits_cfg.get("max_hold_days", 3)),
         )
+        if submit_supplier is None:
+            # Offline / --once / --replay-from / creds-missing mode:
+            # decision telemetry only. A phantom position with an
+            # empty parent_order_id can never be matched to a fill,
+            # so no position is recorded and no counters move.
+            accept["execution"] = "skipped_no_supplier"
         emit_entry_decision_v2(cfg, accept)
 
         # Shadow risk telemetry.
@@ -942,35 +977,38 @@ def consume_candidate_events(
                 "candidate_event_id": ev.get("event_id"),
             })
 
+        if submit_supplier is None:
+            summary["accepted"] += 1
+            continue
+
         # Submit order (injection point).
         parent_order_id = ""
-        if submit_supplier is not None:
-            try:
-                submit_resp = submit_supplier(symbol, qty)
-            except Exception as e:
-                LOG.warning("submit_supplier raised for %s: %s", symbol, e)
-                summary["rejected"] += 1
-                continue
-            # Validate broker accepted the order before mutating state.
-            status_ok = True
-            if isinstance(submit_resp, dict):
-                http_status = submit_resp.get("_http_status")
-                if http_status is not None and http_status not in (200, 201):
-                    status_ok = False
-                    LOG.warning(
-                        "submit rejected for %s (status=%s): %s",
-                        symbol, http_status, submit_resp,
-                    )
-                data = submit_resp.get("data") or {}
-                parent_order_id = (
-                    data.get("order_id")
-                    or data.get("id")
-                    or (submit_resp.get("native_response") or {}).get("id")
-                    or ""
+        try:
+            submit_resp = submit_supplier(symbol, qty)
+        except Exception as e:
+            LOG.warning("submit_supplier raised for %s: %s", symbol, e)
+            summary["rejected"] += 1
+            continue
+        # Validate broker accepted the order before mutating state.
+        status_ok = True
+        if isinstance(submit_resp, dict):
+            http_status = submit_resp.get("_http_status")
+            if http_status is not None and http_status not in (200, 201):
+                status_ok = False
+                LOG.warning(
+                    "submit rejected for %s (status=%s): %s",
+                    symbol, http_status, submit_resp,
                 )
-            if not status_ok:
-                summary["rejected"] += 1
-                continue
+            data = submit_resp.get("data") or {}
+            parent_order_id = (
+                data.get("order_id")
+                or data.get("id")
+                or (submit_resp.get("native_response") or {}).get("id")
+                or ""
+            )
+        if not status_ok:
+            summary["rejected"] += 1
+            continue
 
         # Update state — record the pending position so poll_fills can
         # match the parent's eventual FILLED echo back to this trade.
@@ -987,6 +1025,7 @@ def consume_candidate_events(
             candidate_close=signal_price, signal_strength=ev.get(
                 "signal_strength",
             ),
+            recorded_exposure=target_notional,
             equity_at_entry=risk_snapshot.get("bankroll"),
             entry_features=ev.get("features"),
             stop_pct=float(exits_cfg.get("stop_pct", 0.08)),
@@ -1084,11 +1123,15 @@ def record_pending_position(
     target_pct: float,
     max_hold_days: int,
     candidate_event_id: str | None,
+    recorded_exposure: float | None = None,
 ) -> dict:
     """Write a pending-fill position dict into state['open_positions'].
     Returns the position dict. Called immediately after a successful
     parent submit so poll_fills can match the subsequent fill back to
-    the candidate."""
+    the candidate. ``recorded_exposure`` is the notional this entry
+    added to ``gross_exposure_dollars`` — the janitor and closure paths
+    subtract exactly this amount so the exposure ledger stays symmetric.
+    """
     pos = {
         "symbol": symbol,
         "qty": qty,
@@ -1097,6 +1140,7 @@ def record_pending_position(
         "link_id": link_id,
         "child_order_ids": {"target": "", "stop": ""},
         "status": "pending_fill",
+        "recorded_exposure": recorded_exposure,
         "entry_price": None,
         "entry_timestamp": _iso(_now_utc()),
         "candidate_close": candidate_close,
@@ -1363,6 +1407,73 @@ def poll_fills_v2(
                 pos["exit_filled_qty"] = filled_qty
                 events.append(ev)
     return events
+
+
+def expire_stale_pending_fills(
+    state: dict, cfg: dict, *,
+    oa_client, api_key: str, http,
+    now_utc: datetime | None = None,
+) -> list[str]:
+    """Janitor for lots stuck in ``pending_fill``: after
+    ``execution.pending_fill_timeout_seconds`` (default 900) with no
+    fill echo, cancel the parent order, drop the lot, and restore the
+    exposure it reserved. Runs each loop tick after ``poll_fills_v2``,
+    so a fill echo that arrives first wins — the janitor only acts on
+    lots still ``pending_fill`` at check time. Returns the symbols
+    expired this pass."""
+    timeout_s = float((cfg.get("execution") or {}).get(
+        "pending_fill_timeout_seconds", 900,
+    ))
+    now = now_utc or _now_utc()
+    out: list[str] = []
+    open_positions = state.get("open_positions") or {}
+    for pos_id, pos in list(open_positions.items()):
+        if pos.get("status") != "pending_fill":
+            continue
+        entry_iso = pos.get("entry_timestamp")
+        try:
+            ts = pd.Timestamp(entry_iso)
+            if ts.tzinfo is None:
+                ts = ts.tz_localize("UTC")
+            age_s = (pd.Timestamp(now) - ts).total_seconds()
+        except Exception:
+            continue
+        if age_s <= timeout_s:
+            continue
+        symbol = pos.get("symbol", "")
+        parent_id = pos.get("parent_order_id") or ""
+        if parent_id:
+            try:
+                oa_client.cancel_order(http, api_key, parent_id)
+            except Exception:
+                LOG.exception(
+                    "janitor cancel of stale parent %s (%s) failed",
+                    parent_id, symbol,
+                )
+        exposure = pos.get("recorded_exposure")
+        if not isinstance(exposure, (int, float)) or isinstance(
+            exposure, bool,
+        ):
+            exposure = 0.0
+        state["gross_exposure_dollars"] = max(
+            0.0,
+            float(state.get("gross_exposure_dollars", 0.0))
+            - float(exposure),
+        )
+        open_positions.pop(pos_id, None)
+        _emit_ledger_v2(cfg, "pending_fill_expired", {
+            "symbol": symbol, "link_id": pos.get("link_id"),
+            "parent_order_id": parent_id,
+            "age_seconds": age_s, "timeout_seconds": timeout_s,
+            "restored_exposure": float(exposure),
+        })
+        LOG.warning(
+            "pending fill for %s expired after %.0fs (timeout %.0fs) — "
+            "parent %s canceled, lot dropped", symbol, age_s, timeout_s,
+            parent_id or "<none>",
+        )
+        out.append(symbol)
+    return out
 
 
 def _trading_days_since(entry_iso: str, today_et: date) -> int:
@@ -1998,6 +2109,13 @@ def main(argv: list[str] | None = None) -> int:
                     process_fill_events_v2(fills, state, cfg)
             except Exception:
                 LOG.exception("poll_fills_v2 raised")
+            try:
+                expire_stale_pending_fills(
+                    state, cfg,
+                    oa_client=oa_module, api_key=api_key, http=live_client,
+                )
+            except Exception:
+                LOG.exception("expire_stale_pending_fills raised")
             try:
                 submit_pending_oco_children_v2(
                     state, cfg,

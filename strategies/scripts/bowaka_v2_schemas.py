@@ -153,6 +153,7 @@ CANONICAL_REJECTION_REASONS: frozenset[str] = frozenset({
     "past_last_entry_time",
     "kill_switch",
     "broker_reject",
+    "invalid_signal_price",
 })
 
 
