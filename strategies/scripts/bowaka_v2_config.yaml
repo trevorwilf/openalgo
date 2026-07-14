@@ -192,6 +192,10 @@ execution:
   marketable_limit_timeout_seconds: 30
   bracket_pricing_mode: "actual_fill"
   default_venue_code: "XNAS"
+  # Janitor: a lot stuck in pending_fill this long with no fill echo
+  # gets its parent canceled, the lot dropped, and its reserved
+  # exposure restored.
+  pending_fill_timeout_seconds: 900
 
   quote_gate:
     enabled: true
