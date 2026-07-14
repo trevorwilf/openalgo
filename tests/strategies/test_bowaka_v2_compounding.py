@@ -297,8 +297,22 @@ def test_reconcile_seeds_legacy_state_from_ledger(tmp_path):
     assert state["cumulative_realized_pnl_strategy"] == pytest.approx(130.0)
 
 
-def test_reconcile_empty_ledger_zeroes_cumulative(tmp_path):
+def test_reconcile_missing_ledger_keeps_nonzero_cumulative(tmp_path):
+    """Fix Phase 7 (deliberate behavior change): a MISSING ledger with
+    a nonzero in-state cumulative is treated as ledger-lost — the
+    in-state value is KEPT (operator triage) instead of silently
+    zeroing the compounding bankroll."""
     cfg = _ledger_cfg(tmp_path)  # no ledger file
+    state = {"cumulative_realized_pnl_strategy": 500.0}
+    v2._reconcile_cumulative_from_ledger(state, cfg)
+    assert state["cumulative_realized_pnl_strategy"] == 500.0
+
+
+def test_reconcile_empty_existing_ledger_zeroes_cumulative(tmp_path):
+    """An EXISTING ledger with no closure rows is authoritative: the
+    lifetime sum really is 0.0."""
+    cfg = _ledger_cfg(tmp_path)
+    (tmp_path / "daily_summary.jsonl").write_text("", encoding="utf-8")
     state = {"cumulative_realized_pnl_strategy": 500.0}
     v2._reconcile_cumulative_from_ledger(state, cfg)
     assert state["cumulative_realized_pnl_strategy"] == 0.0

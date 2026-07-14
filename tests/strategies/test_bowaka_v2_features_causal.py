@@ -209,6 +209,7 @@ def test_apply_v2_gates_returns_per_gate_results() -> None:
         "range_expansion_gate", "close_location_gate",
         "ema_distance_gate", "ema_slope_gate", "max_gap_gate",
         "max_rvol_gate", "max_range_expansion_gate",
+        "max_current_return_gate",  # fix Phase 7 — wired LIVE
         "instrument_gate",
     }
     assert set(gates.keys()) == expected_keys

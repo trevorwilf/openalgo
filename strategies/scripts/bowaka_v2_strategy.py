@@ -500,6 +500,15 @@ def _risk_gates(
     ):
         return "unresolved_order_outcome"
 
+    # protected_position.block_entries_on_violation (fix Phase 7): no
+    # new entries while any live lot sits unprotected — adding
+    # exposure on top of an unprotected book compounds the risk the
+    # invariant exists to contain.
+    if (bool((cfg.get("protected_position") or {}).get(
+            "block_entries_on_violation"))
+            and state.get("protection_violation_active")):
+        return "protection_violation"
+
     # bankroll floor — halt ALL new entries once compounding equity has
     # fallen to/below floor_fraction*base. Checked FIRST so it dominates
     # even at negative equity, ahead of the bankroll>0 guarded gates
@@ -627,7 +636,67 @@ def _shadow_risk_check(
         pnl = float(state.get("daily_realized_pnl_strategy") or 0.0)
         if pnl / bankroll <= -float(dl_sh):
             blockers.append("shadow_daily_loss")
+    # Shadow ADV tiers (fix Phase 7 — the key existed but was never
+    # evaluated): stricter mirror of the live tiered ADV cap, checked
+    # against the aggregate symbol notional.
+    shadow_tiers = shadow.get("adv_tier_caps")
+    if shadow_tiers and candidate_adv is not None and candidate_adv > 0:
+        try:
+            allowed, cap_dollars = adv_tier_cap(
+                candidate_adv, {"risk": {"adv_tier_caps": shadow_tiers}},
+            )
+            projected_notional = (
+                _symbol_open_notional(state, ev.get("symbol", ""))
+                + target_notional
+            )
+            if not allowed or (
+                cap_dollars and projected_notional > cap_dollars
+            ):
+                blockers.append("shadow_adv_cap")
+        except Exception:
+            pass
+    # MTM shadow (fix Phase 7): would-block when realized + open
+    # unrealized losses together breach the threshold. Reads the
+    # periodic estimate the main loop stores; absent estimate = no
+    # signal (telemetry only, never blocks).
+    mtm = shadow.get("max_unrealized_loss_pct")
+    if mtm is not None and bankroll and bankroll > 0:
+        est = (state.get("unrealized_pnl_estimate") or {}).get("value")
+        if isinstance(est, (int, float)) and not isinstance(est, bool):
+            daily = float(state.get("daily_realized_pnl_strategy") or 0.0)
+            if (daily + min(0.0, float(est))) / bankroll <= -float(mtm):
+                blockers.append("shadow_max_unrealized_loss")
     return blockers
+
+
+def compute_unrealized_pnl(state: dict, quote_supplier) -> float | None:
+    """Mark-to-market estimate over FILLED lots: Σ (mid − entry) × qty.
+    Lots without a usable quote/mid are skipped; None when there is no
+    supplier, no filled lot, or no lot produced a usable mark. Shadow
+    telemetry only — never drives a blocking decision."""
+    if quote_supplier is None:
+        return None
+    total: float | None = None
+    for pos in (state.get("open_positions") or {}).values():
+        if pos.get("status") != "filled":
+            continue
+        entry = pos.get("entry_price")
+        qty = pos.get("qty") or 0
+        if (not isinstance(entry, (int, float))
+                or isinstance(entry, bool) or entry <= 0 or not qty):
+            continue
+        try:
+            quote = quote_supplier(pos.get("symbol", ""))
+        except Exception:
+            quote = None
+        mid = (quote or {}).get("mid")
+        if mid is None and (quote or {}).get("bid") and (quote or {}).get("ask"):
+            mid = (quote["bid"] + quote["ask"]) / 2.0
+        if (not isinstance(mid, (int, float)) or isinstance(mid, bool)
+                or mid <= 0):
+            continue
+        total = (total or 0.0) + (float(mid) - float(entry)) * float(qty)
+    return total
 
 
 # ---- sizing ----
@@ -657,34 +726,39 @@ def _effective_equity(state: dict, cfg: dict) -> float:
     return base + cum
 
 
-def _ledger_realized_sum(cfg: dict) -> float:
+def _ledger_realized_sum(cfg: dict) -> float | None:
     """Authoritative lifetime realized PnL: sum of realized_pnl over
     every closure record in the append-only daily-summary ledger. Used
     to reconcile the in-state cumulative on load so a torn/lost
     state.json, a .bak restore, or the crash window between a closure's
     ledger append and the next state write cannot silently mis-state the
-    compounding bankroll. Returns 0.0 on any read/parse failure."""
+    compounding bankroll. Returns 0.0 when the file is missing or holds
+    no closure rows; None when the file could not be READ (I/O failure)
+    — the caller must then KEEP the in-state value instead of zeroing
+    the compounding bankroll."""
     path = _resolve(cfg, "daily_summary_path", paths.V2_DAILY_SUMMARY_PATH)
-    total = 0.0
     try:
         if not path.exists():
             return 0.0
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except Exception:
-                continue
-            if rec.get("record_type") == "closure":
-                rp = rec.get("realized_pnl")
-                # bool is a subclass of int — exclude it so a corrupted
-                # `realized_pnl: true` can't silently add 1.0.
-                if isinstance(rp, (int, float)) and not isinstance(rp, bool):
-                    total += float(rp)
-    except Exception:
-        return 0.0
+        text = path.read_text(encoding="utf-8")
+    except Exception as e:
+        LOG.error("closure ledger unreadable at %s: %s", path, e)
+        return None
+    total = 0.0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if rec.get("record_type") == "closure":
+            rp = rec.get("realized_pnl")
+            # bool is a subclass of int — exclude it so a corrupted
+            # `realized_pnl: true` can't silently add 1.0.
+            if isinstance(rp, (int, float)) and not isinstance(rp, bool):
+                total += float(rp)
     return total
 
 
@@ -722,8 +796,37 @@ def _reconcile_cumulative_from_ledger(state: dict, cfg: dict) -> None:
     closure ledger (source of truth). OVERWRITE, not add — so a torn or
     stale state.json, a .bak restore, or the crash window between a
     closure append and the next state write all heal to the true sum on
-    load. Legacy state with no field is seeded from the ledger."""
-    state["cumulative_realized_pnl_strategy"] = _ledger_realized_sum(cfg)
+    load. Legacy state with no field is seeded from the ledger.
+
+    Two guarded failure modes KEEP the in-state value instead (fix
+    Phase 7 — a transient read failure must never silently zero the
+    compounding bankroll and mask the floor halt):
+    - the ledger file exists but could not be read (sum None), or
+    - the ledger file is MISSING while the in-state cumulative is
+      nonzero (ledger lost/moved — operator triage)."""
+    in_state = float(
+        state.get("cumulative_realized_pnl_strategy", 0.0) or 0.0,
+    )
+    path = _resolve(cfg, "daily_summary_path", paths.V2_DAILY_SUMMARY_PATH)
+    try:
+        missing = not path.exists()
+    except OSError:
+        missing = False
+    if missing and in_state != 0.0:
+        LOG.error(
+            "closure ledger MISSING at %s while in-state cumulative is "
+            "%.2f — keeping the in-state value (ledger lost? operator "
+            "triage required)", path, in_state,
+        )
+        return
+    total = _ledger_realized_sum(cfg)
+    if total is None:
+        LOG.error(
+            "closure ledger unreadable — keeping in-state cumulative "
+            "%.2f", in_state,
+        )
+        return
+    state["cumulative_realized_pnl_strategy"] = total
 
 
 def _write_state_atomic(state: dict, path: Path) -> None:
@@ -1172,8 +1275,10 @@ def consume_candidate_events(
             stop_pct=(cfg.get("exits") or {}).get("stop_pct"),
         )
         if qty <= 0:
+            # Sizing produced no whole share (price above the slice,
+            # or risk cap collapsed the qty) — NOT an ADV rejection.
             summary["rejected"] += 1
-            rec = build_rejection_record(ev, reason="adv_cap",
+            rec = build_rejection_record(ev, reason="sizing_zero_qty",
                                           decision_ts=now)
             emit_entry_decision_v2(cfg, rec)
             emit_rejected_candidate(cfg, rec)
@@ -3712,6 +3817,7 @@ def enforce_protected_position_invariant_v2(
     max_attempts = pp.get("max_oco_attach_attempts")
     fallback_stop = bool(pp.get("fallback_stop_enabled", False))
     out: list[str] = []
+    violations = 0
     now = _now_utc()
     for pos_id, pos in dict(state.get("open_positions") or {}).items():
         symbol = pos.get("symbol", "")
@@ -3726,6 +3832,7 @@ def enforce_protected_position_invariant_v2(
         exhausted = (max_attempts is not None
                      and attempts >= int(max_attempts))
         if exhausted and flatten:
+            violations += 1
             emit_protection_state(cfg, {
                 "ts": _iso(now), "symbol": symbol,
                 "event": "oco_attach_attempts_exhausted",
@@ -3742,6 +3849,7 @@ def enforce_protected_position_invariant_v2(
             continue
         if (exhausted and not flatten and fallback_stop
                 and not pos.get("fallback_stop_attached")):
+            violations += 1
             _attach_fallback_stop(
                 symbol, pos, cfg,
                 oa_client=oa_client, api_key=api_key, http=http,
@@ -3760,6 +3868,7 @@ def enforce_protected_position_invariant_v2(
             continue
         if age_s < max_unprotected:
             continue
+        violations += 1
         emit_protection_state(cfg, {
             "ts": _iso(now), "symbol": symbol,
             "event": "unprotected_position_detected",
@@ -3776,6 +3885,10 @@ def enforce_protected_position_invariant_v2(
         )
         if ok:
             out.append(symbol)
+    # Entry-gate signal for protected_position.block_entries_on_violation
+    # (fix Phase 7): True while ANY unprotected lot was detected this
+    # pass, False once the book is clean again.
+    state["protection_violation_active"] = violations > 0
     if out:
         _emit_ledger_v2(cfg, "protected_position_flattened", {
             "symbols": out, "count": len(out),
@@ -4076,7 +4189,9 @@ def main(argv: list[str] | None = None) -> int:
         "v2 strategy entering long-running loop "
         "(interval=%ds, kill_switch_dir=%s)", interval, switch_dir,
     )
+    tick_counter = 0
     while not _shutdown_requested:
+        tick_counter += 1
         # L3 hard-kill — drop everything best-effort, persist, exit 99.
         if (switch_dir / "KILL_HARD.flag").exists():
             LOG.error("L3 KILL_HARD flag detected — flattening + exit 99")
@@ -4157,6 +4272,18 @@ def main(argv: list[str] | None = None) -> int:
                     process_fill_events_v2(fills, state, cfg)
             except Exception:
                 LOG.exception("poll_fills_v2 raised")
+            # MTM shadow sampling — every 12th tick (~60s at the 5s
+            # interval) estimate open unrealized PnL for the shadow
+            # max_unrealized_loss telemetry. Never blocks.
+            if tick_counter % 12 == 0 and quote_supplier is not None:
+                try:
+                    est = compute_unrealized_pnl(state, quote_supplier)
+                    if est is not None:
+                        state["unrealized_pnl_estimate"] = {
+                            "value": est, "ts": _iso(_now_utc()),
+                        }
+                except Exception:
+                    LOG.exception("compute_unrealized_pnl raised")
             # Unknown-submit adjudication runs BEFORE the janitor —
             # the resolver owns outcome_unresolved lots.
             try:

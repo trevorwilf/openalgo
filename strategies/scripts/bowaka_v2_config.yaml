@@ -58,7 +58,6 @@ paths:
   state_path: "strategies/scripts/data/bowaka_v2/state.json"
   trade_ledger_path: "strategies/scripts/data/bowaka_v2/trade_ledger.jsonl"
   daily_summary_path: "strategies/scripts/data/bowaka_v2/daily_summary.jsonl"
-  log_path: "logs/bowaka_v2_strategy.log"
   kill_switch_dir: "."
 
 data:
@@ -74,7 +73,6 @@ data:
   require_split_adjustment: true
   fail_on_missing_baseline: true
   max_bar_age_seconds: 90
-  max_quote_age_seconds: 15
 
 session:
   timezone: "America/New_York"
@@ -144,14 +142,11 @@ scanner:
   bar_source: "openalgo"
   alpaca_chunk_size: 200          # symbols per multi-symbol Alpaca request
   alpaca_fetch_concurrency: 4     # concurrent symbol-chunks
-  full_universe_refresh_interval_minutes: 5
-  in_play_refresh_interval_seconds: 60
   max_candidates_per_scan: 25
   max_entries_per_scan: 3
   signal_expiry_seconds: 600
   same_symbol_entries_per_day: 1
   symbol_cooldown_minutes: 390
-  require_prior_daily_baseline: true
   require_fresh_intraday_bar: true
 
 signals:
@@ -249,8 +244,8 @@ risk:
 
   # Multi-lot accumulation. One entry per symbol per day, allowed on
   # consecutive days, capped at this many concurrent lots per symbol.
-  # 2026-06-11: winner #3155 sets this to 4 (was 3, previously kept equal
-  # to exits.max_hold_days; now decoupled — max_hold_days is 10).
+  # Value 3 is the OPERATOR's choice — deliberately tighter than
+  # winner #3155's 4, and decoupled from exits.max_hold_days.
   max_lots_per_symbol: 3
 
   max_stopouts_per_day: 7
@@ -274,6 +269,10 @@ risk:
     daily_loss_pct: 0.01
     max_gross_exposure_pct: 0.40
     max_total_entries_per_day: 4
+    # MTM shadow (fix Phase 7): would-block when
+    # (daily_realized + min(0, unrealized)) / bankroll <= -this.
+    # Telemetry only — never blocks.
+    max_unrealized_loss_pct: 0.04
     adv_tier_caps:
     - max_adv_dollars: 250000
       reject_if_below: true
@@ -324,9 +323,6 @@ protected_position:
 
 logging:
   level: "INFO"
-  file: "logs/bowaka_v2_strategy.log"
-  intraday_tick_interval_seconds: 60
-  emit_candidate_events: true
   emit_entry_decisions: true
   emit_rejected_candidates: true
   emit_feature_snapshots: true

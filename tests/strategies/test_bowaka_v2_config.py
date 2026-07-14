@@ -85,8 +85,11 @@ def test_v2_config_risk_paper_safe_with_shadow_block() -> None:
 def test_v2_config_logging_observability_parity_toggles_on() -> None:
     cfg = _load_cfg()
     L = cfg["logging"]
+    # Fix Phase 7 removed the dead logging.emit_candidate_events key
+    # (nothing ever read it — candidate events are the scanner's
+    # unconditional output stream).
     for k in (
-        "emit_candidate_events", "emit_entry_decisions",
+        "emit_entry_decisions",
         "emit_rejected_candidates", "emit_feature_snapshots",
         "log_order_execution_quality", "log_protection_state",
         "log_shadow_risk_controls", "log_counterfactual_entries",
