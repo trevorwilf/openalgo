@@ -929,6 +929,53 @@ def _supplier_accepts_quote(supplier) -> bool:
     return has_var or len(positional) >= 3
 
 
+def roll_session_if_needed(
+    state: dict, now_utc: datetime, today_iso: str,
+) -> bool:
+    """Session rollover — when the ET date crosses from a recorded
+    prior session to today, reset per-day counters so daily caps
+    don't accumulate across sessions. We never reset
+    last_consumed_event_offset; candidate_events.jsonl is append-
+    only across sessions and stale-session-rejection handles
+    leftover events. First run (no recorded session_date) leaves
+    state alone — caller-provided seeds are respected.
+
+    Extracted from consume_candidate_events so the main loop can roll
+    the session even on ticks that skip the consume pass (L1 KILL_NEW
+    active) — otherwise entered_today / daily caps would leak into
+    the next session for as long as the flag stayed up. Returns True
+    when a rollover happened."""
+    prior_session = state.get("session_date")
+    if prior_session is None:
+        state["session_date"] = today_iso
+        return False
+    if prior_session == today_iso:
+        return False
+    state["session_date"] = today_iso
+    state["entered_today"] = []
+    state["daily_entries_count"] = 0
+    state["daily_realized_pnl_strategy"] = 0.0
+    state["daily_stopout_count"] = 0
+    # consecutive_stopout_count deliberately NOT reset by rollover —
+    # only a non-stop closure clears the streak (v1 parity).
+    # Purge expired symbol cooldowns; keep any still active.
+    cooldowns = state.get("cooldowns") or {}
+    if cooldowns:
+        state["cooldowns"] = {
+            s: c for s, c in cooldowns.items()
+            if _symbol_in_cooldown({"cooldowns": {s: c}}, s, now_utc)
+        }
+    # Per-scan accept counters and the LULD-pause memory are
+    # session-scoped.
+    state.pop("scan_accept_counts", None)
+    state.pop("luld_pauses", None)
+    # Gross exposure is NOT a per-day counter — lots held overnight
+    # keep their exposure. Recompute from the open lots instead of
+    # zeroing (which under-counted risk gates all next session).
+    state["gross_exposure_dollars"] = _recompute_gross_exposure(state)
+    return True
+
+
 def consume_candidate_events(
     state: dict,
     cfg: dict,
@@ -937,6 +984,7 @@ def consume_candidate_events(
     submit_supplier=None,
     now_utc: datetime | None = None,
     today_iso: str | None = None,
+    state_path: Path | None = None,
 ) -> dict[str, int]:
     """Read new candidate events since the last consumed offset and
     apply gates → submit entries or emit rejection events. Returns
@@ -945,44 +993,15 @@ def consume_candidate_events(
     ``quote_supplier(symbol) -> dict | None`` and ``submit_supplier
     (symbol, qty) -> dict`` are injection points for tests.
     ``today_iso`` defaults to the wall-clock ET date; pass it
-    explicitly when working from a fixture session date.
+    explicitly when working from a fixture session date. When
+    ``state_path`` is set, state is persisted atomically after EACH
+    accepted live submit so a crash between the submit and the end-
+    of-tick state write cannot replay the entry as a duplicate order.
     """
     now = now_utc or _now_utc()
     today_iso = today_iso or _today_iso()
 
-    # Session rollover — when the ET date crosses from a recorded
-    # prior session to today, reset per-day counters so daily caps
-    # don't accumulate across sessions. We never reset
-    # last_consumed_event_offset; candidate_events.jsonl is append-
-    # only across sessions and stale-session-rejection handles
-    # leftover events. First run (no recorded session_date) leaves
-    # state alone — caller-provided seeds are respected.
-    prior_session = state.get("session_date")
-    if prior_session is None:
-        state["session_date"] = today_iso
-    elif prior_session != today_iso:
-        state["session_date"] = today_iso
-        state["entered_today"] = []
-        state["daily_entries_count"] = 0
-        state["daily_realized_pnl_strategy"] = 0.0
-        state["daily_stopout_count"] = 0
-        # consecutive_stopout_count deliberately NOT reset by rollover —
-        # only a non-stop closure clears the streak (v1 parity).
-        # Purge expired symbol cooldowns; keep any still active.
-        cooldowns = state.get("cooldowns") or {}
-        if cooldowns:
-            state["cooldowns"] = {
-                s: c for s, c in cooldowns.items()
-                if _symbol_in_cooldown({"cooldowns": {s: c}}, s, now)
-            }
-        # Per-scan accept counters and the LULD-pause memory are
-        # session-scoped.
-        state.pop("scan_accept_counts", None)
-        state.pop("luld_pauses", None)
-        # Gross exposure is NOT a per-day counter — lots held overnight
-        # keep their exposure. Recompute from the open lots instead of
-        # zeroing (which under-counted risk gates all next session).
-        state["gross_exposure_dollars"] = _recompute_gross_exposure(state)
+    roll_session_if_needed(state, now, today_iso)
 
     # Normalize open_positions to the link_id-keyed multi-lot shape
     # (idempotent — converts legacy symbol-keyed state on first load).
@@ -1333,6 +1352,17 @@ def consume_candidate_events(
         state["gross_exposure_dollars"] = float(
             state.get("gross_exposure_dollars", 0.0)
         ) + target_notional
+
+        # Persist immediately after the accepted submit + counters so
+        # a crash before the end-of-tick write can't lose the pending
+        # lot and replay the entry as a duplicate order.
+        if state_path is not None:
+            try:
+                _write_state_atomic(state, state_path)
+            except Exception as e:
+                LOG.warning(
+                    "immediate state persist after submit failed: %s", e,
+                )
 
         # Execution-quality stub on submit. Phase 6 wires fill data.
         emit_order_execution_quality(cfg, {
@@ -2014,6 +2044,111 @@ def _probe_order_state(
     if status in _DEAD_STATUSES_LOWER:
         return "canceled", row
     return "pending", row
+
+
+def recover_stuck_exit_pending(
+    state: dict, cfg: dict, *,
+    oa_client, api_key: str, http,
+    now_utc: datetime | None = None,
+    max_age_s: float = 120.0,
+) -> list[str]:
+    """Recovery sweep for lots stranded in ``exit_pending`` — the
+    reserve state trigger_exit_v2 sets before its cancel/sell I/O. A
+    crash inside that window leaves the lot frozen forever: no exit
+    pass touches non-'filled' lots and nothing re-enters
+    ``exit_pending``. Any such lot older than ``max_age_s`` (or
+    missing its ``exit_pending_at`` stamp entirely ⇒ stale) is
+    reverted to ``filled``:
+
+    - If ANY recorded child is still live (or its state is unknown),
+      the bracket is kept intact — child ids untouched. The next
+      management pass re-drives the exit.
+    - If every recorded child is confirmed dead with zero fill (or
+      absent at the broker), the ids are cleared so
+      submit_pending_oco_children_v2 re-attaches a fresh bracket.
+    - A dead child WITH fills keeps its id — the fill echo books the
+      closure through the normal poll path.
+
+    Emits protection event ``exit_pending_recovered``. Returns the
+    recovered pos_ids. Runs at startup (after reconcile) and every
+    loop tick between poll_fills_v2 and the OCO sweep."""
+    now = now_utc or _now_utc()
+    out: list[str] = []
+    fetch_order = getattr(oa_client, "fetch_order", None)
+    for pos_id, pos in dict(state.get("open_positions") or {}).items():
+        if pos.get("status") != "exit_pending":
+            continue
+        stamp = pos.get("exit_pending_at")
+        if stamp:
+            try:
+                ts = pd.Timestamp(stamp)
+                if ts.tzinfo is None:
+                    ts = ts.tz_localize("UTC")
+                age_s = (pd.Timestamp(now) - ts).total_seconds()
+                if age_s <= float(max_age_s):
+                    continue
+            except Exception:
+                pass  # unparseable stamp ⇒ stale
+        symbol = pos.get("symbol", "")
+        children = dict(pos.get("child_order_ids") or {})
+        dead_roles: list[str] = []
+        live_or_unknown: list[str] = []
+        for role, oid in children.items():
+            if not oid:
+                continue
+            row = None
+            if callable(fetch_order):
+                try:
+                    row = fetch_order(http, api_key, oid)
+                except Exception as e:
+                    LOG.warning(
+                        "exit_pending recovery: child fetch raised for "
+                        "%s: %s", oid, e,
+                    )
+                    row = None
+            if isinstance(row, dict) and row.get("_status") == "not_found":
+                dead_roles.append(role)
+                continue
+            if isinstance(row, dict):
+                status_l = str(
+                    row.get("native_status") or row.get("status") or "",
+                ).lower()
+                if (status_l in _DEAD_STATUSES_LOWER
+                        and _row_filled_qty(row) == 0):
+                    dead_roles.append(role)
+                    continue
+            live_or_unknown.append(role)
+        cleared: list[str] = []
+        if dead_roles and not live_or_unknown:
+            # Every recorded child confirmed dead/absent — clear so
+            # the OCO sweep re-attaches. (Never clear a subset: a
+            # fresh full-qty bracket next to a live old leg could
+            # oversell.)
+            for role in dead_roles:
+                pos["child_order_ids"][role] = ""
+            cleared = dead_roles
+        pos["status"] = "filled"
+        pos.pop("exit_reason_pending", None)
+        pos.pop("exit_pending_at", None)
+        emit_protection_state(cfg, {
+            "ts": _iso(now), "symbol": symbol,
+            "event": "exit_pending_recovered",
+            "link_id": pos.get("link_id"),
+            "cleared_children": cleared,
+            "kept_children": live_or_unknown,
+        })
+        _emit_ledger_v2(cfg, "exit_pending_recovered", {
+            "symbol": symbol, "link_id": pos.get("link_id"),
+            "cleared_children": cleared,
+            "kept_children": live_or_unknown,
+        })
+        LOG.warning(
+            "recovered %s from stranded exit_pending (cleared=%s "
+            "kept=%s) — lot reverted to filled", symbol, cleared,
+            live_or_unknown,
+        )
+        out.append(pos_id)
+    return out
 
 
 def _broker_position_rows(rows: list[dict]) -> dict[str, float]:
@@ -2942,21 +3077,24 @@ def run_signal_fade_pass_v2(
                                  dt_time(16, 5))
     if (now_et.time() >= eval_time
             and state.get("signal_fade_evaluated_on") != session_date):
-        state["signal_fade_evaluated_on"] = session_date
+        # Stamp AFTER the eval returns — an exception leaves the day
+        # unstamped so the next tick retries instead of silently
+        # skipping the whole session's fade pass.
         exited = _signal_fade_eval(
             state, cfg, sf,
             active=bool(sf.get("active", False)),
             now_et=now_et, phase="eval",
             oa_client=oa_client, api_key=api_key, http=http,
         )
+        state["signal_fade_evaluated_on"] = session_date
     if (now_et.time() >= telemetry_time
             and state.get("signal_fade_telemetry_on") != session_date):
-        state["signal_fade_telemetry_on"] = session_date
         _signal_fade_eval(
             state, cfg, sf, active=False, now_et=now_et,
             phase="post_close",
             oa_client=oa_client, api_key=api_key, http=http,
         )
+        state["signal_fade_telemetry_on"] = session_date
         try:
             _capture_candidate_minute_bars(
                 state, cfg,
@@ -2996,6 +3134,19 @@ def execute_kill_l2_v2(
                     oa_client.cancel_order(http, api_key, parent)
                 except Exception:
                     LOG.exception("L2 cancel parent %s failed", symbol)
+            # Restore the exposure the pending lot reserved (same
+            # guarded arithmetic as the janitor) — popping without it
+            # left gross_exposure_dollars permanently inflated.
+            exposure = pos.get("recorded_exposure")
+            if not isinstance(exposure, (int, float)) or isinstance(
+                exposure, bool,
+            ):
+                exposure = 0.0
+            state["gross_exposure_dollars"] = max(
+                0.0,
+                float(state.get("gross_exposure_dollars", 0.0))
+                - float(exposure),
+            )
             state["open_positions"].pop(pos_id, None)
             out.append(symbol)
             continue
@@ -3404,12 +3555,29 @@ def main(argv: list[str] | None = None) -> int:
             _write_state_atomic(state, state_path)
             live_client.close()
             return rc
+        # Startup recovery for lots a prior crash stranded in
+        # exit_pending — must run before the first management pass.
+        try:
+            recover_stuck_exit_pending(
+                state, cfg,
+                oa_client=oa_module, api_key=api_key, http=live_client,
+            )
+        except Exception:
+            LOG.exception("startup exit_pending recovery raised")
     elif state_parse_failed:
         LOG.error(
             "state.json unrecoverable and no live client to verify "
             "broker positions — refusing to run (exit 7)",
         )
         return 7
+
+    def _persist_now() -> None:
+        """Immediate mid-tick persist — narrows the exit double-fire
+        crash window after a management pass mutates positions."""
+        try:
+            _write_state_atomic(state, state_path)
+        except Exception as e:
+            LOG.warning("mid-tick state persist failed: %s", e)
 
     LOG.info(
         "v2 strategy entering long-running loop "
@@ -3440,17 +3608,27 @@ def main(argv: list[str] | None = None) -> int:
                 LOG.error("L2 KILL_SOFT flag detected — flattening positions")
                 if live_client and oa_module is not None:
                     try:
-                        execute_kill_l2_v2(
+                        flattened = execute_kill_l2_v2(
                             state, cfg,
                             oa_client=oa_module, api_key=api_key,
                             http=live_client,
                         )
+                        if flattened:
+                            _persist_now()
                     except Exception:
                         LOG.exception("L2 flatten raised")
         elif state.get("kill_switch_state") == "L2":
             # Operator cleared the flag — release the L2 mark so future
             # blocks behave normally.
             state.pop("kill_switch_state", None)
+
+        # Session rollover runs unconditionally — L1 KILL_NEW skips the
+        # consume pass below, but per-day counters must still reset
+        # when the ET date advances under an active flag.
+        try:
+            roll_session_if_needed(state, _now_utc(), _today_iso())
+        except Exception:
+            LOG.exception("roll_session_if_needed raised")
 
         # L1 block-new — KILL_NEW.flag prevents new entries; existing
         # positions keep their brackets / time-stops running.
@@ -3462,6 +3640,7 @@ def main(argv: list[str] | None = None) -> int:
                     state, cfg,
                     quote_supplier=quote_supplier,
                     submit_supplier=submit_supplier,
+                    state_path=state_path,
                 )
                 if summary.get("consumed", 0) > 0:
                     LOG.info("v2 consumer tick: %s", summary)
@@ -3492,6 +3671,15 @@ def main(argv: list[str] | None = None) -> int:
                 )
             except Exception:
                 LOG.exception("expire_stale_pending_fills raised")
+            # Recover lots a crash stranded in exit_pending BEFORE the
+            # OCO sweep so cleared child ids re-attach this same tick.
+            try:
+                recover_stuck_exit_pending(
+                    state, cfg,
+                    oa_client=oa_module, api_key=api_key, http=live_client,
+                )
+            except Exception:
+                LOG.exception("recover_stuck_exit_pending raised")
             try:
                 submit_pending_oco_children_v2(
                     state, cfg,
@@ -3500,24 +3688,27 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 LOG.exception("submit_pending_oco_children_v2 raised")
             try:
-                enforce_protected_position_invariant_v2(
+                if enforce_protected_position_invariant_v2(
                     state, cfg,
                     oa_client=oa_module, api_key=api_key, http=live_client,
-                )
+                ):
+                    _persist_now()
             except Exception:
                 LOG.exception("enforce_protected_position_invariant_v2 raised")
             try:
-                run_time_stop_pass_v2(
+                if run_time_stop_pass_v2(
                     state, cfg,
                     oa_client=oa_module, api_key=api_key, http=live_client,
-                )
+                ):
+                    _persist_now()
             except Exception:
                 LOG.exception("run_time_stop_pass_v2 raised")
             try:
-                run_signal_fade_pass_v2(
+                if run_signal_fade_pass_v2(
                     state, cfg,
                     oa_client=oa_module, api_key=api_key, http=live_client,
-                )
+                ):
+                    _persist_now()
             except Exception:
                 LOG.exception("run_signal_fade_pass_v2 raised")
 
