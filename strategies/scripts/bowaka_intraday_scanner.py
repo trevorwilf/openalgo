@@ -165,29 +165,53 @@ def hydrate_entered_symbols_from_decisions(
 ) -> None:
     """Phase 3.5 dedupe: read strategy-side entry_decisions.jsonl
     for today's accepted entries; mark each symbol in
-    ``entered_symbols_today``."""
+    ``entered_symbols_today``.
+
+    Incremental: a byte offset in ``state['entry_decisions_offset']``
+    lets the per-tick re-hydrate read only lines appended since the
+    last call (the file grows all session; re-reading it whole every
+    tick was the reason entered symbols kept re-emitting candidates
+    until the next scanner restart). A shrunken file (rotation)
+    resets the offset and re-reads from the top. Only complete
+    (newline-terminated) lines advance the offset, so a mid-append
+    partial line is re-read next tick instead of being lost."""
     p = paths.ENTRY_DECISIONS_PATH
     if not p.exists():
         return
+    offset = int(state.get("entry_decisions_offset", 0) or 0)
     entered = set(state.get("entered_symbols_today") or [])
     try:
-        for raw in p.read_text(encoding="utf-8").splitlines():
-            raw = raw.strip()
-            if not raw:
-                continue
-            try:
-                ev = json.loads(raw)
-            except ValueError:
-                continue
-            if ev.get("session_date") != today_iso:
-                continue
-            if ev.get("decision") != "accepted":
-                continue
-            sym = ev.get("symbol")
-            if sym:
-                entered.add(sym)
+        size = p.stat().st_size
+        if offset > size:
+            offset = 0
+        if offset == size:
+            return
+        with open(p, "rb") as f:
+            f.seek(offset)
+            data = f.read()
     except OSError:
-        pass
+        return
+    last_nl = data.rfind(b"\n")
+    if last_nl < 0:
+        return  # no complete new line yet
+    for raw in data[: last_nl + 1].decode(
+        "utf-8", errors="replace",
+    ).splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            ev = json.loads(raw)
+        except ValueError:
+            continue
+        if ev.get("session_date") != today_iso:
+            continue
+        if ev.get("decision") != "accepted":
+            continue
+        sym = ev.get("symbol")
+        if sym:
+            entered.add(sym)
+    state["entry_decisions_offset"] = offset + last_nl + 1
     state["entered_symbols_today"] = sorted(entered)
 
 
@@ -626,6 +650,10 @@ def main(argv: list[str] | None = None) -> int:
                        .get("level", "INFO").upper(), logging.INFO),
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    # httpx logs one INFO line per request — the per-tick bar prefetch
+    # turns that into tens of MB/day of noise in the err log.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     try:
         import bowaka_v2_config_schema as config_schema
         config_schema.validate_config(cfg)
@@ -880,6 +908,17 @@ def _run_live(
                         "(continuing with old): %s", e,
                     )
 
+            # Refresh the strategy-side entered-symbol dedupe
+            # incrementally each tick so entered symbols stop
+            # re-emitting candidates intraday.
+            try:
+                hydrate_entered_symbols_from_decisions(
+                    state, now.date().isoformat(),
+                )
+            except Exception:
+                LOG.exception("dedupe hydrate raised")
+
+            _t_tick0 = time.monotonic()
             scan_ts = now.tz_convert("UTC").to_pydatetime()
             try:
                 _t_fetch0 = time.monotonic()
@@ -900,10 +939,26 @@ def _run_live(
             except Exception as e:
                 LOG.exception("scan tick raised: %s", e)
             save_scanner_state(state)
-            _sleep_or_shutdown(interval, shutdown)
+            # Duration-aware sleep: the configured interval is the
+            # actual start-to-start cadence, not interval + scan time.
+            _sleep_or_shutdown(
+                _cadence_sleep_seconds(
+                    interval, time.monotonic() - _t_tick0,
+                ),
+                shutdown,
+            )
     finally:
         http.close()
     return 0
+
+
+def _cadence_sleep_seconds(
+    interval_seconds: int, scan_duration_seconds: float,
+) -> int:
+    """Sleep remainder so scan cadence equals the configured interval
+    (start-to-start). Floored at 5s so a pathologically slow scan
+    can never spin the loop hot."""
+    return max(5, int(round(interval_seconds - scan_duration_seconds)))
 
 
 def _sleep_or_shutdown(interval_seconds: int, shutdown: dict) -> None:

@@ -90,7 +90,11 @@ def test_end_to_end_writes_both_outputs(tmp_path):
 def test_dry_run_smoke_completes(tmp_path, monkeypatch):
     """Phase 2 smoke command: python bowaka_universe_builder.py
     --config <cfg> --dry-run uses the built-in fixture and writes
-    both outputs without a network call."""
+    both outputs without a network call.
+
+    Hardening Phase 7 (deliberate behavior change): dry-run outputs
+    now land in a _dryrun/ sandbox next to the configured paths so
+    the fixture can never clobber production outputs."""
     cfg_path = tmp_path / "cfg.yaml"
     cfg_text = (
         "paths:\n"
@@ -125,10 +129,53 @@ def test_dry_run_smoke_completes(tmp_path, monkeypatch):
     cfg_path.write_text(cfg_text)
     rc = ub.main(["--config", str(cfg_path), "--dry-run"])
     assert rc == 0
-    snap_path = tmp_path / "universe_snapshot.json"
-    cache_path = tmp_path / "daily_feature_cache.parquet"
+    snap_path = tmp_path / "_dryrun" / "universe_snapshot.json"
+    cache_path = tmp_path / "_dryrun" / "daily_feature_cache.parquet"
     assert snap_path.exists()
     assert cache_path.exists()
     snap_doc = json.loads(snap_path.read_text())
     # FOO is the operating equity; TSLL is leveraged and dropped.
     assert {s["symbol"] for s in snap_doc["symbols"]} == {"FOO"}
+    # The configured (production) paths were NOT written.
+    assert not (tmp_path / "universe_snapshot.json").exists()
+    assert not (tmp_path / "daily_feature_cache.parquet").exists()
+
+
+def test_dry_run_never_clobbers_existing_production_outputs(tmp_path):
+    """Regression for the --dry-run clobber: a live universe snapshot
+    + feature cache at the configured paths must be byte-identical
+    after a dry-run."""
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(
+        "paths:\n"
+        f"  universe_snapshot_path: {tmp_path}/universe_snapshot.json\n"
+        f"  daily_feature_cache_path: {tmp_path}/daily_feature_cache.parquet\n"
+        "data:\n  provider: alpaca\n  feed: iex\n"
+        "universe:\n"
+        "  allowed_exchanges: [NASDAQ, NYSE]\n"
+        "  exclude_otc: true\n"
+        "  exclude_leveraged_etp: true\n"
+        "  exclude_etf: true\n"
+        "  price_min: 1.0\n  price_max: 50.0\n"
+        "  avg_dollar_volume_min: 1.0\n"
+        "  ticker_blocklist: []\n"
+        "instrument_rules:\n"
+        "  name_keywords:\n"
+        "    leveraged: ['2X', '3X']\n"
+        "    inverse: []\n    etn: []\n    etf: []\n"
+        "historical_features:\n"
+        "  lookback_days: 20\n  atr_days: 14\n"
+        "  ema_days: 10\n  ema_slope_lookback: 3\n"
+        "logging:\n  level: WARNING\n"
+    )
+    prod_snap = tmp_path / "universe_snapshot.json"
+    prod_cache = tmp_path / "daily_feature_cache.parquet"
+    prod_snap.write_text('{"symbols": ["PRODUCTION"], "sentinel": 1}')
+    prod_cache.write_bytes(b"PRODUCTION-PARQUET-SENTINEL")
+
+    rc = ub.main(["--config", str(cfg_path), "--dry-run"])
+    assert rc == 0
+    assert prod_snap.read_text() == (
+        '{"symbols": ["PRODUCTION"], "sentinel": 1}')
+    assert prod_cache.read_bytes() == b"PRODUCTION-PARQUET-SENTINEL"
+    assert (tmp_path / "_dryrun" / "universe_snapshot.json").exists()

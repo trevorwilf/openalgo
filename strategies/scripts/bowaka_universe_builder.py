@@ -697,6 +697,10 @@ def _setup_logging(cfg: dict) -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
         force=True,
     )
+    # httpx logs one INFO line per request — at build fan-out volume
+    # that is pure noise in the err log.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -724,7 +728,26 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         asset_supplier = _dry_run_assets
         bars_supplier = _dry_run_bars
-        LOG.info("dry-run mode: using built-in fixture (no network)")
+        # Dry-run must NEVER touch the live outputs — the tiny built-in
+        # fixture would clobber the production universe snapshot and
+        # daily feature cache. Redirect both outputs into a _dryrun/
+        # sandbox next to the configured destination.
+        snap_dest = _resolve_path(cfg, "universe_snapshot_path",
+                                  paths.UNIVERSE_SNAPSHOT_PATH)
+        cache_dest = _resolve_path(cfg, "daily_feature_cache_path",
+                                   paths.DAILY_FEATURE_CACHE_PATH)
+        dry_dir = snap_dest.parent / "_dryrun"
+        cfg.setdefault("paths", {})
+        cfg["paths"]["universe_snapshot_path"] = str(
+            dry_dir / snap_dest.name,
+        )
+        cfg["paths"]["daily_feature_cache_path"] = str(
+            dry_dir / cache_dest.name,
+        )
+        LOG.info(
+            "dry-run mode: using built-in fixture (no network); "
+            "outputs redirected to %s", dry_dir,
+        )
     else:
         asset_supplier, bars_supplier, http_client_ref = _live_suppliers(cfg)
         try:
