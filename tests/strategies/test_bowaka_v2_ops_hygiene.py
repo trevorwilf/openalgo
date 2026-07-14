@@ -188,3 +188,185 @@ def test_cadence_sleep_subtracts_scan_duration():
     # Slow scans floor at 5s — never spin hot, never double the wait.
     assert scanner._cadence_sleep_seconds(60, 58.0) == 5
     assert scanner._cadence_sleep_seconds(60, 120.0) == 5
+
+
+# ---- fix Phase 9: --data-files rotation ---------------------------------------
+
+
+def test_rotate_data_files_targets_exactly_the_four(tmp_path):
+    big = b"x" * 2000
+    for name in rot.DATA_FILE_NAMES:
+        (tmp_path / name).write_bytes(big)
+    (tmp_path / "state.json").write_bytes(big)          # never rotated
+    (tmp_path / "daily_summary.jsonl").write_bytes(big)  # never rotated
+    n = rot.rotate_data_files(tmp_path, max_bytes=1000, keep=3)
+    assert n == 4
+    for name in rot.DATA_FILE_NAMES:
+        assert (tmp_path / name).stat().st_size == 0
+        assert (tmp_path / f"{name}.1.gz").exists()
+    assert (tmp_path / "state.json").stat().st_size == 2000
+    assert (tmp_path / "daily_summary.jsonl").stat().st_size == 2000
+
+
+def test_rotate_data_files_respects_size_threshold(tmp_path):
+    (tmp_path / "candidate_events.jsonl").write_bytes(b"y" * 500)
+    n = rot.rotate_data_files(tmp_path, max_bytes=1000, keep=3)
+    assert n == 0
+    assert (tmp_path / "candidate_events.jsonl").stat().st_size == 500
+
+
+def test_data_files_mode_refuses_inside_scan_window(tmp_path, monkeypatch):
+    (tmp_path / "candidate_events.jsonl").write_bytes(b"z" * 2000)
+    monkeypatch.setattr(rot, "_in_scan_window", lambda now=None: True)
+    rc = rot.main(["--data-files", "--data-dir", str(tmp_path),
+                    "--max-mb", "0.001"])
+    assert rc == 3
+    assert (tmp_path / "candidate_events.jsonl").stat().st_size == 2000
+    # --force overrides the guard.
+    rc = rot.main(["--data-files", "--data-dir", str(tmp_path),
+                    "--max-mb", "0.001", "--force"])
+    assert rc == 0
+    assert (tmp_path / "candidate_events.jsonl").stat().st_size == 0
+
+
+def test_data_files_mode_runs_outside_scan_window(tmp_path, monkeypatch):
+    (tmp_path / "entry_decisions.jsonl").write_bytes(b"z" * 2000)
+    monkeypatch.setattr(rot, "_in_scan_window", lambda now=None: False)
+    rc = rot.main(["--data-files", "--data-dir", str(tmp_path),
+                    "--max-mb", "0.001"])
+    assert rc == 0
+    assert (tmp_path / "entry_decisions.jsonl").stat().st_size == 0
+
+
+def test_in_scan_window_boundaries():
+    from datetime import datetime as dt
+    assert rot._in_scan_window(dt(2026, 7, 14, 7, 29)) is False   # Tue pre
+    assert rot._in_scan_window(dt(2026, 7, 14, 7, 30)) is True
+    assert rot._in_scan_window(dt(2026, 7, 14, 14, 59)) is True
+    assert rot._in_scan_window(dt(2026, 7, 14, 15, 0)) is False
+    assert rot._in_scan_window(dt(2026, 7, 18, 10, 0)) is False   # Saturday
+
+
+# ---- fix Phase 9: heartbeat --clear-on-fresh -------------------------------------
+
+
+def _write_fresh_heartbeat(p: Path) -> None:
+    from datetime import datetime, timezone
+    p.write_text(json.dumps({
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }) + "\n", encoding="utf-8")
+
+
+def test_heartbeat_clear_on_fresh_lifts_own_flag(tmp_path):
+    import bowaka_v2_heartbeat as hb
+    hbp = tmp_path / "scanner_heartbeat.jsonl"
+    _write_fresh_heartbeat(hbp)
+    flag = tmp_path / "KILL_NEW.flag"
+    flag.write_text(json.dumps({"source": "bowaka_v2_heartbeat",
+                                 "reason": "scanner_stale"}))
+    result = hb.check_and_kill(
+        hbp, flag, stale_threshold_seconds=180, clear_on_fresh=True,
+    )
+    assert result["kill_flag_cleared"] is True
+    assert not flag.exists()
+
+
+def test_heartbeat_clear_on_fresh_leaves_operator_flags(tmp_path):
+    import bowaka_v2_heartbeat as hb
+    hbp = tmp_path / "scanner_heartbeat.jsonl"
+    _write_fresh_heartbeat(hbp)
+    for content in (
+        json.dumps({"source": "operator", "reason": "manual"}),
+        "STOP — operator note, not JSON",
+        "",
+    ):
+        flag = tmp_path / "KILL_NEW.flag"
+        flag.write_text(content)
+        result = hb.check_and_kill(
+            hbp, flag, stale_threshold_seconds=180, clear_on_fresh=True,
+        )
+        assert result["kill_flag_cleared"] is False
+        assert flag.exists()
+        flag.unlink()
+
+
+def test_heartbeat_still_writes_flag_on_stale(tmp_path):
+    import bowaka_v2_heartbeat as hb
+    hbp = tmp_path / "scanner_heartbeat.jsonl"  # missing => stale
+    flag = tmp_path / "KILL_NEW.flag"
+    result = hb.check_and_kill(
+        hbp, flag, stale_threshold_seconds=180, clear_on_fresh=True,
+    )
+    assert result["kill_flag_written"] is True
+    assert flag.exists()
+    assert json.loads(flag.read_text())["source"] == "bowaka_v2_heartbeat"
+
+
+def test_heartbeat_fresh_without_clear_flag_keeps_own_flag(tmp_path):
+    """Without --clear-on-fresh the old behavior is preserved."""
+    import bowaka_v2_heartbeat as hb
+    hbp = tmp_path / "scanner_heartbeat.jsonl"
+    _write_fresh_heartbeat(hbp)
+    flag = tmp_path / "KILL_NEW.flag"
+    flag.write_text(json.dumps({"source": "bowaka_v2_heartbeat"}))
+    result = hb.check_and_kill(hbp, flag, stale_threshold_seconds=180)
+    assert result["kill_flag_cleared"] is False
+    assert flag.exists()
+
+
+# ---- fix Phase 9: fade window start from config -----------------------------------
+
+
+def test_fade_bar_window_starts_at_configured_scanner_start(tmp_path, monkeypatch):
+    import pandas as pd
+    import bowaka_v2_paths as p
+    import bowaka_v2_strategy as v2
+    monkeypatch.setattr(p, "V2_LEDGER_PATH", tmp_path / "ledger.jsonl")
+    monkeypatch.setattr(p, "COUNTERFACTUAL_EXITS_PATH",
+                         tmp_path / "cf_exits.jsonl")
+
+    captured: dict = {}
+
+    class OA:
+        def fetch_bars(self, http, api_key, *, venue_code, symbol,
+                        interval, start, end):
+            captured["start"] = start
+            return pd.DataFrame()   # skip after capture
+
+    cfg = {
+        "paths": {"trade_ledger_path": str(tmp_path / "ledger.jsonl")},
+        "session": {"scanner_start": "10:00"},
+        "execution": {"default_venue_code": "XNAS"},
+        "score": {}, "historical_features": {},
+        "logging": {"log_counterfactual_exits": False},
+    }
+    state = {"open_positions": {"L-1": {
+        "symbol": "AAA", "status": "filled", "qty": 100,
+        "signal_strength": 5.0,
+        "prior_daily_baselines": {"prior_close": 9.0},
+        "venue_code": "XNAS", "link_id": "L-1",
+    }}}
+    now_et = pd.Timestamp("2026-07-14 15:50", tz="America/New_York")
+    v2._signal_fade_eval(
+        state, cfg, {}, active=False, now_et=now_et, phase="eval",
+        oa_client=OA(), api_key="k", http=None,
+    )
+    assert captured["start"].hour == 10
+    assert captured["start"].minute == 0
+
+
+# ---- fix Phase 9: fsync state write ------------------------------------------------
+
+
+def test_state_write_still_atomic_and_loadable(tmp_path):
+    import bowaka_v2_strategy as v2
+    sp = tmp_path / "state.json"
+    state = {"open_positions": {"L-1": {"symbol": "AAA", "qty": 1}},
+             "cumulative_realized_pnl_strategy": 42.5}
+    v2._write_state_atomic(state, sp)
+    assert json.loads(sp.read_text(encoding="utf-8")) == state
+    assert not sp.with_suffix(sp.suffix + ".tmp").exists()
+    # Overwrite round-trips too.
+    state["cumulative_realized_pnl_strategy"] = -1.0
+    v2._write_state_atomic(state, sp)
+    assert json.loads(sp.read_text(encoding="utf-8")) == state

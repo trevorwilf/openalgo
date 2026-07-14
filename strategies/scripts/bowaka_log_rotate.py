@@ -23,9 +23,21 @@ appended between the copy and the truncate are lost — the standard
 copytruncate caveat; run it outside the session window (the operator
 schedules this via Task Scheduler on weekends).
 
+``--data-files`` mode (fix Phase 9) instead rotates the four unbounded
+data JSONLs in ``data/bowaka_v2/`` — candidate_events, entry_decisions,
+rejected_candidates, scanner_heartbeat — when they exceed
+``--max-mb`` (default 200 in this mode). Safe because every offset
+reader is truncation-aware: the strategy's ``tail_new_events`` resets
+its offset when the file shrinks (fix Phase 5), the scanner's dedupe
+hydrate has the same reset, and the other two files have no offset
+readers. The mode REFUSES to run inside the scan window (07:30–15:00
+local/MT weekdays, mirroring bowaka_gate_dump_rotate) unless
+``--force`` — the writers hold open append handles all session.
+
 Usage:
     uv run python strategies/scripts/bowaka_log_rotate.py
         [--max-mb 50] [--keep 3] [--log-dir logs] [--dry-run]
+        [--data-files [--data-dir …] [--force]]
 """
 from __future__ import annotations
 
@@ -33,6 +45,7 @@ import argparse
 import gzip
 import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -41,6 +54,32 @@ import bowaka_v2_paths as paths
 DEFAULT_MAX_MB = 50
 DEFAULT_KEEP = 3
 TARGET_GLOBS = ("bowaka_v2_*.err.log", "bowaka_v2_*.out.log")
+
+# --data-files mode: the four unbounded session JSONLs. Exactly these —
+# other files in data/bowaka_v2/ (state.json, ledgers, snapshots) must
+# never be rotated.
+DATA_FILE_NAMES = (
+    "candidate_events.jsonl",
+    "entry_decisions.jsonl",
+    "rejected_candidates.jsonl",
+    "scanner_heartbeat.jsonl",
+)
+DEFAULT_DATA_MAX_MB = 200
+
+# Scanner/strategy session window in LOCAL time (the host runs MT) —
+# mirrors bowaka_gate_dump_rotate's guard.
+SCAN_WINDOW_START = (7, 30)
+SCAN_WINDOW_END = (15, 0)
+
+
+def _in_scan_window(now: datetime | None = None) -> bool:
+    now = now or datetime.now()
+    if now.weekday() >= 5:
+        return False
+    minutes = now.hour * 60 + now.minute
+    return (SCAN_WINDOW_START[0] * 60 + SCAN_WINDOW_START[1]
+            <= minutes
+            < SCAN_WINDOW_END[0] * 60 + SCAN_WINDOW_END[1])
 
 
 def rotate_file(path: Path, max_bytes: int, keep: int,
@@ -103,11 +142,24 @@ def rotate_all(log_dir: Path, max_bytes: int, keep: int,
     return rotated
 
 
+def rotate_data_files(data_dir: Path, max_bytes: int, keep: int,
+                       dry_run: bool = False) -> int:
+    """Rotate the four session data JSONLs (and nothing else) in
+    ``data_dir``. Returns the count of files rotated."""
+    rotated = 0
+    for name in DATA_FILE_NAMES:
+        if rotate_file(data_dir / name, max_bytes, keep,
+                       dry_run=dry_run):
+            rotated += 1
+    return rotated
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    ap.add_argument("--max-mb", type=float, default=DEFAULT_MAX_MB,
-                    help="rotate files larger than this "
-                         "(default %(default)s MB)")
+    ap.add_argument("--max-mb", type=float, default=None,
+                    help="rotate files larger than this (default "
+                         f"{DEFAULT_MAX_MB} MB for logs, "
+                         f"{DEFAULT_DATA_MAX_MB} MB for --data-files)")
     ap.add_argument("--keep", type=int, default=DEFAULT_KEEP,
                     help="gzipped generations to keep "
                          "(default %(default)s)")
@@ -115,14 +167,42 @@ def main(argv: list[str] | None = None) -> int:
                     default=paths.REPO_ROOT / "logs",
                     help="directory holding the watchdog logs "
                          "(default <repo>/logs)")
+    ap.add_argument("--data-files", action="store_true",
+                    help="rotate the bowaka_v2 data JSONLs instead of "
+                         "the watchdog logs")
+    ap.add_argument("--data-dir", type=Path,
+                    default=paths.CANDIDATE_EVENTS_PATH.parent,
+                    help="directory holding the data JSONLs "
+                         "(default <repo>/strategies/scripts/data/"
+                         "bowaka_v2)")
+    ap.add_argument("--force", action="store_true",
+                    help="run --data-files even inside the scan window")
     ap.add_argument("--dry-run", action="store_true",
                     help="report what would rotate; write nothing")
     args = ap.parse_args(argv)
 
+    if args.data_files:
+        if _in_scan_window() and not args.force:
+            print(
+                "refusing --data-files inside the scan window "
+                "(07:30-15:00 local weekdays) — the scanner/strategy "
+                "hold open append handles; use --force to override"
+            )
+            return 3
+        max_mb = args.max_mb if args.max_mb is not None else DEFAULT_DATA_MAX_MB
+        if not args.data_dir.is_dir():
+            print(f"data dir {args.data_dir} does not exist; nothing to do")
+            return 0
+        n = rotate_data_files(args.data_dir, int(max_mb * 1e6),
+                              args.keep, dry_run=args.dry_run)
+        print(f"{n} data file(s) rotated")
+        return 0
+
+    max_mb = args.max_mb if args.max_mb is not None else DEFAULT_MAX_MB
     if not args.log_dir.is_dir():
         print(f"log dir {args.log_dir} does not exist; nothing to do")
         return 0
-    n = rotate_all(args.log_dir, int(args.max_mb * 1e6), args.keep,
+    n = rotate_all(args.log_dir, int(max_mb * 1e6), args.keep,
                    dry_run=args.dry_run)
     print(f"{n} file(s) rotated")
     return 0

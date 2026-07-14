@@ -59,9 +59,17 @@ def check_and_kill(
     *,
     stale_threshold_seconds: float = 60.0,
     now_utc: datetime | None = None,
+    clear_on_fresh: bool = False,
 ) -> dict:
     """One-shot heartbeat check. Returns the diagnostic dict;
-    writes KILL_NEW.flag when the scanner is stale."""
+    writes KILL_NEW.flag when the scanner is stale.
+
+    ``clear_on_fresh`` (fix Phase 9): when the heartbeat is FRESH and
+    a KILL_NEW.flag exists whose JSON carries
+    ``"source": "bowaka_v2_heartbeat"``, delete it — the scanner
+    recovered, so the flag this monitor itself wrote is lifted. An
+    operator-written flag (unparseable, or any other source) is NEVER
+    touched."""
     now = now_utc or datetime.now(timezone.utc)
     age = _last_heartbeat_age(heartbeat_path, now)
     payload = {
@@ -69,6 +77,7 @@ def check_and_kill(
         "heartbeat_age_seconds": age,
         "stale_threshold_seconds": stale_threshold_seconds,
         "kill_flag_written": False,
+        "kill_flag_cleared": False,
     }
     if age is None or age > stale_threshold_seconds:
         kill_flag_path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,6 +91,31 @@ def check_and_kill(
             }),
         )
         payload["kill_flag_written"] = True
+    elif clear_on_fresh and kill_flag_path.exists():
+        own_flag = False
+        try:
+            content = json.loads(
+                kill_flag_path.read_text(encoding="utf-8"),
+            )
+            own_flag = (isinstance(content, dict)
+                        and content.get("source") == "bowaka_v2_heartbeat")
+        except Exception:
+            own_flag = False
+        if own_flag:
+            try:
+                kill_flag_path.unlink()
+                payload["kill_flag_cleared"] = True
+                LOG.info(
+                    "scanner heartbeat fresh again (%.0fs) — cleared "
+                    "the heartbeat-written KILL_NEW.flag", age,
+                )
+            except OSError as e:
+                LOG.warning("could not clear KILL_NEW.flag: %s", e)
+        else:
+            LOG.info(
+                "KILL_NEW.flag present but not heartbeat-written — "
+                "leaving it for the operator",
+            )
     return payload
 
 
@@ -96,12 +130,18 @@ def main(argv: list[str] | None = None) -> int:
         "--once", action="store_true",
         help="Run a single check and exit (CI / smoke).",
     )
+    parser.add_argument(
+        "--clear-on-fresh", action="store_true",
+        help="Lift a heartbeat-written KILL_NEW.flag once the "
+             "heartbeat is fresh again (operator flags untouched).",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO)
     hb = Path(args.heartbeat_path) if args.heartbeat_path else paths.SCANNER_HEARTBEAT_PATH
     kf = Path(args.kill_flag) if args.kill_flag else (paths.REPO_ROOT / "KILL_NEW.flag")
     result = check_and_kill(
         hb, kf, stale_threshold_seconds=args.threshold_seconds,
+        clear_on_fresh=args.clear_on_fresh,
     )
     LOG.info("heartbeat check: %s", result)
     return 0

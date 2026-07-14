@@ -58,13 +58,14 @@ def test_v2_config_environment_is_paper() -> None:
 def test_v2_config_signals_have_min_thresholds() -> None:
     cfg = _load_cfg()
     s = cfg["signals"]
-    # Handoff §6 priors are RVOL≥1.50, range≥1.25, close_loc≥0.60.
-    # Operator may relax for IEX partial-tape testing (see YAML
-    # comments). We assert the gates are configured and within a
-    # sensible band — typos like 15.0 or 0.01 still fail.
-    assert 0.3 <= s["rvol_so_far_min"] <= 2.0
-    assert 0.3 <= s["range_expansion_so_far_min"] <= 2.0
-    assert 0.3 <= s["close_location_so_far_min"] <= 1.0
+    # Pins the CURRENT tuned values (trial #3437 overlay, 2026-06-17;
+    # supersedes the pre-SIP handoff §6 bands this test used to
+    # assert). A typo or an accidental re-overlay still fails loudly.
+    assert s["rvol_so_far_min"] == pytest.approx(2.180766810003851)
+    assert s["range_expansion_so_far_min"] == pytest.approx(
+        2.3313429453194527)
+    assert s["close_location_so_far_min"] == pytest.approx(
+        0.6459022368108059)
 
 
 def test_v2_config_score_bounded_default() -> None:
@@ -76,7 +77,10 @@ def test_v2_config_score_bounded_default() -> None:
 
 def test_v2_config_risk_paper_safe_with_shadow_block() -> None:
     cfg = _load_cfg()
-    assert cfg["risk"]["daily_loss_pct"] == pytest.approx(0.03)
+    # Current tuned value (trial #3437 overlay, 2026-06-17; the old
+    # 0.03 pin predated the overlay).
+    assert cfg["risk"]["daily_loss_pct"] == pytest.approx(
+        0.02403648309498329)
     # Shadow block exists.
     assert "shadow" in cfg["risk"]
     assert cfg["risk"]["shadow"]["daily_loss_pct"] == pytest.approx(0.01)

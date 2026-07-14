@@ -397,7 +397,10 @@ def write_outputs(
         "symbols": snapshot_rows,
     }
     tmp_snap = snap_path.with_suffix(snap_path.suffix + ".tmp")
-    tmp_snap.write_text(json.dumps(snap_doc, indent=2, default=str))
+    with open(tmp_snap, "w", encoding="utf-8") as f:
+        f.write(json.dumps(snap_doc, indent=2, default=str))
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp_snap, snap_path)
 
     if not cache_df.empty:
