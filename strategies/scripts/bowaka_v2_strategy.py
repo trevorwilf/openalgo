@@ -1857,13 +1857,16 @@ def expire_stale_pending_fills(
 ) -> list[str]:
     """Janitor for lots stuck in ``pending_fill``: after
     ``execution.pending_fill_timeout_seconds`` (default 900) with no
-    fill echo, cancel the parent order, drop the lot, and restore the
-    exposure it reserved. Runs each loop tick after ``poll_fills_v2``,
-    so a fill echo that arrives first wins — the janitor only acts on
-    lots still ``pending_fill`` at check time. Marketable-limit
-    parents use the (much shorter)
-    ``execution.marketable_limit_timeout_seconds`` instead. Returns
-    the symbols expired this pass."""
+    fill echo, cancel the parent order and — once the cancel is
+    VERIFIED terminal with zero fill — drop the lot and restore the
+    exposure it reserved. A cancel that raced a fill ADOPTS the lot
+    as filled instead (the shares are real; the OCO sweep brackets it
+    the same tick). A cancel whose outcome cannot be confirmed leaves
+    the lot for the next tick — a lot whose parent state is unknown
+    is NEVER dropped. Runs each loop tick after ``poll_fills_v2``, so
+    a fill echo that arrives first wins. Marketable-limit parents use
+    the (much shorter) ``execution.marketable_limit_timeout_seconds``.
+    Returns the symbols expired (dropped) this pass."""
     exec_cfg = cfg.get("execution") or {}
     default_timeout_s = float(exec_cfg.get(
         "pending_fill_timeout_seconds", 900,
@@ -1894,14 +1897,70 @@ def expire_stale_pending_fills(
             continue
         symbol = pos.get("symbol", "")
         parent_id = pos.get("parent_order_id") or ""
+        verdict = "canceled"  # no parent id ⇒ nothing at the broker
+        row: dict | None = None
         if parent_id:
             try:
-                oa_client.cancel_order(http, api_key, parent_id)
-            except Exception:
+                res = oa_client.cancel_order(http, api_key, parent_id)
+            except Exception as e:
                 LOG.exception(
                     "janitor cancel of stale parent %s (%s) failed",
                     parent_id, symbol,
                 )
+                res = {"status": "error", "order_id": parent_id,
+                       "exception": str(e)}
+            status = res.get("status") if isinstance(res, dict) else None
+            if status in ("canceled", "noop"):
+                verdict, row = _await_cancel_terminal(
+                    oa_client, http, api_key, parent_id,
+                    treat_not_found_as_canceled=True,
+                )
+            else:
+                # Cancel errored — probe the parent once. Unknown
+                # state must never drop the lot.
+                verdict, row = _probe_order_state(
+                    oa_client, http, api_key, parent_id,
+                )
+        if verdict == "filled":
+            # The cancel raced the parent's fill: real shares were
+            # bought. Adopt the lot as filled so the OCO sweep
+            # brackets it this same tick; never drop it.
+            fq = _row_filled_qty(row)
+            try:
+                fap = float((row or {}).get("filled_avg_price"))
+            except (TypeError, ValueError):
+                fap = None
+            pos["status"] = "filled"
+            if fap and fap > 0:
+                pos["entry_price"] = fap
+            if fq > 0:
+                pos["qty"] = fq
+            pos["parent_fill_processed"] = True
+            pos["parent_fill_processed_at"] = _iso(_now_utc())
+            _true_up_recorded_exposure(state, pos)
+            ep = pos.get("entry_price")
+            if ep is not None and pos.get("peak_since_entry") is None:
+                pos["peak_since_entry"] = float(ep)
+                pos["trough_since_entry"] = float(ep)
+            _emit_ledger_v2(cfg, "janitor_cancel_raced_fill", {
+                "symbol": symbol, "link_id": pos.get("link_id"),
+                "parent_order_id": parent_id,
+                "filled_qty": fq, "filled_avg_price": fap,
+                "age_seconds": age_s,
+            })
+            LOG.warning(
+                "janitor cancel of %s parent %s raced a FILL — lot "
+                "adopted (qty=%s @ %s); OCO sweep will bracket it",
+                symbol, parent_id, fq, fap,
+            )
+            continue
+        if verdict == "pending":
+            LOG.warning(
+                "janitor: parent %s (%s) cancel outcome unconfirmed — "
+                "lot retained for retry next tick", parent_id, symbol,
+            )
+            continue
+        # verdict == "canceled": confirmed dead with zero fill.
         exposure = pos.get("recorded_exposure")
         if not isinstance(exposure, (int, float)) or isinstance(
             exposure, bool,
@@ -1926,6 +1985,35 @@ def expire_stale_pending_fills(
         )
         out.append(symbol)
     return out
+
+
+def _probe_order_state(
+    oa_client, http, api_key: str, order_id: str,
+) -> tuple[str, dict | None]:
+    """Single status probe for an order whose cancel ERRORED. Maps to
+    the same verdict vocabulary as :func:`_await_cancel_terminal`:
+    filled/partial ⇒ ``"filled"``; confirmed dead with zero fill ⇒
+    ``"canceled"``; still live, not_found, or probe failure ⇒
+    ``"pending"`` (unknown — the caller must retain the lot)."""
+    fetch_order = getattr(oa_client, "fetch_order", None)
+    if not callable(fetch_order):
+        return "pending", None
+    try:
+        row = fetch_order(http, api_key, order_id)
+    except Exception as e:
+        LOG.warning("order-state probe raised for %s: %s", order_id, e)
+        return "pending", None
+    if not isinstance(row, dict) or row.get("_status") == "not_found":
+        return "pending", row if isinstance(row, dict) else None
+    status = str(
+        row.get("native_status") or row.get("status") or "",
+    ).lower()
+    filled_qty = _row_filled_qty(row)
+    if status == "filled" or filled_qty > 0:
+        return "filled", row
+    if status in _DEAD_STATUSES_LOWER:
+        return "canceled", row
+    return "pending", row
 
 
 def _broker_position_rows(rows: list[dict]) -> dict[str, float]:
@@ -2301,6 +2389,86 @@ def process_fill_events_v2(
     return out
 
 
+# Cancel-verification polling knobs. Tests monkeypatch these to
+# (small, 0.0) so verify-timeout paths don't sleep for real.
+_CANCEL_VERIFY_ATTEMPTS = 6
+_CANCEL_VERIFY_SLEEP_S = 0.5
+
+_DEAD_STATUSES_LOWER = frozenset(s.lower() for s in _DEAD_STATUSES)
+
+
+def _row_filled_qty(row: dict | None) -> int:
+    try:
+        return int(float(
+            (row or {}).get("filled_qty")
+            or (row or {}).get("filled_quantity") or 0,
+        ))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _await_cancel_terminal(
+    oa_client, http, api_key: str, order_id: str, *,
+    attempts: int | None = None, sleep_s: float | None = None,
+    treat_not_found_as_canceled: bool = False,
+) -> tuple[str, dict | None]:
+    """Poll an order after a cancel request until it reaches a
+    terminal state. OpenAlgo wraps Alpaca's ASYNC cancel — a
+    cancel-accept only means ``pending_cancel``; the order can still
+    fill. Returns ``(verdict, row)`` where verdict is:
+
+    - ``"canceled"``: terminal dead status with zero filled qty.
+    - ``"filled"``: FILLED, or ANY terminal status with
+      filled_qty > 0 (a partial fill on a canceled order traded real
+      shares and must be booked by the caller).
+    - ``"pending"``: still live / pending_cancel after ``attempts``
+      polls, or the status fetch kept failing — the caller must NOT
+      assume the cancel took.
+
+    ``treat_not_found_as_canceled`` must be True only when the caller
+    has just received a cancel-accept for this exact id. An oa_client
+    without ``fetch_order`` (legacy test surrogates) is trusted at
+    its cancel-accept word — verdict ``"canceled"`` — because the
+    live client always ships ``fetch_order``.
+    """
+    if attempts is None:
+        attempts = _CANCEL_VERIFY_ATTEMPTS
+    if sleep_s is None:
+        sleep_s = _CANCEL_VERIFY_SLEEP_S
+    fetch_order = getattr(oa_client, "fetch_order", None)
+    if not callable(fetch_order):
+        return "canceled", None
+    row: dict | None = None
+    for attempt in range(max(1, int(attempts))):
+        if attempt:
+            time.sleep(max(0.0, float(sleep_s)))
+        try:
+            row = fetch_order(http, api_key, order_id)
+        except Exception as e:
+            LOG.warning(
+                "cancel-verify fetch raised for %s: %s", order_id, e,
+            )
+            row = None
+        if not isinstance(row, dict):
+            continue
+        if row.get("_status") == "not_found":
+            if treat_not_found_as_canceled:
+                return "canceled", None
+            continue
+        status = str(
+            row.get("native_status") or row.get("status") or "",
+        ).lower()
+        filled_qty = _row_filled_qty(row)
+        if status == "filled" or (
+            status in _DEAD_STATUSES_LOWER and filled_qty > 0
+        ):
+            return "filled", row
+        if status in _DEAD_STATUSES_LOWER:
+            return "canceled", row
+        # live / pending_cancel / partially_filled → keep polling.
+    return "pending", row
+
+
 def trigger_exit_v2(
     symbol: str,
     pos: dict,
@@ -2328,10 +2496,18 @@ def trigger_exit_v2(
     pos["status"] = "exit_pending"
     pos["exit_reason_pending"] = reason
     pos["exit_pending_at"] = _iso(_now_utc())
+
+    def _revert_to_filled() -> None:
+        pos["status"] = "filled"
+        pos.pop("exit_reason_pending", None)
+        pos.pop("exit_pending_at", None)
+
     # Every existing child must be CONFIRMED canceled before the
     # market sell goes out — a still-live stop/target plus a market
-    # sell would leave the account short after both fill. Any cancel
-    # failure aborts the exit; the next tick retries.
+    # sell would leave the account short after both fill. The cancel
+    # accept alone is not confirmation (async at the broker); each
+    # accepted cancel is verified terminal via _await_cancel_terminal.
+    # Any failure aborts the exit; the next tick retries.
     children = pos.get("child_order_ids") or {}
     for role in ("target", "stop"):
         oid = children.get(role)
@@ -2345,9 +2521,7 @@ def trigger_exit_v2(
                    "exception": str(e)}
         status = res.get("status") if isinstance(res, dict) else None
         if status not in ("canceled", "noop"):
-            pos["status"] = "filled"
-            pos.pop("exit_reason_pending", None)
-            pos.pop("exit_pending_at", None)
+            _revert_to_filled()
             _emit_ledger_v2(cfg, "exit_aborted_cancel_failed", {
                 "symbol": symbol, "link_id": pos.get("link_id"),
                 "role": role, "order_id": oid, "reason": reason,
@@ -2359,6 +2533,38 @@ def trigger_exit_v2(
                 symbol, role, oid, res,
             )
             return False
+        if status == "canceled":
+            verdict, _row = _await_cancel_terminal(
+                oa_client, http, api_key, oid,
+                treat_not_found_as_canceled=True,
+            )
+            if verdict == "filled":
+                # The cancel raced the child's own fill — the position
+                # already exited at the broker. Selling now would go
+                # short. Revert; the fill echo books the closure.
+                _revert_to_filled()
+                _emit_ledger_v2(cfg, "exit_aborted_child_filled", {
+                    "symbol": symbol, "link_id": pos.get("link_id"),
+                    "role": role, "order_id": oid, "reason": reason,
+                })
+                LOG.warning(
+                    "exit for %s aborted: %s child %s FILLED during "
+                    "cancel — fill echo will book the closure; no "
+                    "market sell", symbol, role, oid,
+                )
+                return False
+            if verdict == "pending":
+                _revert_to_filled()
+                _emit_ledger_v2(cfg, "exit_aborted_cancel_unconfirmed", {
+                    "symbol": symbol, "link_id": pos.get("link_id"),
+                    "role": role, "order_id": oid, "reason": reason,
+                })
+                LOG.error(
+                    "exit for %s aborted: cancel of %s child %s never "
+                    "went terminal — will retry next tick",
+                    symbol, role, oid,
+                )
+                return False
     venue = pos.get("venue_code") or (cfg.get("execution") or {}).get(
         "default_venue_code", "XNAS",
     )
