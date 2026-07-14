@@ -830,12 +830,17 @@ def _reconcile_cumulative_from_ledger(state: dict, cfg: dict) -> None:
 
 
 def _write_state_atomic(state: dict, path: Path) -> None:
-    """Persist state via a tmp file + os.replace so a crash mid-write
-    cannot corrupt the live state.json (which now also carries the
-    compounding cumulative). Mirrors persist_config_snapshot's pattern."""
+    """Persist state via tmp file + fsync + os.replace so neither a
+    process crash mid-write NOR an OS/power failure right after the
+    rename can corrupt or lose the live state.json (which carries the
+    compounding cumulative and the open-lot book). The fsync flushes
+    the tmp file's data to disk BEFORE the rename makes it visible."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(state, default=str, indent=2), encoding="utf-8")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(json.dumps(state, default=str, indent=2))
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, path)
 
 
@@ -3465,7 +3470,14 @@ def _signal_fade_eval(
         ((cfg.get("historical_features") or {}).get("volume_curve")
          or {}).get("fallback_opening_15m_share", 0.08),
     )
-    start_et = _et_session_datetime(now_et, dt_time(9, 45))
+    # Session start for the fade-score bar window comes from config
+    # (fix Phase 9 — was hardcoded 09:45, silently diverging from any
+    # tuned session.scanner_start).
+    scanner_start = _parse_hhmm(
+        (cfg.get("session") or {}).get("scanner_start", "09:45"),
+        dt_time(9, 45),
+    )
+    start_et = _et_session_datetime(now_et, scanner_start)
     end_ts = pd.Timestamp(now_et)
     if end_ts.tzinfo is None:
         end_ts = end_ts.tz_localize("America/New_York")
