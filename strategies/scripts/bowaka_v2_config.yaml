@@ -300,6 +300,9 @@ exits:
 
   signal_fade:
     enabled: true
+    # Exits fire ONLY when active: true. false = telemetry-only
+    # (counterfactual_exits.jsonl rows + ledger), per initial_mode.
+    active: false
     initial_mode: "telemetry_then_active_after_validation"
     eval_time: "15:45"
     telemetry_time: "16:05"
