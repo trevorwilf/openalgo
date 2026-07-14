@@ -158,6 +158,9 @@ CANONICAL_REJECTION_REASONS: frozenset[str] = frozenset({
     "consecutive_stopouts",
     "strategy_slice_loss",
     "max_entries_per_scan",
+    # Fix Phase 4 — entries blocked while a submit's outcome is
+    # unknown (resolver adjudicating a raised / id-less submit).
+    "unresolved_order_outcome",
 })
 
 
