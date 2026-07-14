@@ -36,6 +36,7 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -438,6 +439,28 @@ def _resolve_path(cfg: dict, key: str, default: Path) -> Path:
 # ---------------------------------------------------------------- live suppliers
 
 
+def _drop_today_forming_bar(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop today's (ET) daily bar so prior-daily baselines never see
+    the current session (handoff §5.7 lookahead rule).
+
+    The live daily fetch uses ``end=now``, so an intraday rebuild would
+    otherwise fold today's partial (or just-closed) bar into
+    prior_close / ATR / volume / EMA — corrupting every scanner gate
+    that hot-reloads the feature cache for the rest of the session.
+    No-op for a pre-market build (today's bar does not exist yet) and
+    for any frame already ending at a prior session.
+    """
+    if df is None or len(df) == 0 or "timestamp" not in df.columns:
+        return df
+    ts = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+    today_et = pd.Timestamp.now(tz="America/New_York").date()
+    bar_et_date = ts.dt.tz_convert("America/New_York").dt.date
+    keep = bar_et_date < today_et
+    if keep.all():
+        return df
+    return df[keep].reset_index(drop=True)
+
+
 def _live_suppliers(cfg: dict):
     """Wire the universe builder to OpenAlgo's /api/v2/bars + the
     cached US-equity asset list. Returns (asset_supplier,
@@ -456,8 +479,9 @@ def _live_suppliers(cfg: dict):
             "(or pass --dry-run)"
         )
         raise SystemExit(2)
-    http = oa.make_http_client(host)
     lookback_days = int(live.get("daily_bars_lookback_calendar_days", 45))
+    concurrency = max(1, int(live.get("fetch_concurrency", 32)))
+    http = oa.make_http_client(host, max_connections=concurrency + 8)
     asset_cache_path = live.get(
         "asset_list_cache", "strategies/scripts/data/universe_us_equity.json",
     )
@@ -467,7 +491,17 @@ def _live_suppliers(cfg: dict):
         (cfg.get("universe") or {}).get("pre_fetch_sample_seed", 42)
     )
 
+    # Memoize the eligible asset list + a one-time concurrent daily-bar
+    # prefetch. build_universe calls asset_supplier() once then
+    # bars_supplier(symbol) per symbol in a sequential loop; backing
+    # bars_supplier with a parallel prefetch turns that loop into dict
+    # lookups so a full (un-sampled) eligible set still builds in
+    # seconds rather than minutes.
+    _memo: dict[str, Any] = {"assets": None, "bars": None}
+
     def asset_supplier() -> list[dict]:
+        if _memo["assets"] is not None:
+            return _memo["assets"]
         cache_path = paths.REPO_ROOT / asset_cache_path
         if not cache_path.exists():
             LOG.error(
@@ -514,21 +548,57 @@ def _live_suppliers(cfg: dict):
                 "pre-fetch sample: %d symbols (seed=%d)",
                 len(all_rows), pre_sample_seed,
             )
+        _memo["assets"] = all_rows
         return all_rows
 
-    def bars_supplier(symbol: str) -> pd.DataFrame:
-        venue = _guess_venue_code("")  # default XNAS; refined by per-symbol exchange
+    def _fetch_one_daily(symbol: str) -> pd.DataFrame:
         end = datetime.now(timezone.utc)
         start = end - timedelta(days=lookback_days)
         try:
             return oa.fetch_bars(
                 http, api_key,
-                venue_code=venue, symbol=symbol,
+                venue_code=_guess_venue_code(""), symbol=symbol,
                 interval="1d", start=start, end=end,
             )
         except Exception as e:
             LOG.warning("daily bars fetch failed for %s: %s", symbol, e)
             return pd.DataFrame()
+
+    def _prefetch_all_daily() -> None:
+        assets = asset_supplier()
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=lookback_days)
+        reqs = [
+            {
+                "venue_code": _guess_venue_code(""),
+                "symbol": a["symbol"],
+                "interval": "1d",
+                "start": start, "end": end,
+            }
+            for a in assets
+        ]
+        t0 = time.monotonic()
+        _memo["bars"] = oa.fetch_bars_concurrent(
+            http, api_key, reqs, concurrency=concurrency,
+        )
+        LOG.info(
+            "prefetched daily bars for %d symbols in %.1fs (concurrency=%d)",
+            len(reqs), time.monotonic() - t0, concurrency,
+        )
+
+    def bars_supplier(symbol: str) -> pd.DataFrame:
+        # Daily bars are venue-agnostic here (default XNAS), matching the
+        # prior single-symbol behavior. First call triggers the one-time
+        # concurrent prefetch; the rest are dict lookups.
+        if _memo["bars"] is None:
+            _prefetch_all_daily()
+        df = _memo["bars"].get(symbol)
+        if df is None:
+            df = _fetch_one_daily(symbol)
+        # Lookahead guard: never let today's forming session enter the
+        # prior-daily baseline (applied at the single serving point so
+        # both the prefetch cache and the fallback path are covered).
+        return _drop_today_forming_bar(df)
 
     return asset_supplier, bars_supplier, http
 

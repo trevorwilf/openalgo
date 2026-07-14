@@ -411,6 +411,85 @@ def _synth_daily_bars(symbol: str, session_date: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+# ---- lake-backed suppliers (the DEFAULT when --synth is not passed) ----------
+# A paired lab-vs-prod parity run pins both sides to the same lake and reads it
+# through the SAME bowaka_common reader, so the two read identically.
+
+def _resolve_backtest_lake_root(args: argparse.Namespace, cfg: dict) -> Path:
+    """Resolve the market-data lake root for a lake-backed run.
+
+    Precedence: ``--lake-root`` CLI > ``market_data.shared_root`` in the config >
+    ``$MARKET_DATA_ROOT``. Raises if none resolve (the caller wants lake data but
+    gave no root — pass ``--lake-root`` / set the env, or use ``--synth``).
+    """
+    import os
+
+    root = getattr(args, "lake_root", None)
+    if not root:
+        root = (cfg.get("market_data") or {}).get("shared_root")
+    if not root:
+        root = os.environ.get("MARKET_DATA_ROOT")
+    if not root:
+        raise ValueError(
+            "no market-data lake root resolved -- pass --lake-root, set "
+            "market_data.shared_root in the config, export $MARKET_DATA_ROOT, "
+            "or run with --synth for the synthetic smoke suppliers."
+        )
+    return Path(root)
+
+
+def _resolve_required_adjustment(cfg: dict) -> str:
+    """The daily-bar adjustment the config requires.
+
+    ``'split_adjusted'`` when the config sets ``require_split_adjustment`` or
+    ``require_adjusted_daily_bars`` (an intended-realism contract), else
+    ``'raw'``. Mirrors the lab's ``daily_adjustment_for_config`` so the prior-day
+    baselines (ATR%, EMA, ADV) are computed off the same adjustment on both sides.
+    """
+    md = cfg.get("market_data") or {}
+    if md.get("require_split_adjustment") or md.get("require_adjusted_daily_bars"):
+        return "split_adjusted"
+    return "raw"
+
+
+def _make_lake_suppliers(
+    lake_root: Path, cfg: dict, adjustment: str,
+) -> tuple[
+    Callable[[str, str], pd.DataFrame],
+    Callable[[str, str], pd.DataFrame],
+    Callable[[str, str, datetime], dict] | None,
+]:
+    """Build ``(minute_bars_supplier, daily_bars_supplier, quote_supplier)``
+    reading the shared lake via ``bowaka_common.marketdata.MarketDataStore`` — the
+    SAME reader the lab uses, so a paired run reads identically.
+
+    ``minute_bars_supplier(symbol, session_date)`` → the session's minute bars
+    (the caller filters by scan time). ``daily_bars_supplier(symbol, session_date)``
+    → the trailing daily bars ending the day BEFORE the session (no look-ahead).
+    """
+    from bowaka_common.marketdata import MarketDataStore
+
+    md = cfg.get("market_data") or {}
+    feed = str(md.get("feed", "iex"))
+    vendor = str(md.get("vendor", "alpaca"))
+    daily_lookback_days = 400
+    store = MarketDataStore(lake_root, vendor=vendor)
+
+    def minute_bars_supplier(symbol: str, session_date: str) -> pd.DataFrame:
+        start = pd.Timestamp(session_date + " 00:00", tz="America/New_York").tz_convert("UTC")
+        end = pd.Timestamp(session_date + " 23:59", tz="America/New_York").tz_convert("UTC")
+        return store.minute_bars(symbol, start, end, feed=feed)
+
+    def daily_bars_supplier(symbol: str, session_date: str) -> pd.DataFrame:
+        end = pd.Timestamp(session_date).date() - timedelta(days=1)
+        start = end - timedelta(days=daily_lookback_days)
+        return store.daily_bars(symbol, start, end, feed=feed, adjustment=adjustment)
+
+    # The prod backtester's quote handling falls back to the bar low/high when no
+    # quote_supplier is wired (entry bid/ask). Lake quotes are not wired here.
+    return minute_bars_supplier, daily_bars_supplier, None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Bowaka v2 backtester")
     parser.add_argument("--config", required=True)
@@ -425,6 +504,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--synth", action="store_true",
         help="Use built-in synthetic bar suppliers (smoke).",
+    )
+    parser.add_argument(
+        "--lake-root", dest="lake_root", default=None,
+        help="Market-data lake root for the default (lake-backed) suppliers. "
+             "Falls back to market_data.shared_root / $MARKET_DATA_ROOT.",
     )
     args = parser.parse_args(argv)
 
@@ -449,13 +533,26 @@ def main(argv: list[str] | None = None) -> int:
         LOG.error("symbols file %s not found and --synth not set", symbols_file)
         return 2
 
-    minute_bars = _synth_minute_bars if args.synth else _synth_minute_bars
-    daily_bars = _synth_daily_bars if args.synth else _synth_daily_bars
+    # Default to LAKE-backed suppliers; --synth selects the synthetic smoke
+    # suppliers. (The pre-fix code had a dead ternary that returned the synthetic
+    # suppliers on BOTH branches, so every run silently used synthetic data.)
+    if args.synth:
+        minute_bars = _synth_minute_bars
+        daily_bars = _synth_daily_bars
+        quote_supplier = None
+    else:
+        lake_root = _resolve_backtest_lake_root(args, cfg)
+        adjustment = _resolve_required_adjustment(cfg)
+        LOG.info("lake-backed suppliers: root=%s adjustment=%s", lake_root, adjustment)
+        minute_bars, daily_bars, quote_supplier = _make_lake_suppliers(
+            lake_root, cfg, adjustment,
+        )
 
     trades, summary = run_backtest(
         cfg=cfg, sessions=sessions, symbols=symbols,
         minute_bars_supplier=minute_bars,
         daily_bars_supplier=daily_bars,
+        quote_supplier=quote_supplier,
         cost_stress=args.cost_stress,
         ablation=args.ablation,
     )

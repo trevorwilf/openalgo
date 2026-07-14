@@ -637,25 +637,63 @@ def _file_mtime(p: Path) -> float:
 def _run_live(
     cfg: dict, universe: dict, daily_cache, volume_curve, state,
 ) -> int:
-    """Long-running live scan loop. Polls OpenAlgo /api/v2/bars for
-    each universe symbol every scan_interval_seconds, evaluates
-    gates, emits candidate events.
+    """Long-running live scan loop. Each scan_interval_seconds it
+    prefetches OpenAlgo /api/v2/bars for every universe symbol
+    concurrently (fetch_concurrency workers), evaluates gates, and
+    emits candidate events.
 
     Hot-reload: each tick checks the mtime of universe_snapshot.json,
     daily_feature_cache.parquet, and volume_curve.parquet. When the
     universe builder writes a fresh snapshot (atomic rename via
     os.replace), the scanner picks up the new files at the next scan
-    without a process restart. The live_bars_supplier closure
+    without a process restart. The prefetch_scan_bars closure
     captures ``universe`` by name, so a rebind here propagates to
-    the supplier automatically.
+    the next prefetch automatically.
     """
     import bowaka_v2_openalgo_client as oa
+    import bowaka_v2_alpaca_data as ad
     import signal as _signal
     host, api_key = oa.resolve_host_and_key()
-    http = oa.make_http_client(host, timeout=30.0)
     sess_cfg = cfg.get("session") or {}
     scanner_cfg = cfg.get("scanner") or {}
     interval = int(scanner_cfg.get("scan_interval_seconds", 60))
+    # Concurrent minute-bar prefetch fan-out. Each scan tick fetches
+    # bars for every universe symbol in parallel so a large universe
+    # (cap_to_n_symbols) still completes well within scan_interval.
+    fetch_concurrency = max(1, int(scanner_cfg.get("fetch_concurrency", 24)))
+    http = oa.make_http_client(
+        host, timeout=30.0, max_connections=fetch_concurrency + 8,
+    )
+
+    # Bar source: 'openalgo' (default — single-symbol /api/v2/bars via the
+    # local single-worker server) or 'alpaca_direct' (one multi-symbol
+    # request straight to Alpaca, bypassing the server bottleneck). When
+    # alpaca_direct can't resolve creds at startup we downgrade to
+    # openalgo so the scanner never fails to start; per-tick errors also
+    # fall back to openalgo. The two paths return identical {symbol: df}.
+    bar_source = (scanner_cfg.get("bar_source") or "openalgo").strip().lower()
+    alpaca_chunk = int(scanner_cfg.get("alpaca_chunk_size", 200))
+    alpaca_conc = max(1, int(scanner_cfg.get("alpaca_fetch_concurrency", 4)))
+    ad_client = None
+    ad_feed = None
+    if bar_source == "alpaca_direct":
+        try:
+            _headers, ad_feed = ad.resolve_alpaca_data_auth()
+            ad_client = ad.make_data_client(
+                _headers, max_connections=alpaca_conc + 4,
+            )
+            LOG.info(
+                "bar_source=alpaca_direct (feed=%s, chunk=%d, conc=%d) — "
+                "minute bars fetched direct from Alpaca",
+                ad_feed, alpaca_chunk, alpaca_conc,
+            )
+        except Exception as e:
+            LOG.error(
+                "bar_source=alpaca_direct setup failed (%s); falling back "
+                "to openalgo", e,
+            )
+            bar_source = "openalgo"
+            ad_client = None
 
     # Resolved input paths + initial mtimes. Used by the per-tick
     # hot-reload check below.
@@ -693,24 +731,42 @@ def _run_live(
     except (ValueError, OSError):
         pass
 
-    def live_bars_supplier(symbol: str, scan_ts):
-        # Fetch this symbol's minute bars from session_start → scan_ts.
+    def prefetch_scan_bars(scan_ts) -> dict:
+        # Concurrently fetch every universe symbol's minute bars from
+        # session_start → scan_ts. Returns {symbol: DataFrame}. Reads
+        # ``universe`` by name so a hot-reload rebind is picked up on
+        # the next tick.
         scan_ts_utc = pd.Timestamp(scan_ts)
         if scan_ts_utc.tzinfo is None:
             scan_ts_utc = scan_ts_utc.tz_localize("UTC")
-        # session_start ET → UTC.
-        start_utc = session_start.tz_convert("UTC")
-        venue = "XNAS"
-        for s in universe.get("symbols") or []:
-            if s["symbol"] == symbol:
-                venue = s.get("venue_code", "XNAS")
-                break
-        return oa.fetch_bars(
-            http, api_key,
-            venue_code=venue, symbol=symbol,
-            interval="1m",
-            start=start_utc.to_pydatetime(),
-            end=scan_ts_utc.to_pydatetime(),
+        start_dt = session_start.tz_convert("UTC").to_pydatetime()
+        end_dt = scan_ts_utc.to_pydatetime()
+        syms_meta = universe.get("symbols") or []
+        if bar_source == "alpaca_direct" and ad_client is not None:
+            try:
+                return ad.fetch_bars_multi(
+                    ad_client, ad_feed,
+                    [s["symbol"] for s in syms_meta],
+                    "1m", start_dt, end_dt,
+                    chunk_size=alpaca_chunk, concurrency=alpaca_conc,
+                )
+            except Exception as e:
+                LOG.warning(
+                    "alpaca_direct prefetch failed (%s); falling back to "
+                    "openalgo for this tick", e,
+                )
+        reqs = [
+            {
+                "venue_code": s.get("venue_code", "XNAS"),
+                "symbol": s["symbol"],
+                "interval": "1m",
+                "start": start_dt,
+                "end": end_dt,
+            }
+            for s in syms_meta
+        ]
+        return oa.fetch_bars_concurrent(
+            http, api_key, reqs, concurrency=fetch_concurrency,
         )
 
     try:
@@ -780,15 +836,20 @@ def _run_live(
 
             scan_ts = now.tz_convert("UTC").to_pydatetime()
             try:
+                _t_fetch0 = time.monotonic()
+                bars_by_sym = prefetch_scan_bars(scan_ts)
+                fetch_secs = time.monotonic() - _t_fetch0
                 emitted = evaluate_one_scan(
                     cfg=cfg, universe_snapshot=universe,
                     daily_cache=daily_cache, volume_curve=volume_curve,
                     state=state, scan_ts=scan_ts,
-                    bars_supplier=live_bars_supplier,
+                    bars_supplier=lambda sym, _ts: bars_by_sym.get(sym),
                 )
                 LOG.info(
-                    "scan @ %s: emitted=%d events",
+                    "scan @ %s: emitted=%d events "
+                    "(prefetched %d symbols in %.1fs, conc=%d)",
                     scan_ts.isoformat()[:19], len(emitted),
+                    len(bars_by_sym), fetch_secs, fetch_concurrency,
                 )
             except Exception as e:
                 LOG.exception("scan tick raised: %s", e)

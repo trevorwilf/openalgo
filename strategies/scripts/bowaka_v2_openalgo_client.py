@@ -40,8 +40,20 @@ def make_http_client(
     base_url: str,
     timeout: float = 15.0,
     transport: httpx.BaseTransport | None = None,
+    max_connections: int | None = None,
 ) -> httpx.Client:
+    """Build the shared OpenAlgo HTTP client.
+
+    ``max_connections`` sizes the connection pool for concurrent fan-out
+    (e.g. the scanner / universe builder prefetching many symbols at
+    once). Leave it None for the low-concurrency callers (strategy).
+    """
     kwargs: dict[str, Any] = {"base_url": base_url, "timeout": timeout}
+    if max_connections is not None:
+        kwargs["limits"] = httpx.Limits(
+            max_connections=max_connections,
+            max_keepalive_connections=max_connections,
+        )
     if transport is not None:
         kwargs["transport"] = transport
     return httpx.Client(**kwargs)
@@ -125,6 +137,55 @@ def fetch_bars(
     elif "timestamp" in df.columns:
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
     return df.sort_values("timestamp").reset_index(drop=True)
+
+
+def fetch_bars_concurrent(
+    http: httpx.Client,
+    api_key: str,
+    requests: list[dict],
+    *,
+    concurrency: int = 32,
+) -> dict[str, pd.DataFrame]:
+    """Fetch bars for many requests concurrently. Returns {symbol: df}.
+
+    ``requests`` is a list of dicts, each with ``venue_code``,
+    ``symbol``, ``interval``, ``start``, ``end`` (same params as
+    :func:`fetch_bars`). The fan-out is a bounded thread pool — each
+    ``fetch_bars`` call releases the GIL while waiting on the socket,
+    so threads give real I/O concurrency here. Per-symbol failures
+    yield an empty DataFrame (never raises); ``httpx.Client`` is
+    thread-safe so the shared client + pool is reused across workers.
+
+    The OpenAlgo ``/api/v2/bars`` endpoint is single-instrument and is
+    not rate-limited, so the practical ceiling is the upstream data
+    provider's request budget — keep ``concurrency`` under it.
+    """
+    out: dict[str, pd.DataFrame] = {}
+    if not requests:
+        return out
+
+    def _one(req: dict) -> tuple[str, pd.DataFrame]:
+        sym = req["symbol"]
+        try:
+            df = fetch_bars(
+                http, api_key,
+                venue_code=req.get("venue_code", "XNAS"),
+                symbol=sym,
+                interval=req["interval"],
+                start=req["start"], end=req["end"],
+            )
+        except Exception as e:  # fetch_bars already swallows HTTP errors
+            LOG.debug("concurrent bars fetch failed for %s: %s", sym, e)
+            df = pd.DataFrame()
+        return sym, df
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    workers = max(1, min(int(concurrency), len(requests)))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for sym, df in ex.map(_one, requests):
+            out[sym] = df
+    return out
 
 
 # ---------------------------------------------------------------- quotes

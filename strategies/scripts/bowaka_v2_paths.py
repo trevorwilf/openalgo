@@ -50,6 +50,7 @@ LIQUIDITY_MONITOR_PATH      = _DATA_ROOT / "liquidity_monitor.jsonl"
 SCANNER_HEARTBEAT_PATH      = _DATA_ROOT / "scanner_heartbeat.jsonl"
 SCANNER_STATE_PATH          = _DATA_ROOT / "scanner_state.json"
 SCANNER_GATE_DUMP_PATH      = _DATA_ROOT / "scanner_gate_dump.jsonl"
+GATE_DUMP_ARCHIVE_DIR       = _DATA_ROOT / "gate_dump_archive"
 
 # ---- Backtest / replay outputs ---------------------------------------
 
@@ -97,6 +98,7 @@ __all__ = [
     "SCANNER_HEARTBEAT_PATH",
     "SCANNER_STATE_PATH",
     "SCANNER_GATE_DUMP_PATH",
+    "GATE_DUMP_ARCHIVE_DIR",
     "BACKTEST_REPORTS_DIR",
     "COUNTERFACTUAL_REPORTS_DIR",
     "REPLAY_REPORTS_DIR",
