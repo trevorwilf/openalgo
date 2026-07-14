@@ -179,3 +179,173 @@ def test_dry_run_never_clobbers_existing_production_outputs(tmp_path):
         '{"symbols": ["PRODUCTION"], "sentinel": 1}')
     assert prod_cache.read_bytes() == b"PRODUCTION-PARQUET-SENTINEL"
     assert (tmp_path / "_dryrun" / "universe_snapshot.json").exists()
+
+
+# ---- fix Phase 8: shrink guard --------------------------------------------------
+
+
+def _write_prev_snapshot(tmp_path: Path, count: int) -> Path:
+    snap = tmp_path / "universe_snapshot.json"
+    snap.write_text(json.dumps({
+        "symbols_count": count,
+        "symbols": [{"symbol": f"S{i}"} for i in range(min(count, 3))],
+        "universe_hash": "sha256:prev",
+    }), encoding="utf-8")
+    return snap
+
+
+def _rows(n: int) -> list[dict]:
+    return [{"symbol": f"S{i}"} for i in range(n)]
+
+
+def test_shrink_guard_refuses_empty_build(tmp_path, monkeypatch):
+    monkeypatch.delenv("BOWAKA_UNIVERSE_ALLOW_SHRINK", raising=False)
+    cfg = _cfg(tmp_path)
+    _write_prev_snapshot(tmp_path, 600)
+    assert ub._refuse_suspicious_shrink([], cfg) == 6
+
+
+def test_shrink_guard_refuses_empty_even_without_previous(tmp_path, monkeypatch):
+    monkeypatch.delenv("BOWAKA_UNIVERSE_ALLOW_SHRINK", raising=False)
+    cfg = _cfg(tmp_path)
+    assert ub._refuse_suspicious_shrink([], cfg) == 6
+
+
+def test_shrink_guard_refuses_600_to_200(tmp_path, monkeypatch):
+    monkeypatch.delenv("BOWAKA_UNIVERSE_ALLOW_SHRINK", raising=False)
+    cfg = _cfg(tmp_path)
+    _write_prev_snapshot(tmp_path, 600)
+    assert ub._refuse_suspicious_shrink(_rows(200), cfg) == 6
+
+
+def test_shrink_guard_allows_600_to_550(tmp_path, monkeypatch):
+    monkeypatch.delenv("BOWAKA_UNIVERSE_ALLOW_SHRINK", raising=False)
+    cfg = _cfg(tmp_path)
+    _write_prev_snapshot(tmp_path, 600)
+    assert ub._refuse_suspicious_shrink(_rows(550), cfg) is None
+
+
+def test_shrink_guard_ignores_small_previous(tmp_path, monkeypatch):
+    """prev < 50 symbols never arms the ratio guard (tiny test
+    universes shrink freely)."""
+    monkeypatch.delenv("BOWAKA_UNIVERSE_ALLOW_SHRINK", raising=False)
+    cfg = _cfg(tmp_path)
+    _write_prev_snapshot(tmp_path, 40)
+    assert ub._refuse_suspicious_shrink(_rows(5), cfg) is None
+
+
+def test_shrink_guard_env_override_allows_write(tmp_path, monkeypatch, caplog):
+    import logging
+    monkeypatch.setenv("BOWAKA_UNIVERSE_ALLOW_SHRINK", "1")
+    cfg = _cfg(tmp_path)
+    _write_prev_snapshot(tmp_path, 600)
+    with caplog.at_level(logging.WARNING):
+        assert ub._refuse_suspicious_shrink(_rows(200), cfg) is None
+    assert any("shrink override" in r.message for r in caplog.records)
+
+
+def test_build_and_write_exit6_leaves_snapshot_untouched(tmp_path, monkeypatch):
+    """End-to-end: a 2-symbol build against an existing 600-symbol
+    snapshot exits 6 with the snapshot byte-identical."""
+    monkeypatch.delenv("BOWAKA_UNIVERSE_ALLOW_SHRINK", raising=False)
+    cfg = _cfg(tmp_path)
+    snap = _write_prev_snapshot(tmp_path, 600)
+    before = snap.read_bytes()
+    assets = [
+        {"symbol": "FOO", "exchange": "NASDAQ", "name": "Foo Inc",
+         "asset_class": "us_equity", "tradable": True, "status": "active"},
+        {"symbol": "BAR", "exchange": "NYSE", "name": "Bar Holdings",
+         "asset_class": "us_equity", "tradable": True, "status": "active"},
+    ]
+
+    def bars_supplier(symbol):
+        rows = []
+        for i in range(25):
+            c = 5.0 + i * 0.05
+            rows.append({
+                "timestamp": datetime(2026, 4, 1, tzinfo=timezone.utc)
+                             + timedelta(days=i),
+                "open": c - 0.05, "high": c + 0.10,
+                "low":  c - 0.10, "close": c, "volume": 500_000,
+            })
+        return pd.DataFrame(rows)
+
+    rc = ub.build_and_write(cfg, lambda: assets, bars_supplier)
+    assert rc == 6
+    assert snap.read_bytes() == before
+    assert not (tmp_path / "daily_feature_cache.parquet").exists()
+
+
+def test_build_and_write_no_previous_snapshot_writes(tmp_path, monkeypatch):
+    monkeypatch.delenv("BOWAKA_UNIVERSE_ALLOW_SHRINK", raising=False)
+    cfg = _cfg(tmp_path)
+    assets = [
+        {"symbol": "FOO", "exchange": "NASDAQ", "name": "Foo Inc",
+         "asset_class": "us_equity", "tradable": True, "status": "active"},
+    ]
+
+    def bars_supplier(symbol):
+        rows = []
+        for i in range(25):
+            c = 5.0 + i * 0.05
+            rows.append({
+                "timestamp": datetime(2026, 4, 1, tzinfo=timezone.utc)
+                             + timedelta(days=i),
+                "open": c - 0.05, "high": c + 0.10,
+                "low":  c - 0.10, "close": c, "volume": 500_000,
+            })
+        return pd.DataFrame(rows)
+
+    rc = ub.build_and_write(cfg, lambda: assets, bars_supplier)
+    assert rc == 0
+    doc = json.loads((tmp_path / "universe_snapshot.json").read_text())
+    assert doc["symbols_count"] == 1
+
+
+# ---- fix Phase 8: stale asset-cache warning ---------------------------------------
+
+
+def test_stale_asset_cache_warns(tmp_path, monkeypatch, caplog):
+    import logging
+    import os as _os
+    import time as _time
+
+    cache = tmp_path / "universe_us_equity.json"
+    cache.write_text(json.dumps({
+        "symbols": [], "exchanges": {}, "asset_meta": {},
+    }), encoding="utf-8")
+    ten_days_ago = _time.time() - 10 * 86400
+    _os.utime(cache, (ten_days_ago, ten_days_ago))
+
+    monkeypatch.setenv("OPENALGO_API_KEY", "test-key")
+    cfg = _cfg(tmp_path)
+    cfg["live_fetch"] = {"asset_list_cache": str(cache),
+                          "fetch_concurrency": 1}
+    asset_supplier, _bars, http = ub._live_suppliers(cfg)
+    try:
+        with caplog.at_level(logging.WARNING):
+            rows = asset_supplier()
+    finally:
+        http.close()
+    assert rows == []
+    assert any("days old" in r.message for r in caplog.records)
+
+
+def test_fresh_asset_cache_no_warning(tmp_path, monkeypatch, caplog):
+    import logging
+
+    cache = tmp_path / "universe_us_equity.json"
+    cache.write_text(json.dumps({
+        "symbols": [], "exchanges": {}, "asset_meta": {},
+    }), encoding="utf-8")
+    monkeypatch.setenv("OPENALGO_API_KEY", "test-key")
+    cfg = _cfg(tmp_path)
+    cfg["live_fetch"] = {"asset_list_cache": str(cache),
+                          "fetch_concurrency": 1}
+    asset_supplier, _bars, http = ub._live_suppliers(cfg)
+    try:
+        with caplog.at_level(logging.WARNING):
+            asset_supplier()
+    finally:
+        http.close()
+    assert not any("days old" in r.message for r in caplog.records)

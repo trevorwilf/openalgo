@@ -412,11 +412,15 @@ def write_outputs(
                               lines=True, compression="gzip")
         os.replace(tmp_cache, cache_path)
     else:
-        # Touch an empty parquet placeholder so downstream readers see it.
+        # Empty parquet placeholder so downstream readers see it —
+        # written atomically (tmp + replace) like the main path so a
+        # crash mid-write can't leave a torn cache file.
+        tmp_cache = cache_path.with_suffix(cache_path.suffix + ".tmp")
         try:
-            cache_df.to_parquet(cache_path, index=False)
+            cache_df.to_parquet(tmp_cache, index=False)
         except Exception:
-            cache_path.write_text("")
+            tmp_cache.write_text("")
+        os.replace(tmp_cache, cache_path)
 
     return snap_path, cache_path
 
@@ -510,6 +514,18 @@ def _live_suppliers(cfg: dict):
                 cache_path,
             )
             return []
+        try:
+            age_days = (
+                time.time() - cache_path.stat().st_mtime
+            ) / 86400.0
+            if age_days > 7:
+                LOG.warning(
+                    "asset list cache is %.0f days old (%s) — newly "
+                    "listed symbols are missing; refresh via the v1 "
+                    "prefilter", age_days, cache_path,
+                )
+        except OSError:
+            pass
         cache = json.loads(cache_path.read_text(encoding="utf-8"))
         symbols = cache.get("symbols") or []
         ex_by_sym = cache.get("exchanges") or {}
@@ -628,6 +644,9 @@ def build_and_write(
             snapshot_rows = snapshot_rows[:int(cap)]
             metadata["capped_to"] = int(cap)
             metadata["symbols_count"] = len(snapshot_rows)
+    rc = _refuse_suspicious_shrink(snapshot_rows, cfg)
+    if rc is not None:
+        return rc
     snap_path, cache_path = write_outputs(
         snapshot_rows, cache_df, metadata, cfg,
     )
@@ -639,6 +658,67 @@ def build_and_write(
     LOG.info("snapshot -> %s", snap_path)
     LOG.info("cache    -> %s", cache_path)
     return 0
+
+
+#: A previous snapshot at least this large arms the 50%-shrink guard.
+_SHRINK_GUARD_MIN_PREV = 50
+
+
+def _refuse_suspicious_shrink(
+    snapshot_rows: list[dict], cfg: dict,
+) -> int | None:
+    """Guard the LIVE write path against clobbering a good universe
+    with a bad build (finding 8): a transient asset-cache / bars-fetch
+    failure yields an empty (or drastically smaller) symbol list, and
+    writing it would blank the scanner for the rest of the session.
+
+    Refuses (exit code 6, nothing written) when the new build has 0
+    symbols, or when the existing snapshot holds >=
+    ``_SHRINK_GUARD_MIN_PREV`` symbols and the new build has fewer
+    than half of them. ``BOWAKA_UNIVERSE_ALLOW_SHRINK=1`` downgrades
+    the refusal to a WARNING (deliberate universe reductions). Dry-run
+    builds never route through here (they bypass build_and_write into
+    the _dryrun/ sandbox). Returns 6 to refuse, None to proceed."""
+    new_count = len(snapshot_rows)
+    snap_path = _resolve_path(cfg, "universe_snapshot_path",
+                                paths.UNIVERSE_SNAPSHOT_PATH)
+    prev_count = None
+    if snap_path.exists():
+        try:
+            prev_doc = json.loads(snap_path.read_text(encoding="utf-8"))
+            pc = prev_doc.get("symbols_count")
+            if isinstance(pc, int) and not isinstance(pc, bool):
+                prev_count = pc
+            elif isinstance(prev_doc.get("symbols"), list):
+                prev_count = len(prev_doc["symbols"])
+        except Exception as e:
+            LOG.warning(
+                "existing snapshot unreadable (%s) — shrink guard has "
+                "no baseline", e,
+            )
+    suspicious = new_count == 0 or (
+        prev_count is not None
+        and prev_count >= _SHRINK_GUARD_MIN_PREV
+        and new_count < 0.5 * prev_count
+    )
+    if not suspicious:
+        return None
+    if os.environ.get("BOWAKA_UNIVERSE_ALLOW_SHRINK") == "1":
+        LOG.warning(
+            "universe shrink override: writing %d symbols over an "
+            "existing snapshot of %s (BOWAKA_UNIVERSE_ALLOW_SHRINK=1)",
+            new_count, prev_count,
+        )
+        return None
+    LOG.error(
+        "REFUSING to write universe: new build has %d symbols vs the "
+        "existing snapshot's %s — this smells like a transient fetch/"
+        "cache failure, and writing it would blank the scanner. Set "
+        "BOWAKA_UNIVERSE_ALLOW_SHRINK=1 to force a deliberate "
+        "reduction. Nothing was written (exit 6).",
+        new_count, prev_count,
+    )
+    return 6
 
 
 # ---------------------------------------------------------------- dry-run fixture
