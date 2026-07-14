@@ -235,6 +235,12 @@ sizing:
     floor_fraction: 0.50      # effective_equity <= 0.50*base ($45k) => HALT new entries
     cap_multiple: 4.0         # sizing bankroll = min(effective_equity, 4*base) ($360k)
 
+# Startup broker-truth reconciliation. An orphan broker position
+# (held at the broker, unknown to state) exits with code 7 — the
+# watchdog does not restart on 7; operator triage required.
+reconcile:
+  halt_on_orphans: true
+
 risk:
   daily_loss_pct: 0.02403648309498329
   strategy_slice_loss_pct: 0.025
