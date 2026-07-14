@@ -160,6 +160,8 @@ def test_canonical_rejection_reasons_complete() -> None:
         "invalid_signal_price",
         "max_stopouts_per_day", "consecutive_stopouts",
         "strategy_slice_loss", "max_entries_per_scan",
+        # Fix Phase 4 — idempotency guard.
+        "unresolved_order_outcome",
     }
     assert set(schemas.CANONICAL_REJECTION_REASONS) == expected
 

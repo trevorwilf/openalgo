@@ -283,9 +283,12 @@ def submit_market_buy(
     symbol: str,
     qty: int,
     time_in_force: str = "DAY",
+    client_order_id: str | None = None,
 ) -> dict[str, Any]:
     """POST /api/v2/orders for a parent MARKET BUY. Returns the
-    parsed body with ``_http_status`` annotated."""
+    parsed body with ``_http_status`` annotated. ``client_order_id``
+    (unique per account at the broker) makes the submit idempotent —
+    a crash-replayed duplicate is rejected instead of double-buying."""
     body = {
         "apikey": api_key,
         "instrument": {
@@ -299,6 +302,8 @@ def submit_market_buy(
         "time_in_force": time_in_force,
         "session": "REGULAR",
     }
+    if client_order_id:
+        body["client_order_id"] = str(client_order_id)
     r = http.post("/api/v2/orders", json=body, headers=_api_headers(api_key))
     parsed = r.json() if r.content else {}
     parsed["_http_status"] = r.status_code
@@ -313,10 +318,12 @@ def submit_market_sell(
     symbol: str,
     qty: int,
     time_in_force: str = "DAY",
+    client_order_id: str | None = None,
 ) -> dict[str, Any]:
     """POST /api/v2/orders for a single SELL MARKET. Returns the parsed
     body with ``_http_status`` annotated. Caller validates http_status
-    in (200, 201) before treating as accepted."""
+    in (200, 201) before treating as accepted. ``client_order_id``
+    makes the sell idempotent at the broker."""
     body = {
         "apikey": api_key,
         "instrument": {
@@ -330,6 +337,8 @@ def submit_market_sell(
         "time_in_force": time_in_force,
         "session": "REGULAR",
     }
+    if client_order_id:
+        body["client_order_id"] = str(client_order_id)
     r = http.post("/api/v2/orders", json=body, headers=_api_headers(api_key))
     parsed = r.json() if r.content else {}
     parsed["_http_status"] = r.status_code
@@ -345,9 +354,11 @@ def submit_limit_buy(
     qty: int,
     price: float,
     time_in_force: str = "DAY",
+    client_order_id: str | None = None,
 ) -> dict[str, Any]:
     """POST /api/v2/orders for a LIMIT BUY (marketable-limit entry).
-    Returns the parsed body with ``_http_status`` annotated."""
+    Returns the parsed body with ``_http_status`` annotated.
+    ``client_order_id`` makes the submit idempotent at the broker."""
     body = {
         "apikey": api_key,
         "instrument": {
@@ -362,6 +373,8 @@ def submit_limit_buy(
         "time_in_force": time_in_force,
         "session": "REGULAR",
     }
+    if client_order_id:
+        body["client_order_id"] = str(client_order_id)
     r = http.post("/api/v2/orders", json=body, headers=_api_headers(api_key))
     parsed = r.json() if r.content else {}
     parsed["_http_status"] = r.status_code
@@ -377,9 +390,11 @@ def submit_limit_sell(
     qty: int,
     price: float,
     time_in_force: str = "DAY",
+    client_order_id: str | None = None,
 ) -> dict[str, Any]:
     """POST /api/v2/orders for a LIMIT SELL (marketable-limit exit).
-    Returns the parsed body with ``_http_status`` annotated."""
+    Returns the parsed body with ``_http_status`` annotated.
+    ``client_order_id`` makes the sell idempotent at the broker."""
     body = {
         "apikey": api_key,
         "instrument": {
@@ -394,6 +409,8 @@ def submit_limit_sell(
         "time_in_force": time_in_force,
         "session": "REGULAR",
     }
+    if client_order_id:
+        body["client_order_id"] = str(client_order_id)
     r = http.post("/api/v2/orders", json=body, headers=_api_headers(api_key))
     parsed = r.json() if r.content else {}
     parsed["_http_status"] = r.status_code

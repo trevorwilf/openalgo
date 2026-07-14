@@ -465,6 +465,16 @@ def _risk_gates(
     risk_cfg = cfg.get("risk") or {}
     sizing_cfg = cfg.get("sizing") or {}
 
+    # Idempotency guard — while ANY lot's submit outcome is unknown
+    # (resolver still adjudicating whether the order reached the
+    # broker), refuse all new entries: sizing, exposure and per-symbol
+    # caps can't be trusted until the unknown resolves.
+    if any(
+        p.get("outcome_unresolved")
+        for p in (state.get("open_positions") or {}).values()
+    ):
+        return "unresolved_order_outcome"
+
     # bankroll floor — halt ALL new entries once compounding equity has
     # fallen to/below floor_fraction*base. Checked FIRST so it dominates
     # even at negative equity, ahead of the bankroll>0 guarded gates
@@ -916,17 +926,28 @@ def _supplier_accepts_quote(supplier) -> bool:
     """True when a submit_supplier accepts a third (quote) parameter.
     Determined once via signature inspection so a TypeError raised
     INSIDE the supplier is never mistaken for a 2-arg signature."""
+    return _supplier_positional_arity(supplier) >= 3
+
+
+def _supplier_positional_arity(supplier) -> int:
+    """Effective positional-parameter count of a submit_supplier for
+    backward-compatible dispatch: >=4 → (symbol, qty, quote, link_id),
+    3 → (symbol, qty, quote), else (symbol, qty). VAR_POSITIONAL
+    counts as unbounded (4). Signature inspection — never probing —
+    so a TypeError raised INSIDE the supplier is never mistaken for
+    a smaller signature."""
     import inspect
     try:
         params = inspect.signature(supplier).parameters
     except (TypeError, ValueError):
-        return False
+        return 2
+    if any(p.kind == p.VAR_POSITIONAL for p in params.values()):
+        return 4
     positional = [
         p for p in params.values()
         if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
     ]
-    has_var = any(p.kind == p.VAR_POSITIONAL for p in params.values())
-    return has_var or len(positional) >= 3
+    return len(positional)
 
 
 def roll_session_if_needed(
@@ -1018,6 +1039,7 @@ def consume_candidate_events(
     summary = {
         "consumed": 0, "accepted": 0, "rejected": 0,
         "expired": 0, "stale": 0, "dedupe": 0, "invalid": 0,
+        "unresolved": 0,
     }
 
     # scanner.max_entries_per_scan — accept at most N candidates per
@@ -1268,69 +1290,105 @@ def consume_candidate_events(
             scan_accepts[scan_key] = scan_accepts.get(scan_key, 0) + 1
             continue
 
+        # link_id doubles as the broker-side client_order_id, so it is
+        # generated BEFORE the submit — a crash-replayed duplicate of
+        # the same submit is then rejected by the broker instead of
+        # double-buying. Nanosecond resolution keeps keys unique.
+        venue_code = (cfg.get("execution") or {}).get(
+            "default_venue_code", "XNAS",
+        )
+        link_id = f"BOWAKAv2-{symbol}-{time.time_ns()}"
+
+        def _record_lot(parent_id: str) -> dict:
+            record_pending_position(
+                state,
+                symbol=symbol, qty=qty, venue_code=venue_code,
+                parent_order_id=parent_id, link_id=link_id,
+                candidate_close=signal_price, signal_strength=ev.get(
+                    "signal_strength",
+                ),
+                recorded_exposure=target_notional,
+                equity_at_entry=risk_snapshot.get("bankroll"),
+                entry_features=ev.get("features"),
+                prior_daily_baselines=ev.get("prior_daily_baselines"),
+                parent_order_style=(cfg.get("execution") or {}).get(
+                    "parent_order_style", "market",
+                ),
+                stop_pct=float(exits_cfg.get("stop_pct", 0.08)),
+                target_pct=float(exits_cfg.get("target_pct", 0.15)),
+                max_hold_days=int(exits_cfg.get("max_hold_days", 3)),
+                candidate_event_id=ev.get("event_id"),
+            )
+            return state["open_positions"][link_id]
+
         # Submit order (injection point). Suppliers that accept a
         # third parameter receive the live quote so marketable-limit
-        # entries can price off the ask; 2-arg test suppliers keep
-        # their legacy signature.
+        # entries can price off the ask; 4-arg suppliers additionally
+        # receive the link_id to send as the broker client_order_id;
+        # 2-arg test suppliers keep their legacy signature.
         parent_order_id = ""
+        unresolved_detail = ""
+        submit_resp = None
+        arity = _supplier_positional_arity(submit_supplier)
         try:
-            if _supplier_accepts_quote(submit_supplier):
+            if arity >= 4:
+                submit_resp = submit_supplier(symbol, qty, quote, link_id)
+            elif arity == 3:
                 submit_resp = submit_supplier(symbol, qty, quote)
             else:
                 submit_resp = submit_supplier(symbol, qty)
         except Exception as e:
-            LOG.warning("submit_supplier raised for %s: %s", symbol, e)
-            summary["rejected"] += 1
-            continue
-        # Validate broker accepted the order before mutating state.
-        status_ok = True
-        if isinstance(submit_resp, dict):
-            http_status = submit_resp.get("_http_status")
-            if http_status is not None and http_status not in (200, 201):
-                status_ok = False
-                LOG.warning(
-                    "submit rejected for %s (status=%s): %s",
-                    symbol, http_status, submit_resp,
-                )
-            data = submit_resp.get("data") or {}
-            parent_order_id = (
-                data.get("order_id")
-                or data.get("id")
-                or (submit_resp.get("native_response") or {}).get("id")
-                or ""
+            # The order may or may not have reached the broker —
+            # outcome UNKNOWN. Never drop the event silently: record
+            # an unresolved lot keyed by the client_order_id and let
+            # resolve_unknown_submits adjudicate.
+            LOG.warning(
+                "submit_supplier raised for %s: %s — outcome unknown, "
+                "recording unresolved lot", symbol, e,
             )
-        if not status_ok:
-            summary["rejected"] += 1
-            continue
+            unresolved_detail = f"exception: {e}"
+        if not unresolved_detail:
+            # Validate broker accepted the order before mutating state.
+            status_ok = True
+            if isinstance(submit_resp, dict):
+                http_status = submit_resp.get("_http_status")
+                if http_status is not None and http_status not in (200, 201):
+                    status_ok = False
+                    LOG.warning(
+                        "submit rejected for %s (status=%s): %s",
+                        symbol, http_status, submit_resp,
+                    )
+                data = submit_resp.get("data") or {}
+                parent_order_id = (
+                    data.get("order_id")
+                    or data.get("id")
+                    or (submit_resp.get("native_response") or {}).get("id")
+                    or ""
+                )
+            if not status_ok:
+                # Clean broker rejection — no shares, no lot.
+                summary["rejected"] += 1
+                continue
+            if not parent_order_id:
+                LOG.warning(
+                    "submit for %s accepted with no order id — outcome "
+                    "unknown, recording unresolved lot", symbol,
+                )
+                unresolved_detail = "accepted_no_order_id"
 
-        # Update state — record the pending position so poll_fills can
-        # match the parent's eventual FILLED echo back to this trade.
-        venue_code = (cfg.get("execution") or {}).get(
-            "default_venue_code", "XNAS",
-        )
-        # link_id is the open_positions primary key — use nanosecond
-        # resolution so two entries can never collide on the same key.
-        link_id = f"BOWAKAv2-{symbol}-{time.time_ns()}"
-        record_pending_position(
-            state,
-            symbol=symbol, qty=qty, venue_code=venue_code,
-            parent_order_id=parent_order_id, link_id=link_id,
-            candidate_close=signal_price, signal_strength=ev.get(
-                "signal_strength",
-            ),
-            recorded_exposure=target_notional,
-            equity_at_entry=risk_snapshot.get("bankroll"),
-            entry_features=ev.get("features"),
-            prior_daily_baselines=ev.get("prior_daily_baselines"),
-            parent_order_style=(cfg.get("execution") or {}).get(
-                "parent_order_style", "market",
-            ),
-            stop_pct=float(exits_cfg.get("stop_pct", 0.08)),
-            target_pct=float(exits_cfg.get("target_pct", 0.15)),
-            max_hold_days=int(exits_cfg.get("max_hold_days", 3)),
-            candidate_event_id=ev.get("event_id"),
-        )
-        summary["accepted"] += 1
+        if unresolved_detail:
+            pos = _record_lot("")
+            pos["outcome_unresolved"] = True
+            pos["resolver_misses"] = 0
+            summary["unresolved"] += 1
+            _emit_ledger_v2(cfg, "submit_outcome_unknown", {
+                "symbol": symbol, "link_id": link_id,
+                "client_order_id": link_id,
+                "detail": unresolved_detail,
+            })
+        else:
+            _record_lot(parent_order_id)
+            summary["accepted"] += 1
         scan_accepts[scan_key] = scan_accepts.get(scan_key, 0) + 1
         # One element per entry (not a set) so
         # same_symbol_entries_per_day > 1 can count correctly.
@@ -1462,6 +1520,10 @@ def record_pending_position(
         "venue_code": venue_code,
         "parent_order_id": parent_order_id,
         "link_id": link_id,
+        # link_id doubles as the broker client_order_id (sent on the
+        # parent submit) — the resolver matches unknown-outcome
+        # submits back to their lot through this field.
+        "client_order_id": link_id,
         "child_order_ids": {"target": "", "stop": ""},
         "status": "pending_fill",
         "recorded_exposure": recorded_exposure,
@@ -1880,6 +1942,98 @@ def poll_fills_v2(
     return events
 
 
+#: Resolver passes after which a client_order_id absent from the
+#: broker's order list is declared never-placed and its lot dropped.
+_RESOLVER_MAX_MISSES = 12
+
+
+def resolve_unknown_submits(
+    state: dict, cfg: dict, *,
+    oa_client, api_key: str, http,
+) -> list[str]:
+    """Adjudicate lots recorded with ``outcome_unresolved`` (submit
+    raised, or was accepted with no order id). Scans the broker's
+    order list for each lot's ``client_order_id``:
+
+    - found → the order DID reach the broker: adopt its order id,
+      clear the flag (ledger ``unknown_submit_resolved_present``);
+      the normal poll path takes over from there.
+    - absent for ``_RESOLVER_MAX_MISSES`` consecutive passes → the
+      order never landed: drop the lot and restore its reserved
+      exposure (ledger ``unknown_submit_resolved_absent``).
+
+    While any lot is unresolved, ``_risk_gates`` blocks all new
+    entries (``unresolved_order_outcome``) and the pending-fill
+    janitor skips these lots (this resolver owns them). Runs each
+    tick BEFORE the janitor. Returns the pos_ids resolved (either
+    way) this pass."""
+    lots = [
+        (pid, pos)
+        for pid, pos in (state.get("open_positions") or {}).items()
+        if pos.get("outcome_unresolved")
+    ]
+    if not lots:
+        return []
+    try:
+        rows = oa_client.fetch_all_orders(http, api_key)
+    except Exception as e:
+        LOG.warning("resolver orders fetch failed: %s", e)
+        return []
+    by_coid: dict[str, dict] = {}
+    for row in rows or []:
+        coid = row.get("client_order_id")
+        if coid:
+            by_coid[str(coid)] = row
+    out: list[str] = []
+    for pid, pos in lots:
+        symbol = pos.get("symbol", "")
+        coid = str(pos.get("client_order_id") or pos.get("link_id") or "")
+        row = by_coid.get(coid)
+        if row is not None:
+            oid = str(row.get("id") or row.get("order_id") or "")
+            pos["parent_order_id"] = oid
+            pos.pop("outcome_unresolved", None)
+            pos.pop("resolver_misses", None)
+            _emit_ledger_v2(cfg, "unknown_submit_resolved_present", {
+                "symbol": symbol, "link_id": pos.get("link_id"),
+                "client_order_id": coid, "parent_order_id": oid,
+            })
+            LOG.warning(
+                "unknown submit for %s RESOLVED: order %s exists at "
+                "broker (client_order_id=%s) — lot adopted",
+                symbol, oid, coid,
+            )
+            out.append(pid)
+            continue
+        misses = int(pos.get("resolver_misses", 0) or 0) + 1
+        pos["resolver_misses"] = misses
+        if misses < _RESOLVER_MAX_MISSES:
+            continue
+        exposure = pos.get("recorded_exposure")
+        if not isinstance(exposure, (int, float)) or isinstance(
+            exposure, bool,
+        ):
+            exposure = 0.0
+        state["gross_exposure_dollars"] = max(
+            0.0,
+            float(state.get("gross_exposure_dollars", 0.0))
+            - float(exposure),
+        )
+        state["open_positions"].pop(pid, None)
+        _emit_ledger_v2(cfg, "unknown_submit_resolved_absent", {
+            "symbol": symbol, "link_id": pos.get("link_id"),
+            "client_order_id": coid, "resolver_misses": misses,
+            "restored_exposure": float(exposure),
+        })
+        LOG.warning(
+            "unknown submit for %s RESOLVED: client_order_id %s absent "
+            "from broker after %d passes — never placed; lot dropped",
+            symbol, coid, misses,
+        )
+        out.append(pid)
+    return out
+
+
 def expire_stale_pending_fills(
     state: dict, cfg: dict, *,
     oa_client, api_key: str, http,
@@ -1909,6 +2063,11 @@ def expire_stale_pending_fills(
     open_positions = state.get("open_positions") or {}
     for pos_id, pos in list(open_positions.items()):
         if pos.get("status") != "pending_fill":
+            continue
+        # Unknown-outcome lots belong to resolve_unknown_submits —
+        # they have no parent id to cancel and must not be dropped
+        # on a timeout.
+        if pos.get("outcome_unresolved"):
             continue
         timeout_s = (
             ml_timeout_s
@@ -2707,22 +2866,68 @@ def trigger_exit_v2(
         order_style == "marketable_limit"
         and limit_price is not None and float(limit_price) > 0
     )
-    try:
+    # Deterministic exit client_order_id: {link_id}-EXIT{n}. n only
+    # advances on a CONFIRMED broker rejection — an unknown-outcome
+    # submit reuses the same n, so a crash-replayed duplicate is
+    # rejected by the broker (duplicate client_order_id) and adopted
+    # via _find_order_id_by_coid instead of selling twice.
+    attempt = int(pos.get("exit_attempt", 0) or 0)
+    exit_coid = f"{pos.get('link_id') or symbol}-EXIT{attempt}"
+
+    def _submit_sell():
+        kwargs: dict = dict(
+            venue_code=venue, symbol=symbol, qty=int(pos["qty"]),
+            time_in_force=time_in_force,
+        )
         if use_limit:
-            resp = oa_client.submit_limit_sell(
-                http, api_key, venue_code=venue, symbol=symbol,
-                qty=int(pos["qty"]), price=float(limit_price),
-                time_in_force=time_in_force,
-            )
+            fn = oa_client.submit_limit_sell
+            kwargs["price"] = float(limit_price)
         else:
-            resp = oa_client.submit_market_sell(
-                http, api_key, venue_code=venue, symbol=symbol,
-                qty=int(pos["qty"]), time_in_force=time_in_force,
-            )
+            fn = oa_client.submit_market_sell
+        try:
+            return fn(http, api_key, client_order_id=exit_coid, **kwargs)
+        except TypeError:
+            # Legacy client/test surrogate without the kwarg.
+            return fn(http, api_key, **kwargs)
+
+    def _adopt_existing_exit() -> bool:
+        """A sell with this client_order_id may already be live at the
+        broker (crash replay / raced submit). Adopt it instead of
+        submitting another sell."""
+        existing = _find_order_id_by_coid(
+            oa_client, http, api_key, exit_coid,
+        )
+        if not existing:
+            return False
+        pos["status"] = "exiting"
+        pos["exit_reason"] = reason
+        pos["exit_order_id"] = existing
+        pos["exit_submitted_at"] = _iso(_now_utc())
+        pos.pop("exit_reason_pending", None)
+        pos.pop("exit_pending_at", None)
+        _emit_ledger_v2(cfg, "exit_adopted_existing", {
+            "symbol": symbol, "exit_order_id": existing,
+            "client_order_id": exit_coid, "reason": reason,
+            "link_id": pos.get("link_id"),
+        })
+        LOG.warning(
+            "exit sell for %s already exists at broker "
+            "(client_order_id=%s) — adopted order %s",
+            symbol, exit_coid, existing,
+        )
+        return True
+
+    try:
+        resp = _submit_sell()
     except Exception as e:
         LOG.exception(
             "exit submission failed for %s: %s", symbol, e,
         )
+        # Outcome unknown — same client_order_id next attempt. If the
+        # order actually landed, adopt it now (or on the retry, when
+        # the duplicate rejection routes back through adoption).
+        if _adopt_existing_exit():
+            return True
         pos["status"] = "filled"
         pos.pop("exit_reason_pending", None)
         pos.pop("exit_pending_at", None)
@@ -2731,11 +2936,16 @@ def trigger_exit_v2(
         resp, dict,
     ) else None
     if http_status not in (200, 201):
+        if _adopt_existing_exit():
+            return True
         LOG.error(
             "market-sell rejected for %s (status=%s); reverting to "
             "'filled' so the next pass can retry: %s",
             symbol, http_status, resp,
         )
+        # Confirmed rejection with no existing order — the coid was
+        # burned; the retry must use a fresh one.
+        pos["exit_attempt"] = attempt + 1
         pos["status"] = "filled"
         pos.pop("exit_reason_pending", None)
         pos.pop("exit_pending_at", None)
@@ -2743,6 +2953,8 @@ def trigger_exit_v2(
     data = (resp.get("data") or {}) if isinstance(resp, dict) else {}
     exit_id = data.get("order_id") or data.get("id") or ""
     if not exit_id:
+        if _adopt_existing_exit():
+            return True
         LOG.error(
             "market-sell accepted for %s but no order_id surfaced; "
             "reverting: %s", symbol, resp,
@@ -2754,15 +2966,39 @@ def trigger_exit_v2(
     pos["status"] = "exiting"
     pos["exit_reason"] = reason
     pos["exit_order_id"] = exit_id
+    pos["exit_client_order_id"] = exit_coid
     pos["exit_submitted_at"] = _iso(_now_utc())
     pos.pop("exit_reason_pending", None)
     pos.pop("exit_pending_at", None)
     _emit_ledger_v2(cfg, "exit_submitted", {
         "symbol": symbol, "exit_order_id": exit_id,
+        "client_order_id": exit_coid,
         "reason": reason, "time_in_force": time_in_force,
         "link_id": pos.get("link_id"),
     })
     return True
+
+
+def _find_order_id_by_coid(
+    oa_client, http, api_key: str, client_order_id: str,
+) -> str:
+    """Scan the broker order list for a row whose client_order_id
+    matches. Returns the broker order id, or "" when absent /
+    unavailable."""
+    fetch_all = getattr(oa_client, "fetch_all_orders", None)
+    if not callable(fetch_all) or not client_order_id:
+        return ""
+    try:
+        rows = fetch_all(http, api_key)
+    except Exception as e:
+        LOG.warning(
+            "coid lookup fetch failed for %s: %s", client_order_id, e,
+        )
+        return ""
+    for row in rows or []:
+        if str(row.get("client_order_id") or "") == str(client_order_id):
+            return str(row.get("id") or row.get("order_id") or "")
+    return ""
 
 
 def _parse_hhmm(value, fallback: dt_time) -> dt_time:
@@ -3503,7 +3739,8 @@ def main(argv: list[str] | None = None) -> int:
                 venue_code=_venue_for(symbol), symbol=symbol,
             )
 
-        def submit_supplier(symbol: str, qty: int, quote=None):  # noqa: F811
+        def submit_supplier(symbol: str, qty: int, quote=None,  # noqa: F811
+                             link_id=None):
             exec_cfg = cfg.get("execution") or {}
             style = exec_cfg.get("parent_order_style", "market")
             ask = (quote or {}).get("ask")
@@ -3518,12 +3755,14 @@ def main(argv: list[str] | None = None) -> int:
                     qty=qty,
                     price=round(float(ask) * (1.0 + slippage), 2),
                     time_in_force="DAY",
+                    client_order_id=link_id,
                 )
             # Default (and marketable-limit-without-a-quote fallback).
             return oa.submit_market_buy(
                 live_client, api_key,
                 venue_code=_venue_for(symbol), symbol=symbol,
                 qty=qty, time_in_force="DAY",
+                client_order_id=link_id,
             )
 
         LOG.info("v2 strategy: live OpenAlgo suppliers wired (host=%s)", host)
@@ -3664,6 +3903,15 @@ def main(argv: list[str] | None = None) -> int:
                     process_fill_events_v2(fills, state, cfg)
             except Exception:
                 LOG.exception("poll_fills_v2 raised")
+            # Unknown-submit adjudication runs BEFORE the janitor —
+            # the resolver owns outcome_unresolved lots.
+            try:
+                resolve_unknown_submits(
+                    state, cfg,
+                    oa_client=oa_module, api_key=api_key, http=live_client,
+                )
+            except Exception:
+                LOG.exception("resolve_unknown_submits raised")
             try:
                 expire_stale_pending_fills(
                     state, cfg,
