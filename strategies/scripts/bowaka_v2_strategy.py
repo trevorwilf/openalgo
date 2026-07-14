@@ -239,29 +239,54 @@ def tail_new_events(
     candidate_events_path: Path,
     last_offset: int,
 ) -> tuple[list[dict], int]:
-    """Read new lines from candidate_events.jsonl since
-    ``last_offset`` (byte offset). Returns ``(events,
-    new_offset)``."""
+    """Read new COMPLETE lines from candidate_events.jsonl since
+    ``last_offset`` (byte offset). Returns ``(events, new_offset)``.
+
+    Torn-line safe (scanner-hydrate pattern, binary mode): a trailing
+    partial line — the scanner mid-append — is NOT consumed; the
+    offset stops at the last newline so the line re-reads complete on
+    the next tick instead of being parsed torn and lost forever. A
+    file smaller than the stored offset (rotation/truncation) resets
+    the offset to 0 and re-reads from the top; the stale-session and
+    same-symbol dedupe gates make replayed events harmless. A
+    malformed COMPLETE line is still skipped with the offset
+    advanced."""
     if not candidate_events_path.exists():
         return [], last_offset
+    try:
+        size = candidate_events_path.stat().st_size
+    except OSError:
+        return [], last_offset
+    offset = max(0, int(last_offset or 0))
+    if offset > size:
+        LOG.warning(
+            "candidate_events file shrank below the stored offset "
+            "(%d > %d) — rotation/truncation detected; resetting to 0",
+            offset, size,
+        )
+        offset = 0
+    if offset >= size:
+        return [], offset
+    with open(candidate_events_path, "rb") as f:
+        f.seek(offset)
+        chunk = f.read()
+    cut = chunk.rfind(b"\n")
+    if cut < 0:
+        # Only a torn partial line so far — consume nothing.
+        return [], offset
+    complete = chunk[:cut + 1]
+    new_offset = offset + cut + 1
     out: list[dict] = []
-    new_offset = last_offset
-    with open(candidate_events_path, "r", encoding="utf-8") as f:
-        f.seek(last_offset)
-        while True:
-            line = f.readline()
-            if not line:
-                break
-            new_offset = f.tell()
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                ev = json.loads(line)
-            except ValueError:
-                LOG.warning("dropping malformed candidate event line")
-                continue
-            out.append(ev)
+    for raw in complete.split(b"\n"):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            ev = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            LOG.warning("dropping malformed candidate event line")
+            continue
+        out.append(ev)
     return out, new_offset
 
 
@@ -1835,6 +1860,15 @@ def _process_order_row(
                 "filled_avg_price": filled_avg_f,
             }
             events.append(ev)
+        elif ((native_status in _DEAD_STATUSES
+               or canonical in {s.upper() for s in _DEAD_STATUSES})
+              and filled_qty > 0
+              and not (pos.get("child_partial_processed") or {})
+                  .get(role)):
+            # Child died AFTER a partial execution — real shares
+            # traded. Surface the event so process_fill_events_v2
+            # books a partial closure (finding 9).
+            events.append(ev)
     elif role == "exit":
         if (native_status in _FILLED_STATUSES
                 or canonical == "FILLED"):
@@ -2586,6 +2620,92 @@ def close_position_v2(
     return record
 
 
+def close_position_partial_v2(
+    pos_id: str,
+    state: dict,
+    cfg: dict,
+    *,
+    exit_price: float,
+    reason: str,
+    qty_filled: int,
+) -> dict | None:
+    """Book a PARTIAL closure for ``qty_filled`` shares of a lot whose
+    OCO child died after a partial execution: writes a closure record
+    for exactly that qty (reasons ``target_hit_partial`` /
+    ``stop_hit_partial``), updates daily + cumulative realized PnL,
+    and reduces the lot's qty / recorded_exposure / gross exposure
+    proportionally. The lot is NOT popped — the caller clears the
+    dead OCO pair's ids and reverts status to ``filled`` so the sweep
+    re-brackets the remaining shares.
+
+    Stop-out circuit-breaker counters deliberately do NOT bump here:
+    they count FULL stop closes only (``close_position_v2`` with
+    reason ``stop_hit``). A partially-stopped remainder stays managed
+    under a fresh bracket rather than counting as a completed
+    stop-out."""
+    pos = (state.get("open_positions") or {}).get(pos_id)
+    if pos is None:
+        return None
+    qty_filled = int(qty_filled)
+    total_qty = int(pos.get("qty") or 0)
+    if qty_filled <= 0 or total_qty <= 0:
+        return None
+    qty_filled = min(qty_filled, total_qty)
+    symbol = pos.get("symbol", "")
+    entry_price = float(pos.get("entry_price") or 0.0)
+    realized = (float(exit_price) - entry_price) * qty_filled
+    record = {
+        "record_type": "closure",
+        "symbol": symbol,
+        "qty": qty_filled,
+        "entry_price": entry_price,
+        "exit_price": float(exit_price),
+        "entry_timestamp": pos.get("entry_timestamp"),
+        "exit_timestamp": _iso(_now_utc()),
+        "realized_pnl": realized,
+        "reason": reason,
+        "venue_code": pos.get("venue_code"),
+        "link_id": pos.get("link_id"),
+        "candidate_event_id": pos.get("candidate_event_id"),
+        "signal_strength": pos.get("signal_strength"),
+        "candidate_close": pos.get("candidate_close"),
+        "target_pct": pos.get("target_pct"),
+        "stop_pct": pos.get("stop_pct"),
+        "target_price": pos.get("target_price"),
+        "stop_price": pos.get("stop_price"),
+        "entry_trigger": pos.get("entry_trigger"),
+        "partial": True,
+        "remaining_qty": total_qty - qty_filled,
+    }
+    _append_closure_summary(cfg, record)
+    _emit_ledger_v2(cfg, "closure", record)
+    state["daily_realized_pnl_strategy"] = float(
+        state.get("daily_realized_pnl_strategy", 0.0)
+    ) + realized
+    state["cumulative_realized_pnl_strategy"] = float(
+        state.get("cumulative_realized_pnl_strategy", 0.0)
+    ) + realized
+    # Proportional exposure release for the closed slice.
+    exposure = pos.get("recorded_exposure")
+    if (not isinstance(exposure, (int, float))
+            or isinstance(exposure, bool) or exposure <= 0):
+        exposure = entry_price * total_qty
+    frac = qty_filled / float(total_qty)
+    delta = float(exposure) * frac
+    pos["recorded_exposure"] = max(0.0, float(exposure) - delta)
+    state["gross_exposure_dollars"] = max(
+        0.0,
+        float(state.get("gross_exposure_dollars", 0.0)) - delta,
+    )
+    pos["qty"] = total_qty - qty_filled
+    LOG.warning(
+        "partial closure for %s: %d of %d @ %.4f (%s) pnl=%.2f — "
+        "%d shares remain", symbol, qty_filled, total_qty,
+        float(exit_price), reason, realized, total_qty - qty_filled,
+    )
+    return record
+
+
 def _positive_price(v) -> float | None:
     """float(v) when it is a usable positive price, else None."""
     if isinstance(v, bool):
@@ -2637,7 +2757,10 @@ def process_fill_events_v2(
     events: list[dict], state: dict, cfg: dict,
 ) -> list[dict]:
     """Map child/exit fill events to closures. A fill with no usable
-    price defers the closure (never books exit_price=0.0)."""
+    price defers the closure (never books exit_price=0.0). A DEAD
+    target/stop child with a partial fill books a partial closure for
+    the executed shares and re-brackets the remainder."""
+    dead_upper = {s.upper() for s in _DEAD_STATUSES}
     out: list[dict] = []
     open_positions = state.get("open_positions") or {}
     for ev in events:
@@ -2646,6 +2769,43 @@ def process_fill_events_v2(
         if pos is None:
             continue
         role = ev["role"]
+        if (role in ("target", "stop") and ev["status"] in dead_upper
+                and int(ev.get("filled_qty") or 0) > 0):
+            # OCO child died after a partial execution (finding 9).
+            processed = pos.setdefault("child_partial_processed", {})
+            if processed.get(role):
+                continue
+            price = _resolve_exit_price(ev, pos, role)
+            if price is None:
+                _defer_closure_no_price(cfg, pos, ev)
+                continue
+            base_reason = "target_hit" if role == "target" else "stop_hit"
+            filled_qty = int(ev.get("filled_qty") or 0)
+            remaining = int(pos.get("qty") or 0) - filled_qty
+            if remaining <= 0:
+                # The "partial" covered the whole lot — full closure
+                # (stop-out counters DO bump for a full stop here).
+                rec = close_position_v2(
+                    pos_id, state, cfg,
+                    exit_price=price, reason=base_reason,
+                )
+                if rec:
+                    out.append(rec)
+                continue
+            rec = close_position_partial_v2(
+                pos_id, state, cfg,
+                exit_price=price, reason=f"{base_reason}_partial",
+                qty_filled=filled_qty,
+            )
+            if rec:
+                processed[role] = True
+                # The OCO pair dies together at Alpaca — clear BOTH
+                # ids and revert to filled so the sweep re-attaches a
+                # fresh bracket sized to the remaining shares.
+                pos["child_order_ids"] = {"target": "", "stop": ""}
+                pos["status"] = "filled"
+                out.append(rec)
+            continue
         if role == "target" and ev["status"] in {"FILLED"}:
             price = _resolve_exit_price(ev, pos, "target")
             if price is None:
