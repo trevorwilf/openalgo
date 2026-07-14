@@ -32,6 +32,9 @@ from domain.enums import (
     TimeInForce,
 )
 from domain.errors import UnsupportedCapability
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Branch N — single source of truth for vocabulary mapping lives in
 # ``broker.alpaca.mapping.transform_data``. The translator imports
@@ -593,21 +596,74 @@ class AlpacaOrderTranslator:
     # honored for the lifetime of the session, regardless of what the
     # current ``ALPACA_PAPER`` / ``ALPACA_LIVE_MODE`` env vars say.
 
+    #: Alpaca rejects ``limit`` above 500 on GET /v2/orders.
+    _ORDERS_MAX_PAGE_SIZE = 500
+    #: Pagination hard stop — 20 pages x 500 rows = 10,000 orders.
+    _ORDERS_MAX_PAGES = 20
+
     def list_orders_via_token(
         self,
         auth_token: str,
         *,
         status: str = "open",
-        limit: int = 100,
+        limit: int = 500,
     ) -> list[dict[str, Any]]:
-        """GET /v2/orders with the session's auth handle."""
-        from broker.alpaca.api.auth_api import auth_handle_from_token
+        """GET /v2/orders with the session's auth handle.
 
-        auth = auth_handle_from_token(auth_token)
-        with httpx.Client(**self._client_kwargs(auth)) as c:
-            r = c.get(f"/v2/orders?status={status}&limit={limit}")
-        r.raise_for_status()
-        return r.json() or []
+        Paginates past Alpaca's 500-row page cap: pages are requested
+        ascending by ``submitted_at`` with an ``after`` cursor while
+        each page comes back full, hard-capped at ``_ORDERS_MAX_PAGES``
+        pages. Rows are returned sorted descending by ``submitted_at``
+        (newest first) so the pre-pagination row-order contract for
+        existing consumers is preserved. ``limit`` sets the per-page
+        size (clamped to Alpaca's 500 max); it is not a total cap.
+        """
+        page_size = max(1, min(int(limit), self._ORDERS_MAX_PAGE_SIZE))
+
+        def _fetch_pages(c: httpx.Client) -> list[dict[str, Any]]:
+            rows: list[dict[str, Any]] = []
+            after: str | None = None
+            for _page in range(self._ORDERS_MAX_PAGES):
+                params: dict[str, str] = {
+                    "status": status,
+                    "limit": str(page_size),
+                    "direction": "asc",
+                }
+                if after is not None:
+                    params["after"] = after
+                r = c.get("/v2/orders", params=params)
+                r.raise_for_status()
+                page = r.json() or []
+                rows.extend(page)
+                if len(page) < page_size:
+                    break
+                cursor = (page[-1] or {}).get("submitted_at")
+                if not cursor:
+                    # No usable cursor on a full page — stop rather
+                    # than loop on the same page forever.
+                    break
+                after = str(cursor)
+            else:
+                logger.warning(
+                    "alpaca list_orders hit the %d-page pagination cap "
+                    "(%d rows, status=%s) — older orders were not fetched",
+                    self._ORDERS_MAX_PAGES, len(rows), status,
+                )
+            return rows
+
+        if self._client is not None:
+            rows = _fetch_pages(self._client)
+        else:
+            from broker.alpaca.api.auth_api import auth_handle_from_token
+
+            auth = auth_handle_from_token(auth_token)
+            with httpx.Client(**self._client_kwargs(auth)) as c:
+                rows = _fetch_pages(c)
+        rows.sort(
+            key=lambda row: str((row or {}).get("submitted_at") or ""),
+            reverse=True,
+        )
+        return rows
 
     def get_order_via_token(
         self,

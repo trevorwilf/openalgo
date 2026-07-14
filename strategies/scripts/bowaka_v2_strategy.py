@@ -1652,6 +1652,168 @@ def _true_up_recorded_exposure(state: dict, pos: dict) -> None:
     pos["recorded_exposure"] = new_exposure
 
 
+def _process_order_row(
+    row: dict, idx: dict[str, tuple[str, str]],
+    state: dict, cfg: dict, events: list[dict],
+) -> None:
+    """Match one broker order row against the tracked-order index and
+    apply the fill / terminal state transitions, appending any
+    detected fill event to ``events``. Shared verbatim by the bulk
+    ``poll_fills_v2`` pass and the per-id direct-fetch fallback so
+    both paths book fills identically. Rows for untracked ids are
+    ignored."""
+    open_positions = state.setdefault("open_positions", {})
+    oid = row.get("id") or row.get("order_id") or ""
+    if oid not in idx:
+        return
+    pos_id, role = idx[oid]
+    pos = open_positions.get(pos_id)
+    if pos is None:
+        return
+    symbol = pos.get("symbol", "")
+    native_status = row.get("native_status") or row.get("status") or ""
+    canonical = (
+        row.get("canonical_status") or native_status or ""
+    ).upper()
+    filled_qty = int(float(
+        row.get("filled_qty") or row.get("filled_quantity") or 0,
+    ))
+    filled_avg = row.get("filled_avg_price")
+    try:
+        filled_avg_f = (
+            float(filled_avg) if filled_avg is not None else None
+        )
+    except (ValueError, TypeError):
+        filled_avg_f = None
+    ev = {
+        "symbol": symbol, "pos_id": pos_id, "order_id": oid, "role": role,
+        "status": canonical, "filled_qty": filled_qty,
+        "filled_avg_price": filled_avg_f, "raw": row,
+    }
+    if role == "parent":
+        if (native_status in _FILLED_STATUSES
+                or canonical == "FILLED"):
+            if pos.get("parent_fill_processed"):
+                return
+            pos["status"] = "filled"
+            pos["entry_price"] = filled_avg_f or pos.get("entry_price")
+            if filled_qty > 0:
+                pos["qty"] = filled_qty
+            pos["parent_fill_processed"] = True
+            pos["parent_fill_processed_at"] = _iso(_now_utc())
+            _true_up_recorded_exposure(state, pos)
+            ep = pos.get("entry_price")
+            if ep is not None and pos.get("peak_since_entry") is None:
+                pos["peak_since_entry"] = float(ep)
+                pos["trough_since_entry"] = float(ep)
+            _emit_ledger_v2(cfg, "entry_fill", {
+                "symbol": symbol, "order_id": oid,
+                "filled_qty": filled_qty,
+                "filled_avg_price": filled_avg_f,
+                "link_id": pos.get("link_id"),
+            })
+            events.append(ev)
+        elif (native_status in _DEAD_STATUSES
+              or canonical in {s.upper() for s in _DEAD_STATUSES}):
+            if filled_qty > 0 and not pos.get("parent_fill_processed"):
+                pos["status"] = "filled"
+                pos["entry_price"] = (
+                    filled_avg_f or pos.get("entry_price")
+                )
+                pos["qty"] = filled_qty
+                pos["parent_fill_processed"] = True
+                pos["parent_fill_processed_at"] = _iso(_now_utc())
+                _true_up_recorded_exposure(state, pos)
+                events.append(ev)
+            else:
+                LOG.info(
+                    "parent %s ended in %s — dropping position",
+                    symbol, canonical,
+                )
+                open_positions.pop(pos_id, None)
+                _emit_ledger_v2(cfg, "parent_terminal", {
+                    "symbol": symbol, "order_id": oid,
+                    "status": canonical,
+                })
+    elif role in ("target", "stop"):
+        if (native_status in _FILLED_STATUSES
+                or canonical == "FILLED"):
+            pos.setdefault("filled_children", {})[role] = {
+                "filled_qty": filled_qty,
+                "filled_avg_price": filled_avg_f,
+            }
+            events.append(ev)
+    elif role == "exit":
+        if (native_status in _FILLED_STATUSES
+                or canonical == "FILLED"):
+            pos["exit_fill_price"] = filled_avg_f
+            pos["exit_filled_qty"] = filled_qty
+            events.append(ev)
+
+
+def _poll_missing_orders(
+    state: dict, cfg: dict, *,
+    idx: dict[str, tuple[str, str]], seen: set[str],
+    events: list[dict],
+    oa_client, api_key: str, http,
+    max_direct_fetches: int = 5,
+) -> None:
+    """Per-id fallback for tracked orders absent from the bulk order
+    list (e.g. pushed past the broker's pagination window). A tracked
+    id missing from two consecutive bulk polls is fetched directly
+    via ``fetch_order`` (round-robin, at most ``max_direct_fetches``
+    per tick) and fed through the same row-processing path as bulk
+    rows. Miss counters live in ``state['order_poll_misses']`` and
+    are dropped for ids that reappear or stop being tracked."""
+    misses: dict = state.setdefault("order_poll_misses", {})
+    tracked = set(idx)
+    for oid in [o for o in misses if o not in tracked]:
+        misses.pop(oid, None)
+    for oid in tracked:
+        if oid in seen:
+            misses.pop(oid, None)
+        else:
+            misses[oid] = int(misses.get(oid, 0) or 0) + 1
+    eligible = sorted(o for o, n in misses.items() if int(n or 0) >= 2)
+    warned: dict = state.setdefault("order_poll_warned", {})
+    for oid in [o for o in warned if o not in tracked]:
+        warned.pop(oid, None)
+    if not eligible:
+        return
+    fetch_order = getattr(oa_client, "fetch_order", None)
+    if not callable(fetch_order):
+        return
+    cursor = int(state.get("order_poll_fetch_cursor", 0) or 0)
+    n = min(int(max_direct_fetches), len(eligible))
+    batch = [eligible[(cursor + i) % len(eligible)] for i in range(n)]
+    state["order_poll_fetch_cursor"] = (cursor + n) % len(eligible)
+    today = _today_iso()
+    for oid in batch:
+        try:
+            row = fetch_order(http, api_key, oid)
+        except Exception as e:
+            LOG.warning("direct order fetch raised for %s: %s", oid, e)
+            row = None
+        usable = (
+            isinstance(row, dict)
+            and row.get("_status") != "not_found"
+            and (row.get("id") or row.get("order_id"))
+        )
+        if not usable:
+            # Leave the miss counter — retried on a later tick.
+            if warned.get(oid) != today:
+                warned[oid] = today
+                LOG.warning(
+                    "tracked order %s missing from bulk order list "
+                    "(%s misses); direct fetch returned %s — will retry",
+                    oid, misses.get(oid),
+                    "not_found" if isinstance(row, dict) else "no data",
+                )
+            continue
+        misses.pop(oid, None)
+        _process_order_row(row, idx, state, cfg, events)
+
+
 def poll_fills_v2(
     state: dict, cfg: dict, *,
     oa_client, api_key: str, http,
@@ -1659,7 +1821,10 @@ def poll_fills_v2(
     """GET /api/v2/orders?status=all and reconcile fills against state.
     Updates state in place. Returns the list of detected fill events
     (each: ``{symbol, order_id, role, status, filled_qty,
-    filled_avg_price}``)."""
+    filled_avg_price}``). Tracked ids absent from the bulk response
+    for 2+ consecutive polls are fetched per-id via
+    ``_poll_missing_orders`` so a fill can never be silently lost to
+    the broker's list window."""
     if not state.get("open_positions"):
         return []
     try:
@@ -1669,94 +1834,19 @@ def poll_fills_v2(
         return []
     idx = _build_order_index_v2(state)
     events: list[dict] = []
-    open_positions = state.setdefault("open_positions", {})
+    seen: set[str] = set()
     for row in rows:
         oid = row.get("id") or row.get("order_id") or ""
-        if oid not in idx:
-            continue
-        pos_id, role = idx[oid]
-        pos = open_positions.get(pos_id)
-        if pos is None:
-            continue
-        symbol = pos.get("symbol", "")
-        native_status = row.get("native_status") or row.get("status") or ""
-        canonical = (
-            row.get("canonical_status") or native_status or ""
-        ).upper()
-        filled_qty = int(float(
-            row.get("filled_qty") or row.get("filled_quantity") or 0,
-        ))
-        filled_avg = row.get("filled_avg_price")
-        try:
-            filled_avg_f = (
-                float(filled_avg) if filled_avg is not None else None
-            )
-        except (ValueError, TypeError):
-            filled_avg_f = None
-        ev = {
-            "symbol": symbol, "pos_id": pos_id, "order_id": oid, "role": role,
-            "status": canonical, "filled_qty": filled_qty,
-            "filled_avg_price": filled_avg_f, "raw": row,
-        }
-        if role == "parent":
-            if (native_status in _FILLED_STATUSES
-                    or canonical == "FILLED"):
-                if pos.get("parent_fill_processed"):
-                    continue
-                pos["status"] = "filled"
-                pos["entry_price"] = filled_avg_f or pos.get("entry_price")
-                if filled_qty > 0:
-                    pos["qty"] = filled_qty
-                pos["parent_fill_processed"] = True
-                pos["parent_fill_processed_at"] = _iso(_now_utc())
-                _true_up_recorded_exposure(state, pos)
-                ep = pos.get("entry_price")
-                if ep is not None and pos.get("peak_since_entry") is None:
-                    pos["peak_since_entry"] = float(ep)
-                    pos["trough_since_entry"] = float(ep)
-                _emit_ledger_v2(cfg, "entry_fill", {
-                    "symbol": symbol, "order_id": oid,
-                    "filled_qty": filled_qty,
-                    "filled_avg_price": filled_avg_f,
-                    "link_id": pos.get("link_id"),
-                })
-                events.append(ev)
-            elif (native_status in _DEAD_STATUSES
-                  or canonical in {s.upper() for s in _DEAD_STATUSES}):
-                if filled_qty > 0 and not pos.get("parent_fill_processed"):
-                    pos["status"] = "filled"
-                    pos["entry_price"] = (
-                        filled_avg_f or pos.get("entry_price")
-                    )
-                    pos["qty"] = filled_qty
-                    pos["parent_fill_processed"] = True
-                    pos["parent_fill_processed_at"] = _iso(_now_utc())
-                    _true_up_recorded_exposure(state, pos)
-                    events.append(ev)
-                else:
-                    LOG.info(
-                        "parent %s ended in %s — dropping position",
-                        symbol, canonical,
-                    )
-                    open_positions.pop(pos_id, None)
-                    _emit_ledger_v2(cfg, "parent_terminal", {
-                        "symbol": symbol, "order_id": oid,
-                        "status": canonical,
-                    })
-        elif role in ("target", "stop"):
-            if (native_status in _FILLED_STATUSES
-                    or canonical == "FILLED"):
-                pos.setdefault("filled_children", {})[role] = {
-                    "filled_qty": filled_qty,
-                    "filled_avg_price": filled_avg_f,
-                }
-                events.append(ev)
-        elif role == "exit":
-            if (native_status in _FILLED_STATUSES
-                    or canonical == "FILLED"):
-                pos["exit_fill_price"] = filled_avg_f
-                pos["exit_filled_qty"] = filled_qty
-                events.append(ev)
+        if oid:
+            seen.add(oid)
+        _process_order_row(row, idx, state, cfg, events)
+    try:
+        _poll_missing_orders(
+            state, cfg, idx=idx, seen=seen, events=events,
+            oa_client=oa_client, api_key=api_key, http=http,
+        )
+    except Exception:
+        LOG.exception("_poll_missing_orders raised")
     return events
 
 
@@ -1941,6 +2031,33 @@ def reconcile_with_broker(
                     "broker_missing; awaiting order echo",
                     pos.get("link_id"), sym,
                 )
+    # Qty comparison for symbols present on BOTH sides — a missed
+    # partial fill or a lost echo leaves the state qty out of step
+    # with the broker's. Warn + protection event only; never halt
+    # (the order echoes and the janitor resolve the drift).
+    for sym, lots in state_symbols.items():
+        if not sym or sym not in broker_pos:
+            continue
+        state_qty = 0.0
+        for pos in lots:
+            if pos.get("status") not in {"filled", "exiting",
+                                          "exit_pending"}:
+                continue
+            try:
+                state_qty += float(pos.get("qty") or 0)
+            except (TypeError, ValueError):
+                pass
+        broker_qty = float(broker_pos[sym])
+        if abs(state_qty - broker_qty) > 1e-9:
+            LOG.warning(
+                "qty mismatch for %s: state holds %.4f, broker holds "
+                "%.4f", sym, state_qty, broker_qty,
+            )
+            emit_protection_state(cfg, {
+                "ts": _iso(_now_utc()), "symbol": sym,
+                "event": "qty_mismatch",
+                "state_qty": state_qty, "broker_qty": broker_qty,
+            })
     if orphans:
         halt = bool((cfg.get("reconcile") or {}).get(
             "halt_on_orphans", True,

@@ -542,9 +542,47 @@ def fetch_open_orders(
 
 
 def fetch_all_orders(http: httpx.Client, api_key: str) -> list[dict]:
-    """GET /api/v2/orders?status=all — used by poll_fills."""
+    """GET /api/v2/orders?status=all — used by poll_fills.
+
+    ``limit=1000`` asks the server for large pages; the Alpaca
+    translator paginates server-side (500-row Alpaca pages, 20-page
+    cap) so old resting OCO legs stay visible to the fill poller.
+    """
     r = http.get("/api/v2/orders",
                  headers=_api_headers(api_key),
-                 params={"status": "all"})
+                 params={"status": "all", "limit": 1000})
     r.raise_for_status()
     return r.json().get("data", {}).get("orders", []) or []
+
+
+def fetch_order(
+    http: httpx.Client, api_key: str, order_id: str,
+) -> dict | None:
+    """GET /api/v2/orders/<id> — single-order status fetch.
+
+    Returns the order row on 200, ``{"_status": "not_found"}`` on 404,
+    and None on network errors / any other HTTP status. NOTE: the
+    detail route does NOT enrich ``canonical_status`` — consumers must
+    parse the native ``status`` field.
+    """
+    if not order_id:
+        return None
+    try:
+        r = http.get(f"/api/v2/orders/{order_id}",
+                     headers=_api_headers(api_key))
+    except httpx.HTTPError as e:
+        LOG.warning("order fetch failed for %s: %s", order_id, e)
+        return None
+    if r.status_code == 404:
+        return {"_status": "not_found"}
+    if r.status_code != 200:
+        LOG.warning(
+            "order fetch %d for %s: %s",
+            r.status_code, order_id, (r.text or "")[:200],
+        )
+        return None
+    try:
+        row = (r.json().get("data") or {}).get("order")
+    except ValueError:
+        return None
+    return row if isinstance(row, dict) else None

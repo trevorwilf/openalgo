@@ -85,12 +85,17 @@ def _broker_lane_check(broker: str) -> tuple[Any | None, int | None]:
 api = Namespace("orders", description="Normalized order placement")
 
 
-def _list_orders_via_translator(promoted, auth_token: str, status: str):
+def _list_orders_via_translator(
+    promoted, auth_token: str, status: str, limit: int | None = None
+):
     """Try the optional list_orders_via_token hook on a translator.
 
     Returns ``(rows | None, error_payload | None, http_status | None)``.
     Translators that don't implement the hook return None for rows
-    so the caller can return 501.
+    so the caller can return 501. ``limit`` is forwarded only when the
+    caller supplied one; translators whose hook doesn't accept a
+    ``limit`` kwarg are retried without it so older translators keep
+    working unchanged.
     """
     fn = getattr(promoted, "list_orders_via_token", None)
     if not callable(fn):
@@ -100,7 +105,13 @@ def _list_orders_via_translator(promoted, auth_token: str, status: str):
             details={"broker_code": promoted.broker_code},
         ), 501
     try:
-        rows = fn(auth_token, status=status)
+        if limit is not None:
+            try:
+                rows = fn(auth_token, status=status, limit=limit)
+            except TypeError:
+                rows = fn(auth_token, status=status)
+        else:
+            rows = fn(auth_token, status=status)
     except Exception as e:  # noqa: BLE001 — last-resort guard
         logger.exception("list_orders failed for %s: %s", promoted.broker_code, e)
         return None, error("broker_error", str(e)), 502
@@ -188,6 +199,10 @@ class Orders(Resource):
 
         Query params:
           status: ``open`` (default), ``closed``, or ``all``.
+          limit: optional int, clamped to 1..10000. Forwarded to
+            translators whose list hook accepts it (e.g. Alpaca's
+            per-page size); silently dropped for translators that
+            don't.
         """
         auth_token, broker, auth_err = resolve_auth()
         if auth_err is not None:
@@ -201,8 +216,16 @@ class Orders(Resource):
         if status not in ("open", "closed", "all"):
             return error("bad_request", "status must be one of: open, closed, all"), 400
 
+        limit_raw = request.args.get("limit")
+        limit: int | None = None
+        if limit_raw not in (None, ""):
+            try:
+                limit = max(1, min(int(limit_raw), 10000))
+            except ValueError:
+                return error("bad_request", "limit must be an integer"), 400
+
         rows, err_payload, err_status = _list_orders_via_translator(
-            promoted, auth_token, status
+            promoted, auth_token, status, limit
         )
         if rows is None:
             return err_payload, err_status
