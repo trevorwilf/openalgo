@@ -1938,6 +1938,13 @@ def _process_order_row(
                 "filled_qty": filled_qty,
                 "filled_avg_price": filled_avg_f,
                 "link_id": pos.get("link_id"),
+                # Reconciliation latency capture (Tier 1): the event's auto-stamped
+                # `ts` is the fill-detection time; `parent_submitted_at` is the parent
+                # submit time, so submit->fill latency is derivable. `candidate_event_id`
+                # lets the reconciler key an entry fill to its candidate (also enables
+                # open-position latency, which has no closure row to fall back on).
+                "candidate_event_id": pos.get("candidate_event_id"),
+                "parent_submitted_at": pos.get("parent_submitted_at"),
             })
             events.append(ev)
         elif (native_status in _DEAD_STATUSES
