@@ -1,0 +1,17 @@
+Bowaka v2 fixes — Phase 0 baseline (2026-07-14)
+Command: uv run pytest tests/strategies tests/api_v2 tests/contracts -q
+Result: 4 failed, 1034 passed, 34 skipped in 261.47s
+
+Failures (all pre-existing, allowed per prompt):
+1. tests/strategies/test_bowaka_v2_config.py::test_v2_config_signals_have_min_thresholds
+   - assert 2.180766810003851 <= 2.0 (stale config pin; Phase 9 fixes)
+2. tests/strategies/test_bowaka_v2_config.py::test_v2_config_risk_paper_safe_with_shadow_block
+   - assert 0.02403648309498329 == 0.03 (stale config pin; Phase 9 fixes)
+3. tests/api_v2/test_options_greeks_and_symbol.py::test_greeks_us_call_returns_full_set
+   - date-sensitive greeks fixture (allowed through Phase 10)
+4. tests/api_v2/test_options_greeks_and_symbol.py::test_greeks_us_put_delta_negative
+   - date-sensitive greeks fixture (allowed through Phase 10)
+
+Branch state: dev @ 1d7ee8361c18f52443d5124989ff0433948fecd7
+Uncommitted (expected, never commit): .claude/scheduled_tasks.lock, frontend/*,
+strategies/scripts/_watchdog_bowaka_v2_strategy.cmd (deliberate exit-7 local edit), logs/

@@ -1,0 +1,4 @@
+[watchdog Tue 05/19/2026  0:04:26.50] launching bowaka_v2_strategy retry=0
+[watchdog Tue 05/19/2026  9:11:15.67] bowaka_v2 exited code=-1
+[watchdog] restart in 30s
+[watchdog Tue 05/19/2026  9:11:46.07] launching bowaka_v2_strategy retry=1

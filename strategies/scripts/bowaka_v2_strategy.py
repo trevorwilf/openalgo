@@ -34,9 +34,10 @@ import logging
 import os
 import sys
 import time
+from collections.abc import Iterable
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -1602,6 +1603,234 @@ _DEAD_STATUSES = {
     "CANCELED", "CANCELLED", "REJECTED", "EXPIRED", "REPLACED",
     "done_for_day", "DONE_FOR_DAY",
 }
+_DEAD_STATUSES_LOWER = frozenset(s.lower() for s in _DEAD_STATUSES)
+
+
+def _oco_order_type(row: dict) -> str:
+    return str(row.get("order_type") or row.get("type") or "").lower()
+
+
+def _oco_order_id(row: dict) -> str:
+    return str(row.get("id") or row.get("order_id") or "")
+
+
+def _oco_order_is_live(row: dict) -> bool:
+    """Return True for an unfilled OCO row that can still reserve shares."""
+    status = str(
+        row.get("native_status")
+        or row.get("status")
+        or row.get("canonical_status")
+        or ""
+    ).lower()
+    if status == "filled" or status in _DEAD_STATUSES_LOWER:
+        return False
+    try:
+        qty = float(row.get("qty") or row.get("quantity") or 0)
+        filled = float(
+            row.get("filled_qty") or row.get("filled_quantity") or 0
+        )
+    except (TypeError, ValueError):
+        qty = filled = 0.0
+    return bool(_oco_order_id(row)) and not (qty > 0 and filled >= qty)
+
+
+def _classify_oco_rows(rows: Iterable[dict]) -> tuple[str, str]:
+    """Classify OCO rows into ``(target_id, stop_id)``.
+
+    Alpaca represents an OCO take-profit as the top-level LIMIT order
+    and the stop-loss as its nested child. Other adapters may return
+    both orders inside ``legs``. Classifying a combined top-level +
+    nested sequence handles both shapes without guessing from position.
+    """
+    target_id = ""
+    stop_id = ""
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        order_id = _oco_order_id(row)
+        order_type = _oco_order_type(row)
+        if not order_id:
+            continue
+        if "stop" in order_type:
+            if not stop_id:
+                stop_id = order_id
+        elif "limit" in order_type:
+            if not target_id:
+                target_id = order_id
+    return target_id, stop_id
+
+
+def _find_existing_oco_pair(
+    rows: Iterable[dict],
+    *,
+    symbol: str,
+    pos: dict,
+    expected_client_order_id: str | None = None,
+) -> tuple[dict, dict] | None:
+    """Find this lot's live Alpaca OCO in a flat/nested order list.
+
+    The strategy-generated OCO client id is rooted at the lot's unique
+    ``link_id``. Alpaca's flat order list gives that id to the LIMIT
+    take-profit parent and a broker-generated id to the STOP child; the
+    pair shares the exact creation timestamp. Requiring both the lot
+    prefix and timestamp prevents one same-symbol lot from adopting
+    another lot's protection.
+    """
+    all_rows = [row for row in rows if isinstance(row, dict)]
+    symbol_upper = str(symbol).upper()
+    link_id = str(pos.get("link_id") or "")
+    prefix = f"{link_id}-OCO-" if link_id else ""
+
+    parents: list[dict] = []
+    for row in all_rows:
+        row_symbol = str(
+            row.get("symbol") or row.get("canonical_symbol") or ""
+        ).upper()
+        if row_symbol != symbol_upper:
+            continue
+        if str(row.get("order_class") or "").lower() != "oco":
+            continue
+        if "limit" not in _oco_order_type(row) or not _oco_order_is_live(row):
+            continue
+        client_order_id = str(row.get("client_order_id") or "")
+        if expected_client_order_id:
+            if client_order_id != expected_client_order_id:
+                continue
+        elif not prefix or not client_order_id.startswith(prefix):
+            continue
+        parents.append(row)
+
+    parents.sort(
+        key=lambda row: str(
+            row.get("created_at") or row.get("submitted_at") or ""
+        ),
+        reverse=True,
+    )
+    for parent in parents:
+        nested = [
+            leg for leg in (parent.get("legs") or []) if isinstance(leg, dict)
+        ]
+        target_id, stop_id = _classify_oco_rows([parent, *nested])
+        if target_id and stop_id and target_id != stop_id:
+            stop = next(
+                (row for row in nested if _oco_order_id(row) == stop_id),
+                None,
+            )
+            if stop is not None and _oco_order_is_live(stop):
+                return parent, stop
+
+        created_at = str(parent.get("created_at") or "")
+        parent_asset = str(parent.get("asset_id") or "")
+        stops = []
+        for row in all_rows:
+            row_symbol = str(
+                row.get("symbol") or row.get("canonical_symbol") or ""
+            ).upper()
+            if row_symbol != symbol_upper:
+                continue
+            if str(row.get("order_class") or "").lower() != "oco":
+                continue
+            if "stop" not in _oco_order_type(row) or not _oco_order_is_live(row):
+                continue
+            same_creation = (
+                created_at
+                and str(row.get("created_at") or "") == created_at
+            )
+            same_asset_and_submit = (
+                parent_asset
+                and str(row.get("asset_id") or "") == parent_asset
+                and str(row.get("submitted_at") or "")
+                == str(parent.get("submitted_at") or "")
+            )
+            if same_creation or same_asset_and_submit:
+                stops.append(row)
+        if (
+            len(stops) == 1
+            and _oco_order_id(parent) != _oco_order_id(stops[0])
+        ):
+            return parent, stops[0]
+    return None
+
+
+def _positive_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _adopt_existing_oco_children_v2(
+    symbol: str,
+    pos: dict,
+    cfg: dict,
+    *,
+    oa_client,
+    api_key: str,
+    http,
+    expected_client_order_id: str | None = None,
+) -> bool:
+    """Recover missing child IDs from the broker without placing orders."""
+    children = pos.get("child_order_ids") or {}
+    if children.get("target") and children.get("stop"):
+        return True
+    fetch_all = getattr(oa_client, "fetch_all_orders", None)
+    if not callable(fetch_all):
+        return False
+    try:
+        rows = fetch_all(http, api_key)
+    except Exception as exc:
+        LOG.warning("OCO recovery order fetch failed for %s: %s", symbol, exc)
+        return False
+    pair = _find_existing_oco_pair(
+        rows,
+        symbol=symbol,
+        pos=pos,
+        expected_client_order_id=expected_client_order_id,
+    )
+    if pair is None:
+        return False
+    target, stop = pair
+    target_id = _oco_order_id(target)
+    stop_id = _oco_order_id(stop)
+    pos["child_order_ids"] = {"target": target_id, "stop": stop_id}
+    target_price = _positive_float(
+        target.get("limit_price") or target.get("price")
+    )
+    stop_price = _positive_float(
+        stop.get("stop_price") or stop.get("trigger_price")
+    )
+    if target_price is not None:
+        pos["target_price"] = target_price
+    if stop_price is not None:
+        pos["stop_price"] = stop_price
+    now_iso = _iso(_now_utc())
+    pos.setdefault("oco_attached_at", now_iso)
+    pos["oco_recovered_at"] = now_iso
+    pos.pop("oco_attach_outcome_unknown", None)
+    _emit_ledger_v2(cfg, "bracket_adopted_existing", {
+        "symbol": symbol,
+        "link_id": pos.get("link_id"),
+        "target_id": target_id,
+        "stop_id": stop_id,
+        "target_price": target_price,
+        "stop_price": stop_price,
+        "client_order_id": target.get("client_order_id"),
+    })
+    emit_protection_state(cfg, {
+        "ts": now_iso,
+        "symbol": symbol,
+        "event": "bracket_adopted_existing",
+        "target_id": target_id,
+        "stop_id": stop_id,
+    })
+    LOG.warning(
+        "adopted existing broker OCO for %s: target=%s stop=%s",
+        symbol,
+        target_id,
+        stop_id,
+    )
+    return True
 
 
 def _emit_ledger_v2(cfg: dict, event_type: str, payload: dict) -> None:
@@ -1726,6 +1955,30 @@ def submit_oco_children_v2(
     children = pos.get("child_order_ids") or {}
     if children.get("target") and children.get("stop"):
         return None
+    unresolved = pos.get("oco_attach_outcome_unknown") or {}
+    expected_coid = (
+        unresolved.get("client_order_id")
+        if isinstance(unresolved, dict)
+        else None
+    )
+    if _adopt_existing_oco_children_v2(
+        symbol,
+        pos,
+        cfg,
+        oa_client=oa_client,
+        api_key=api_key,
+        http=http,
+        expected_client_order_id=expected_coid,
+    ):
+        return {"status": "adopted_existing"}
+    if unresolved:
+        # A 2xx response means the broker may have accepted protection.
+        # Until its exact ids are recovered, another OCO or a blind
+        # flatten could over-allocate the position.
+        return {
+            "error": {"code": "oco_attach_outcome_unresolved"},
+            "status": "outcome_unresolved",
+        }
     entry_price = pos.get("entry_price")
     qty = int(pos.get("qty") or 0)
     venue = pos.get("venue_code") or (cfg.get("execution") or {}).get(
@@ -1739,7 +1992,16 @@ def submit_oco_children_v2(
             "skipping (will retry next tick)", symbol,
         )
         return None
-    pos["oco_attach_attempts"] = int(pos.get("oco_attach_attempts", 0)) + 1
+    attempts = int(pos.get("oco_attach_attempts", 0) or 0)
+    max_attempts = (cfg.get("protected_position") or {}).get(
+        "max_oco_attach_attempts"
+    )
+    if max_attempts is not None and attempts >= int(max_attempts):
+        return {
+            "error": {"code": "oco_attach_attempts_exhausted"},
+            "status": "attempts_exhausted",
+        }
+    pos["oco_attach_attempts"] = attempts + 1
     target_price = round(float(entry_price) * (1.0 + target_pct), 2)
     stop_price = round(float(entry_price) * (1.0 - stop_pct), 2)
     link_id = f"{pos.get('link_id', symbol)}-OCO-{int(time.time())}"
@@ -1761,34 +2023,37 @@ def submit_oco_children_v2(
     data = parsed.get("data") or {}
     native = data.get("native_response") or {}
     legs = native.get("legs") or []
-    # Strict leg parsing — a stop leg classifies first (covers
-    # stop_limit), a plain limit leg is the target. No guessing: a
-    # missing or duplicated id means we do NOT know which order is the
-    # stop, and storing a wrong id would let trigger_exit cancel the
-    # wrong leg later. Treat as attach failure and let the retry
-    # sweep / protected-position flatten handle it.
-    target_id = ""
-    stop_id = ""
-    for leg in legs:
-        otype = (leg.get("order_type") or leg.get("type") or "").lower()
-        leg_id = leg.get("id") or leg.get("order_id") or ""
-        if "stop" in otype:
-            if not stop_id:
-                stop_id = leg_id
-        elif "limit" in otype:
-            if not target_id:
-                target_id = leg_id
+    # Alpaca's OCO response uses the top-level LIMIT order as the
+    # take-profit parent and nests only the STOP child under ``legs``.
+    # Other adapters may put both rows in ``legs``; classify the union.
+    target_id, stop_id = _classify_oco_rows([native, *legs])
     if not target_id or not stop_id or target_id == stop_id:
+        if _adopt_existing_oco_children_v2(
+            symbol,
+            pos,
+            cfg,
+            oa_client=oa_client,
+            api_key=api_key,
+            http=http,
+            expected_client_order_id=link_id,
+        ):
+            return parsed
+        pos["oco_attach_outcome_unknown"] = {
+            "client_order_id": link_id,
+            "submitted_at": _iso(_now_utc()),
+            "target_price": target_price,
+            "stop_price": stop_price,
+        }
         _emit_ledger_v2(cfg, "bracket_attach_ambiguous", {
             "symbol": symbol, "link_id": pos.get("link_id"),
             "target_id": target_id, "stop_id": stop_id,
-            "legs": legs,
+            "native_response": native,
         })
         emit_protection_state(cfg, {
             "ts": _iso(_now_utc()), "symbol": symbol,
             "event": "bracket_attach_ambiguous",
             "target_id": target_id, "stop_id": stop_id,
-            "legs": legs,
+            "native_response": native,
         })
         LOG.error(
             "OCO attach for %s returned ambiguous legs "
@@ -1803,6 +2068,7 @@ def submit_oco_children_v2(
     pos["target_price"] = target_price
     pos["stop_price"] = stop_price
     pos["oco_attached_at"] = _iso(_now_utc())
+    pos.pop("oco_attach_outcome_unknown", None)
     _emit_ledger_v2(cfg, "bracket_attached", {
         "symbol": symbol, "link_id": pos.get("link_id"),
         "target_id": target_id, "stop_id": stop_id,
@@ -2965,9 +3231,6 @@ def process_fill_events_v2(
 _CANCEL_VERIFY_ATTEMPTS = 6
 _CANCEL_VERIFY_SLEEP_S = 0.5
 
-_DEAD_STATUSES_LOWER = frozenset(s.lower() for s in _DEAD_STATUSES)
-
-
 def _row_filled_qty(row: dict | None) -> int:
     try:
         return int(float(
@@ -3063,6 +3326,26 @@ def trigger_exit_v2(
             symbol, pos.get("status"), reason,
         )
         return False
+    children = pos.get("child_order_ids") or {}
+    if not (children.get("target") and children.get("stop")):
+        _adopt_existing_oco_children_v2(
+            symbol,
+            pos,
+            cfg,
+            oa_client=oa_client,
+            api_key=api_key,
+            http=http,
+        )
+        children = pos.get("child_order_ids") or {}
+    if pos.get("oco_attach_outcome_unknown") and not (
+        children.get("target") and children.get("stop")
+    ):
+        LOG.error(
+            "exit for %s blocked: OCO submission outcome is unresolved; "
+            "refusing a blind sell",
+            symbol,
+        )
+        return False
     # Reserve before any I/O so a re-entrant tick doesn't double-fire.
     pos["status"] = "exit_pending"
     pos["exit_reason_pending"] = reason
@@ -3079,7 +3362,6 @@ def trigger_exit_v2(
     # accept alone is not confirmation (async at the broker); each
     # accepted cancel is verified terminal via _await_cancel_terminal.
     # Any failure aborts the exit; the next tick retries.
-    children = pos.get("child_order_ids") or {}
     for role in ("target", "stop"):
         oid = children.get(role)
         if not oid:
@@ -3844,6 +4126,23 @@ def enforce_protected_position_invariant_v2(
             continue
         children = pos.get("child_order_ids") or {}
         if children.get("target") and children.get("stop"):
+            continue
+        if _adopt_existing_oco_children_v2(
+            symbol,
+            pos,
+            cfg,
+            oa_client=oa_client,
+            api_key=api_key,
+            http=http,
+        ):
+            continue
+        if pos.get("oco_attach_outcome_unknown"):
+            violations += 1
+            emit_protection_state(cfg, {
+                "ts": _iso(now),
+                "symbol": symbol,
+                "event": "oco_attach_outcome_unresolved",
+            })
             continue
         # OCO attach retries exhausted: act immediately — don't wait
         # for max_unprotected_seconds while attach keeps failing.

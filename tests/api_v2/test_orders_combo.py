@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 import pytest
 
 from services.broker_translator_registry import clear_registry_for_tests
@@ -206,3 +204,57 @@ def test_combo_oco_dispatch_to_webull_like(flask_app, monkeypatch):
     assert sent["combo_type"] == "OCO"
     assert sent["link_id"] == "WB-OCO-1"
     assert len(sent["orders"]) == 2
+
+
+def test_combo_broker_exception_returns_structured_502(flask_app, monkeypatch):
+    broker_code = "_mock_webull_like"
+    monkeypatch.setenv("API_V2__MOCK_WEBULL_LIKE", "1")
+    _install_fake_auth_resolver(monkeypatch, broker_code)
+    _stub_caps(
+        monkeypatch,
+        broker_code=broker_code,
+        supports_combo_types=["OCO"],
+    )
+    from broker._mock_webull_like.api.order_api import (
+        install_mock_webull_like_translator,
+    )
+    from services.broker_translator_registry import get_broker_translator
+
+    install_mock_webull_like_translator()
+    _seed_aapl_msft(broker_code)
+    promoted = get_broker_translator(broker_code)
+
+    def _raise_broker_error(native_payload, account_ctx):
+        raise RuntimeError("insufficient qty available")
+
+    monkeypatch.setattr(promoted, "send_native", _raise_broker_error)
+    body = {
+        "apikey": "k",
+        "combo_type": "OCO",
+        "time_in_force": "DAY",
+        "session": "REGULAR",
+        "link_id": "WB-OCO-ERR",
+        "legs": [
+            {
+                "instrument_ref": {
+                    "venue_code": "XNAS", "canonical_symbol": "MSFT",
+                },
+                "side": "SELL", "quantity": "1", "quantity_unit": "WHOLE",
+                "order_type": "LIMIT", "price": "410.00",
+            },
+            {
+                "instrument_ref": {
+                    "venue_code": "XNAS", "canonical_symbol": "MSFT",
+                },
+                "side": "SELL", "quantity": "1", "quantity_unit": "WHOLE",
+                "order_type": "STOP", "trigger_price": "390.00",
+            },
+        ],
+    }
+
+    response = flask_app.test_client().post("/api/v2/orders/combo", json=body)
+
+    assert response.status_code == 502
+    payload = response.get_json()
+    assert payload["error"]["code"] == "broker_error"
+    assert "insufficient qty available" in payload["error"]["message"]

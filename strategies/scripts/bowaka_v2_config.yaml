@@ -1,3 +1,10 @@
+# STAGED lab->live config for robustness WINNER trial #3005 (combined=-0.79177, median_fold=-0.60367, holdout=-0.70790, robust_ok=False).
+# Study: bowaka_v2_sip_walkforward_conservative_747e4c31_20260711 (salvage sweep, 2026-07-12).
+# Overlaid onto the CURRENT LIVE config (NOT the lab mirror, which had
+# drifted) so all live-only operator blocks are preserved. 29 tuned keys overlaid
+# by artifacts/deploy/_overlay_797_onto_live.py (transforms from
+# scripts/_gen_live_config_from_trial.py). environment left at live value.
+# NOT applied to the live system — operator copies it deliberately.
 # 2026-06-17 - Applied fast_realism 5000-study finalist trial #3437 (combined
 #   -0.03170, median_fold -0.05971, holdout +0.05175). PAPER SHADOW: replaces
 #   the #3155 config (operator: "not working at all"). 30 tuned keys overlaid
@@ -150,13 +157,13 @@ scanner:
   require_fresh_intraday_bar: true
 
 signals:
-  rvol_so_far_min: 2.180766810003851             # 2026-06-11: winner #3155 (was 0.65, 2026-06-08 SIP recalibration).
-  projected_full_day_rvol_min: 2.958226768828195 # 2026-06-11: winner #3155 set this ABOVE rvol_so_far_min; if the feature engine computes the two identically, this higher floor is the binding RVOL constraint. Was 0.65.
-  prior_atr_pct_min: 0.08001509346394585
-  range_expansion_so_far_min: 2.3313429453194527  # 2026-06-11: winner #3155 (was 0.60, 2026-06-08 SIP recalibration).
-  close_location_so_far_min: 0.6459022368108059
-  ema_distance_min: -0.0328508989291792            # 2026-06-11: winner #3155 (was 0.0, SIP 2026-06-04).
-  ema_slope_min: -0.012319899344748711            # 2026-06-11: winner #3155 (was -0.05, 2026-06-08).
+  rvol_so_far_min: 2.075689573651686             # 2026-06-11: winner #3155 (was 0.65, 2026-06-08 SIP recalibration).
+  projected_full_day_rvol_min: 2.5620305212160988 # 2026-06-11: winner #3155 set this ABOVE rvol_so_far_min; if the feature engine computes the two identically, this higher floor is the binding RVOL constraint. Was 0.65.
+  prior_atr_pct_min: 0.08371277806880828
+  range_expansion_so_far_min: 1.0866292555728243  # 2026-06-11: winner #3155 (was 0.60, 2026-06-08 SIP recalibration).
+  close_location_so_far_min: 0.23117715400491556
+  ema_distance_min: 0.07731736243168531            # 2026-06-11: winner #3155 (was 0.0, SIP 2026-06-04).
+  ema_slope_min: -0.021692111236959237            # 2026-06-11: winner #3155 (was -0.05, 2026-06-08).
 
   # Universe-layer thresholds mirrored here so apply_v2_gates can
   # evaluate them against the candidate's current price / ADV.
@@ -166,11 +173,11 @@ signals:
   avg_dollar_volume_max:
 
   # Blow-off / exhaustion guards. Research priors.
-  rvol_so_far_max: 15.063383404911255
-  projected_full_day_rvol_max: 4.389998623160714
-  range_expansion_so_far_max: 3.435850844675855
-  gap_pct_max: 0.38569051045725955
-  current_return_pct_max: 0.6809040495280265
+  rvol_so_far_max: 19.607146856464215
+  projected_full_day_rvol_max: 11.81373464161752
+  range_expansion_so_far_max: 6.789822927488781
+  gap_pct_max: 0.4105548972468585
+  current_return_pct_max: 0.5625997054154155
 
 score:
   bounded: true
@@ -194,8 +201,8 @@ execution:
 
   quote_gate:
     enabled: true
-    max_spread_pct: 0.0198
-    max_quote_age_seconds: 68
+    max_spread_pct: 0.0166
+    max_quote_age_seconds: 40
     require_bid_ask_positive: true
 
   price_chase_gate:
@@ -211,9 +218,9 @@ execution:
 sizing:
   sizing_mode: "equal_slice"
   bankroll_fixed_dollars: 90000
-  max_concurrent_positions: 22
-  equal_slice_bankroll_fraction: 0.4871237621044672
-  target_risk_dollars: 960.0976463800389
+  max_concurrent_positions: 13
+  equal_slice_bankroll_fraction: 0.9397277502072913
+  target_risk_dollars: 123.51117931021301
   min_order_notional: 500
   max_per_trade_dollars:
 
@@ -237,10 +244,10 @@ reconcile:
   halt_on_orphans: true
 
 risk:
-  daily_loss_pct: 0.02403648309498329
+  daily_loss_pct: 0.03073661384922606
   strategy_slice_loss_pct: 0.025
-  max_gross_exposure_pct: 0.713019169077437
-  max_total_entries_per_day: 15
+  max_gross_exposure_pct: 0.8005389644473218
+  max_total_entries_per_day: 24
 
   # Multi-lot accumulation. One entry per symbol per day, allowed on
   # consecutive days, capped at this many concurrent lots per symbol.
@@ -248,8 +255,8 @@ risk:
   # winner #3155's 4, and decoupled from exits.max_hold_days.
   max_lots_per_symbol: 3
 
-  max_stopouts_per_day: 7
-  stop_trading_after_consecutive_stopouts: 7
+  max_stopouts_per_day: 3
+  stop_trading_after_consecutive_stopouts: 1
 
   adv_tier_caps:
   - max_adv_dollars: 250000
@@ -289,13 +296,13 @@ exits:
   # 2026-05-26: operator tightened 0.08 -> 0.025. 2026-06-11: reverted to
   # winner #3155 value 0.1038 per operator (supersedes the 2026-05-26 note).
   # Per-lot OCO stop = entry_price * (1 - stop_pct).
-  stop_pct: 0.1896328255554003
-  target_pct: 0.4464470988
-  max_hold_days: 5
+  stop_pct: 0.17710018623023313
+  target_pct: 0.6866949165
+  max_hold_days: 9
 
   time_stop:
     enabled: true
-    exit_time: "15:15"
+    exit_time: "15:45"
 
   signal_fade:
     enabled: true
@@ -306,9 +313,9 @@ exits:
     eval_time: "15:45"
     telemetry_time: "16:05"
     score_thresholds:
-      soft: 0.156500767
-      hard: 0.3943120795
-      critical: 0.4997581073
+      soft: 0.1921087167
+      hard: 0.3057876819
+      critical: 0.3585638778
     exit_on: ["hard", "critical"]
     order_style: "marketable_limit"
     marketable_limit_offset_pct: 0.005

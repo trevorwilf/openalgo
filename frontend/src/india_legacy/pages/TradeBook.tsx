@@ -91,6 +91,21 @@ function formatTime(timestamp: string): string {
   })
 }
 
+function formatDate(timestamp: string): string | null {
+  if (!timestamp) return null
+
+  const timeValue = parseTimestamp(timestamp)
+  // Time-only broker formats (e.g. "HH:MM:SS") carry no date
+  if (timeValue === 0) return null
+
+  const date = new Date(timeValue)
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 export default function TradeBook() {
   const { apiKey } = useAuthStore()
   const { isCrypto } = useSupportedExchanges()
@@ -514,7 +529,7 @@ export default function TradeBook() {
                       className="cursor-pointer hover:bg-muted/50 transition-colors"
                     >
                       <div className="flex items-center gap-1">
-                        Time
+                        Date / Time
                         {sortConfig.key === 'timestamp' && (
                           sortConfig.direction === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
                         )}
@@ -523,7 +538,9 @@ export default function TradeBook() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedAndFilteredTrades.map((trade, index) => (
+                  {sortedAndFilteredTrades.map((trade, index) => {
+                    const tradeDate = formatDate(trade.timestamp)
+                    return (
                     <TableRow key={`${trade.orderid}-${index}`}>
                       <TableCell className="font-medium">{trade.symbol}</TableCell>
                       <TableCell>
@@ -556,10 +573,14 @@ export default function TradeBook() {
                       </TableCell>
                       <TableCell className="font-mono text-xs">{trade.orderid}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {formatTime(trade.timestamp)}
+                        <div className="flex flex-col leading-tight">
+                          {tradeDate && <span className="text-xs">{tradeDate}</span>}
+                          <span>{formatTime(trade.timestamp)}</span>
+                        </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>

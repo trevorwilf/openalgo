@@ -1,0 +1,21 @@
+Bowaka v2 hardening — Phase 0 baseline (2026-07-14 00:24 local)
+Baseline commit on dev: 12cfd46d chore(bowaka-v2): commit running baseline before hardening phases
+
+uv run pytest tests/strategies -q
+=> 2 failed, 167 passed
+
+Pre-existing failures (stale config-pinning tests vs winner-calibrated trial #3437 config; NOT caused by hardening):
+1. tests/strategies/test_bowaka_v2_config.py::test_v2_config_signals_have_min_thresholds
+   assert 0.3 <= rvol_so_far_min <= 2.0  -> actual 2.180766810003851
+2. tests/strategies/test_bowaka_v2_config.py::test_v2_config_risk_paper_safe_with_shadow_block
+   assert risk.daily_loss_pct == 0.03    -> actual 0.02403648309498329
+
+Rule: these 2 may remain failing; the failure count must not increase.
+
+Addendum (Phase 6, 2026-07-14): tests/api_v2 has 2 pre-existing failures
+verified present WITHOUT any hardening changes (git stash test):
+3. tests/api_v2/test_options_greeks_and_symbol.py::test_greeks_us_call_returns_full_set
+4. tests/api_v2/test_options_greeks_and_symbol.py::test_greeks_us_put_delta_negative
+Both are date-sensitive greeks fixtures (delta computes 0.0 — expiry appears
+to have passed relative to today's date). Not caused by hardening phases.
+

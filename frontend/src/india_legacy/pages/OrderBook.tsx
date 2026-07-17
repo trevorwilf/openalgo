@@ -113,6 +113,21 @@ function formatTime(timestamp: string): string {
   })
 }
 
+function formatDate(timestamp: string): string | null {
+  if (!timestamp) return null
+
+  const timeValue = parseTimestamp(timestamp)
+  // Time-only broker formats (e.g. "HH:MM:SS") carry no date
+  if (timeValue === 0) return null
+
+  const date = new Date(timeValue)
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; label: string }> = {
   complete: { icon: CheckCircle2, color: 'text-green-500', label: 'complete' },
   rejected: { icon: XCircle, color: 'text-red-500', label: 'rejected' },
@@ -623,12 +638,12 @@ export default function OrderBook() {
                         )}
                       </div>
                     </TableHead>
-                    <TableHead 
-                      className="w-[100px] cursor-pointer hover:bg-muted/50 transition-colors"
+                    <TableHead
+                      className="w-[120px] cursor-pointer hover:bg-muted/50 transition-colors"
                       onClick={() => requestSort('timestamp')}
                     >
                       <div className="flex items-center gap-1">
-                        Time
+                        Date / Time
                         {sortConfig.key === 'timestamp' && (
                           sortConfig.direction === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
                         )}
@@ -643,6 +658,7 @@ export default function OrderBook() {
                     const status = statusConfig[order.order_status] || statusConfig.open
                     const StatusIcon = status.icon
                     const canCancel = order.order_status === 'open'
+                    const orderDate = formatDate(order.timestamp)
 
                     return (
                       <TableRow key={`${order.orderid}-${index}`}>
@@ -681,7 +697,10 @@ export default function OrderBook() {
                           </div>
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {formatTime(order.timestamp)}
+                          <div className="flex flex-col leading-tight">
+                            {orderDate && <span className="text-xs">{orderDate}</span>}
+                            <span>{formatTime(order.timestamp)}</span>
+                          </div>
                         </TableCell>
                         <TableCell>
                           {canCancel && (

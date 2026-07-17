@@ -15,8 +15,6 @@ supported by translator returns HTTP 422 ``unsupported_capability``.
 
 from __future__ import annotations
 
-from typing import Any
-
 from flask import request
 from flask_restx import Namespace, Resource
 
@@ -183,6 +181,11 @@ def _dispatch_combo(combo, *, broker: str, auth_token: str, promoted):
             "broker_code": e.broker_code,
             "capability_name": e.capability_name,
         }), 422
+    except Exception as e:  # noqa: BLE001 — broker-side last-resort
+        logger.exception(
+            "combo broker send_native failed for %s: %s", broker, e
+        )
+        return error("broker_error", str(e)), 502
 
     return ok({
         "combo_type": combo.combo_type.value,

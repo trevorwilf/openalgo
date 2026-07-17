@@ -357,3 +357,102 @@ def test_stop_limit_leg_classifies_as_stop(tmp_path):
     )
     assert res is not None and "error" not in res
     assert pos["child_order_ids"]["stop"] == "STP-1"
+
+
+def test_alpaca_parent_target_and_nested_stop_attach(tmp_path):
+    cfg = _cfg(tmp_path)
+    pos = _oco_pos()
+    oa = FakeOA()
+    oa.oco_response = {
+        "_http_status": 200,
+        "data": {"native_response": {
+            "id": "TGT-ALPACA",
+            "order_type": "limit",
+            "order_class": "oco",
+            "limit_price": "11.00",
+            "legs": [
+                {
+                    "id": "STP-ALPACA",
+                    "order_type": "stop",
+                    "stop_price": "9.50",
+                },
+            ],
+        }},
+    }
+
+    result = v2.submit_oco_children_v2(
+        "AAA", pos, cfg, oa_client=oa, api_key="k", http=None,
+    )
+
+    assert result is not None and "error" not in result
+    assert pos["child_order_ids"] == {
+        "target": "TGT-ALPACA", "stop": "STP-ALPACA",
+    }
+
+
+def test_exit_adopts_and_cancels_unrecorded_oco_before_sell(tmp_path):
+    cfg = _cfg(tmp_path)
+    pos = _oco_pos()
+
+    class RecoveringOA(FakeOA):
+        def fetch_all_orders(self, http, api_key):
+            created = "2026-07-17T15:02:04.191418381Z"
+            return [
+                {
+                    "id": "TGT-LIVE",
+                    "client_order_id": "L-1-OCO-1784300519",
+                    "symbol": "AAA",
+                    "asset_id": "asset-1",
+                    "qty": "100",
+                    "filled_qty": "0",
+                    "order_class": "oco",
+                    "order_type": "limit",
+                    "limit_price": "11.00",
+                    "status": "new",
+                    "created_at": created,
+                },
+                {
+                    "id": "STP-LIVE",
+                    "client_order_id": "broker-stop-id",
+                    "symbol": "AAA",
+                    "asset_id": "asset-1",
+                    "qty": "100",
+                    "filled_qty": "0",
+                    "order_class": "oco",
+                    "order_type": "stop",
+                    "stop_price": "9.50",
+                    "status": "held",
+                    "created_at": created,
+                },
+            ]
+
+    oa = RecoveringOA()
+    result = v2.trigger_exit_v2(
+        "AAA", pos, cfg, oa_client=oa, api_key="k", http=None,
+        reason="protected_position_flatten",
+    )
+
+    assert result is True
+    assert sorted(oa.cancel_calls) == ["STP-LIVE", "TGT-LIVE"]
+    assert len(oa.market_sells) == 1
+    assert pos["status"] == "exiting"
+
+
+def test_exit_blocks_blind_sell_while_oco_outcome_unresolved(tmp_path):
+    cfg = _cfg(tmp_path)
+    pos = _oco_pos()
+    pos["oco_attach_outcome_unknown"] = {
+        "client_order_id": "L-1-OCO-UNKNOWN",
+        "submitted_at": "2026-07-17T15:02:04Z",
+    }
+    oa = FakeOA()
+
+    result = v2.trigger_exit_v2(
+        "AAA", pos, cfg, oa_client=oa, api_key="k", http=None,
+        reason="protected_position_flatten",
+    )
+
+    assert result is False
+    assert oa.cancel_calls == []
+    assert oa.market_sells == []
+    assert pos["status"] == "filled"

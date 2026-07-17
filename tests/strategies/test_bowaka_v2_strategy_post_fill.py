@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -67,9 +66,12 @@ class FakeOAClient:
             "_http_status": 200,
             "data": {
                 "native_response": {
-                    "id": "PARENT-OCO-1",
+                    # Alpaca OCO shape: take-profit is the top-level
+                    # LIMIT parent; only the STOP is nested in legs.
+                    "id": "TARGET-1",
+                    "order_type": "limit",
+                    "order_class": "oco",
                     "legs": [
-                        {"id": "TARGET-1", "order_type": "limit"},
                         {"id": "STOP-1", "order_type": "stop"},
                     ],
                 },
@@ -262,6 +264,86 @@ def test_submit_oco_children_v2_idempotent(tmp_path):
         "AAA", pos, cfg, oa_client=oa, api_key="k", http=None,
     )
     assert res is None
+    assert oa.calls == []
+
+
+def _alpaca_flat_oco_rows(*, link_id="L-1"):
+    created = "2026-07-17T15:02:04.191418381Z"
+    return [
+        {
+            "id": "TARGET-EXISTING",
+            "client_order_id": f"{link_id}-OCO-1784300519",
+            "symbol": "AAA",
+            "asset_id": "asset-1",
+            "qty": "100",
+            "filled_qty": "0",
+            "order_class": "oco",
+            "order_type": "limit",
+            "side": "sell",
+            "limit_price": "11.00",
+            "status": "new",
+            "created_at": created,
+        },
+        {
+            "id": "STOP-EXISTING",
+            "client_order_id": "broker-stop-id",
+            "symbol": "AAA",
+            "asset_id": "asset-1",
+            "qty": "100",
+            "filled_qty": "0",
+            "order_class": "oco",
+            "order_type": "stop",
+            "side": "sell",
+            "stop_price": "9.50",
+            "status": "held",
+            "created_at": created,
+        },
+    ]
+
+
+def test_submit_oco_adopts_existing_alpaca_flat_pair(tmp_path):
+    cfg = _cfg(tmp_path)
+    pos = {
+        "symbol": "AAA", "qty": 100, "venue_code": "XNAS",
+        "entry_price": 10.00, "status": "filled",
+        "stop_pct": 0.05, "target_pct": 0.10,
+        "child_order_ids": {"target": "", "stop": ""},
+        "link_id": "L-1", "oco_attach_attempts": 99,
+    }
+    oa = FakeOAClient()
+    oa.fetched_orders = _alpaca_flat_oco_rows()
+
+    result = v2.submit_oco_children_v2(
+        "AAA", pos, cfg, oa_client=oa, api_key="k", http=None,
+    )
+
+    assert result == {"status": "adopted_existing"}
+    assert pos["child_order_ids"] == {
+        "target": "TARGET-EXISTING", "stop": "STOP-EXISTING",
+    }
+    assert pos["target_price"] == pytest.approx(11.0)
+    assert pos["stop_price"] == pytest.approx(9.5)
+    assert oa.calls == []
+
+
+def test_submit_oco_honors_retry_cap(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["protected_position"]["max_oco_attach_attempts"] = 2
+    pos = {
+        "symbol": "AAA", "qty": 100, "venue_code": "XNAS",
+        "entry_price": 10.00, "status": "filled",
+        "stop_pct": 0.05, "target_pct": 0.10,
+        "child_order_ids": {"target": "", "stop": ""},
+        "link_id": "L-1", "oco_attach_attempts": 2,
+    }
+    oa = FakeOAClient()
+
+    result = v2.submit_oco_children_v2(
+        "AAA", pos, cfg, oa_client=oa, api_key="k", http=None,
+    )
+
+    assert result["status"] == "attempts_exhausted"
+    assert pos["oco_attach_attempts"] == 2
     assert oa.calls == []
 
 

@@ -9,6 +9,8 @@ REM
 REM Exit codes that DO NOT trigger a restart:
 REM   0  = clean shutdown
 REM   5  = config error (e.g., live env without SIP feed)
+REM   7  = broker reconciliation refused to trade blind (orphan
+REM        positions or unrecoverable state.json) — operator triage
 REM   99 = L3 hard-kill flag dropped (operator intent)
 REM
 REM Caps at 10 restarts per launch. uv handles deps + venv.
@@ -38,13 +40,21 @@ set "MAX_RETRIES=10"
 
 :loop
 echo [watchdog %DATE% %TIME%] launching bowaka_v2_strategy retry=!RETRIES!
+for /f %%t in ('powershell -nop -c "[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()"') do set "T0=%%t"
 "%PY%" strategies\scripts\bowaka_v2_strategy.py --config "%CFG%"
 set "EC=!ERRORLEVEL!"
-echo [watchdog %DATE% %TIME%] bowaka_v2 exited code=!EC!
+for /f %%t in ('powershell -nop -c "[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()"') do set "T1=%%t"
+set /a RUNTIME=!T1! - !T0!
+echo [watchdog %DATE% %TIME%] bowaka_v2 exited code=!EC! runtime=!RUNTIME!s
 
 if "!EC!"=="0"  goto :end
 if "!EC!"=="5"  goto :end
+if "!EC!"=="7"  goto :end
 if "!EC!"=="99" goto :end
+
+REM A run that survived 600s+ was healthy - reset the crash budget
+REM so a rare blip days later does not inherit stale retries.
+if !RUNTIME! GEQ 600 set "RETRIES=0"
 
 set /a RETRIES=!RETRIES! + 1
 if !RETRIES! GEQ !MAX_RETRIES! goto :max_retries
@@ -55,6 +65,8 @@ goto :loop
 
 :max_retries
 echo [watchdog] ERROR: max restart count reached, giving up 1>&2
+if not exist "%ROOT%\logs" mkdir "%ROOT%\logs"
+> "%ROOT%\logs\bowaka_watchdog_gaveup.flag" echo {"task": "bowaka_v2_strategy_watchdog", "at": "%DATE% %TIME%", "retries": !RETRIES!}
 exit /b 13
 
 :end
