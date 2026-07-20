@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from flask import request
 
-from database.auth_db import get_auth_token_broker
+from database.auth_db import get_auth_token_broker, verify_api_key
 
 
 def resolve_auth() -> Tuple[Optional[str], Optional[str], Optional[str]]:
@@ -31,7 +31,12 @@ def resolve_auth() -> Tuple[Optional[str], Optional[str], Optional[str]]:
 
     auth_token, _feed, broker = get_auth_token_broker(api_key, include_feed_token=True)
     if auth_token is None:
-        return None, None, "invalid apikey"
+        # "invalid apikey" and "no broker session" send the operator to
+        # different fixes (regenerate the key vs re-login to the
+        # broker) — don't conflate them.
+        if verify_api_key(api_key) is None:
+            return None, None, "invalid apikey"
+        return None, None, "no active broker session for this apikey"
     return auth_token, broker, None
 
 

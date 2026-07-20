@@ -8,7 +8,7 @@ from typing import Any
 
 from flask import request
 
-from database.auth_db import get_auth_token_broker
+from database.auth_db import get_auth_token_broker, verify_api_key
 from restx_api.v2._auth import error, ok
 
 __all__ = ["error", "ok", "parse_body", "resolve_user_id"]
@@ -31,7 +31,9 @@ def resolve_user_id() -> tuple[str | None, str | None]:
         return None, "missing apikey"
     auth_token, _feed, broker = get_auth_token_broker(api_key, include_feed_token=True)
     if auth_token is None:
-        return None, "invalid apikey"
+        if verify_api_key(api_key) is None:
+            return None, "invalid apikey"
+        return None, "no active broker session for this apikey"
     # Use the API key as the scope id; replace with username lookup in Phase 5.
     return f"u:{api_key[:12]}", None
 

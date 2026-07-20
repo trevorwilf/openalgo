@@ -185,6 +185,16 @@ invalid_api_key_cache = TTLCache(maxsize=512, ttl=300)  # 5 minutes
 # entry in auth_cache.
 revoked_auth_cache = TTLCache(maxsize=1024, ttl=300)  # 5 minutes
 
+# Cache keys (SHA256-derived, never plaintext) that have successfully
+# authenticated at least once in this process. Unlike the TTL caches
+# these never expire: they exist only to widen logging — a failure on
+# a key that once worked is an incident (ERROR, lands in
+# log/errors.jsonl), while a failure on a never-seen key is routine
+# noise (debug/warning). Bounded defensively; a deployment holds O(1)
+# real keys.
+_ever_verified_api_keys: set = set()
+_ever_authenticated_auth_keys: set = set()
+
 # Conditionally create engine based on DB type
 if DATABASE_URL and "sqlite" in DATABASE_URL:
     # SQLite: Use NullPool — each checkout creates a fresh connection.
@@ -841,12 +851,25 @@ def verify_api_key(provided_api_key):
         # Query all API keys
         api_keys = ApiKeys.query.all()
 
+        if not api_keys:
+            # Zero rows on a configured deployment is a transient DB
+            # anomaly, not proof the key is bad — negative-caching it
+            # would serve 401s for a valid key until the cache expires.
+            logger.error(
+                "API key verification found zero rows in api_keys; "
+                "treating as transient and not caching the failure"
+            )
+            return None
+
         # Try to verify against each stored hash
         for api_key_obj in api_keys:
             try:
                 ph.verify(api_key_obj.api_key_hash, peppered_key)
                 # Valid key found - cache it
                 verified_api_key_cache[cache_key] = api_key_obj.user_id
+                if len(_ever_verified_api_keys) > 512:
+                    _ever_verified_api_keys.clear()
+                _ever_verified_api_keys.add(cache_key)
                 logger.debug(f"API key verified and cached for user_id: {api_key_obj.user_id}")
                 return api_key_obj.user_id
             except VerifyMismatchError:
@@ -855,7 +878,19 @@ def verify_api_key(provided_api_key):
         # If we reach here, the API key is invalid
         # Cache the invalid result to prevent repeated expensive verifications
         invalid_api_key_cache[cache_key] = True
-        logger.debug("Invalid API key cached")
+        if cache_key in _ever_verified_api_keys:
+            # A key that verified earlier in this process should never
+            # mismatch unless it was regenerated or the DB/pepper is in
+            # a bad state. Every request now 401s from the invalid-key
+            # cache until the TTL lapses — surface it loudly.
+            logger.error(
+                f"API key that previously verified in this process failed "
+                f"verification against {len(api_keys)} stored hash(es); "
+                f"serving 401 from cache for the next "
+                f"{int(invalid_api_key_cache.ttl)}s"
+            )
+        else:
+            logger.debug("Invalid API key cached")
 
         # Track the invalid attempt
         try:
@@ -970,9 +1005,15 @@ def get_auth_token_broker(provided_api_key, include_feed_token=False):
             try:
                 auth_obj = Auth.query.filter_by(name=user_id).first()
                 if auth_obj and auth_obj.is_revoked:
-                    # Token was revoked, remove from cache
+                    # Token was revoked, remove from cache. A cached
+                    # entry proves this key was serving authenticated
+                    # requests — losing auth mid-session is an incident.
                     del auth_cache[cache_key]
-                    logger.warning(f"Cached auth token was revoked for user_id '{user_id}'.")
+                    logger.error(
+                        f"Cached auth token was revoked mid-session for user_id "
+                        f"'{user_id}'; API requests will receive 401 until a new "
+                        f"broker session is established."
+                    )
                     return (None, None, None) if include_feed_token else (None, None)
                 # Not revoked, return cached result
                 logger.debug(f"Auth token retrieved from cache for user_id: {user_id}")
@@ -1000,6 +1041,9 @@ def get_auth_token_broker(provided_api_key, include_feed_token=False):
 
                 # Cache the result
                 auth_cache[cache_key] = result
+                if len(_ever_authenticated_auth_keys) > 512:
+                    _ever_authenticated_auth_keys.clear()
+                _ever_authenticated_auth_keys.add(cache_key)
                 logger.debug(f"Auth token cached for user_id: {user_id}")
                 return result
             else:
@@ -1010,7 +1054,21 @@ def get_auth_token_broker(provided_api_key, include_feed_token=False):
                 # for up to 24h, which silently blocked recovery).
                 negative_result = (None, None, None) if include_feed_token else (None, None)
                 revoked_auth_cache[cache_key] = True
-                logger.warning(f"No valid auth token or broker found for user_id '{user_id}'. Cached negative result.")
+                reason = "is revoked" if auth_obj is not None else "row is missing"
+                if cache_key in _ever_authenticated_auth_keys:
+                    # This key served authenticated requests earlier in
+                    # this process — mid-session auth loss is an
+                    # incident, not routine noise.
+                    logger.error(
+                        f"Broker auth token for user_id '{user_id}' {reason} after "
+                        f"previously authenticating in this process; negative result "
+                        f"cached for {int(revoked_auth_cache.ttl)}s (401s until restored)."
+                    )
+                else:
+                    logger.warning(
+                        f"No valid auth token or broker found for user_id '{user_id}' "
+                        f"(auth {reason}). Cached negative result."
+                    )
                 return negative_result
         except Exception as e:
             logger.exception(f"Error while querying the database for auth token and broker: {e}")
