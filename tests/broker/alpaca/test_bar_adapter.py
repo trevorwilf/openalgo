@@ -8,6 +8,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
+import broker.alpaca.api.bar_api as bar_api
 from broker.alpaca.api.auth_api import AlpacaAuth, DATA_BASE_URL, PAPER_BASE_URL
 from broker.alpaca.api.bar_api import AlpacaBarAdapter
 from domain.broker_market_data import AccountContext, NormalizedBarRequest
@@ -196,3 +197,43 @@ def test_unknown_interval_raises_unsupported():
             ),
             AccountContext(broker_code="alpaca"),
         )
+
+
+def test_default_adapter_reuses_one_client_pool(monkeypatch):
+    """Regression: the promoted singleton must not build an SSL/client
+    stack for every symbol request.
+    """
+    created: list[object] = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.closed = False
+            self.calls = 0
+            created.append(self)
+
+        def get(self, _url, **_kwargs):
+            self.calls += 1
+            return httpx.Response(
+                200,
+                json=BARS_PAYLOAD,
+                request=httpx.Request("GET", "https://data.alpaca.markets/v2/stocks/bars"),
+            )
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(bar_api.httpx, "Client", FakeClient)
+    adapter = AlpacaBarAdapter(auth=_auth())
+    request = NormalizedBarRequest(
+        interval="1m",
+        start=datetime(2026, 4, 23, 14, 30, tzinfo=timezone.utc),
+        end=datetime(2026, 4, 23, 15, 0, tzinfo=timezone.utc),
+    )
+
+    adapter.get_bars(_FakeInstrument(), request, AccountContext(broker_code="alpaca"))
+    adapter.get_bars(_FakeInstrument(), request, AccountContext(broker_code="alpaca"))
+
+    assert len(created) == 1
+    assert created[0].calls == 2
+    adapter.close()
+    assert created[0].closed is True

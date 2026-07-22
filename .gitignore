@@ -42,6 +42,7 @@ tmp/
 *.duckdb
 *.sqlite
 *.log
+*.log.*.gz
 *.jsonl
 # Allow committed test fixtures (jsonl).
 !tests/fixtures/**/*.jsonl
@@ -161,6 +162,7 @@ strategies/scripts/*
 !strategies/scripts/run_bowaka_prefilter.bat
 !strategies/scripts/_watchdog_bowaka_strategy.cmd
 !strategies/scripts/_watchdog_openalgo.cmd
+!strategies/scripts/_run_bowaka_log_rotate.cmd
 !strategies/scripts/BowakaPrefilter.xml
 !strategies/scripts/install_bowaka_task.cmd
 # Linux launchers (.sh / cron / supercronic)

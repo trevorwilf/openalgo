@@ -1,4 +1,5 @@
 import logging
+from ipaddress import ip_address
 from collections.abc import Callable, Iterable
 from functools import wraps
 from typing import Any
@@ -15,6 +16,18 @@ logger = logging.getLogger(__name__)
 WSGIEnviron = dict[str, Any]
 StartResponse = Callable[..., Any]
 WSGIApp = Callable[[WSGIEnviron, StartResponse], Iterable[bytes]]
+
+
+def _is_loopback(client_ip: str) -> bool:
+    """Return True for local-only callers that the product never bans."""
+    if client_ip == "localhost":
+        return True
+    try:
+        parsed = ip_address(client_ip)
+        mapped = getattr(parsed, "ipv4_mapped", None)
+        return parsed.is_loopback or bool(mapped and mapped.is_loopback)
+    except ValueError:
+        return False
 
 
 class SecurityMiddleware:
@@ -55,6 +68,13 @@ class SecurityMiddleware:
         # Get real client IP (handles proxies)
         client_ip = get_real_ip_from_environ(environ)
 
+        # Automated local services generate high request volumes and localhost
+        # is explicitly non-bannable everywhere IP bans are created. Avoid a
+        # SQLite connection/query per local request while preserving the real
+        # forwarded client IP when a reverse proxy supplies one.
+        if _is_loopback(client_ip):
+            return self.app(environ, start_response)
+
         # Check if IP is banned — this opens a logs_session connection.
         # Must clean up in ALL paths (banned and non-banned) because this
         # runs at WSGI level, outside Flask's teardown_appcontext scope.
@@ -91,7 +111,7 @@ def check_ip_ban(f: Callable[..., Any]) -> Callable[..., Any]:
     def decorated_function(*args: Any, **kwargs: Any) -> Any:
         client_ip = get_real_ip()
 
-        if IPBan.is_ip_banned(client_ip):
+        if not _is_loopback(client_ip) and IPBan.is_ip_banned(client_ip):
             logger.warning(f"Blocked banned IP in decorator: {client_ip}")
             abort(403, description="Access Denied: Your IP has been banned")
 

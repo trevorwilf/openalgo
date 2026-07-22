@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import atexit
 import os
+import threading
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -43,6 +45,13 @@ class AlpacaBarAdapter:
     ) -> None:
         self._auth = auth
         self._client = client
+        self._owns_client = False
+        self._client_lock = threading.Lock()
+        if client is None:
+            # The promoted adapter is a process-lifetime singleton. Close its
+            # lazily-created pool cleanly without making every request pay for
+            # client/TLS construction and teardown.
+            atexit.register(self.close)
 
     def _resolve_auth(self) -> AlpacaAuth:
         if self._auth is None:
@@ -51,17 +60,43 @@ class AlpacaBarAdapter:
 
     def _get(self, url_path: str, params: dict | None = None) -> dict:
         auth = self._resolve_auth()
-        if self._client is not None:
-            r = self._client.get(url_path, params=params)
+        client = self._get_client()
+        if self._owns_client:
+            # Resolve credentials on every request so a runtime credential
+            # rotation takes effect immediately while the transport pool is
+            # still reused. The host remains Alpaca's stable data endpoint.
+            url = f"{auth.data_base_url.rstrip('/')}/{url_path.lstrip('/')}"
+            r = client.get(url, params=params, headers=dict(auth.headers))
         else:
-            with httpx.Client(
-                base_url=auth.data_base_url,
-                headers=dict(auth.headers),
-                timeout=httpx.Timeout(15.0, connect=5.0),
-            ) as c:
-                r = c.get(url_path, params=params)
+            # Injected clients (notably MockTransport tests) retain their own
+            # base URL and headers.
+            r = client.get(url_path, params=params)
         r.raise_for_status()
         return r.json()
+
+    def _get_client(self) -> httpx.Client:
+        """Return one thread-safe process-lifetime HTTP connection pool."""
+        if self._client is not None:
+            return self._client
+        with self._client_lock:
+            if self._client is None:
+                self._client = httpx.Client(
+                    timeout=httpx.Timeout(15.0, connect=5.0),
+                    limits=httpx.Limits(
+                        max_connections=64,
+                        max_keepalive_connections=32,
+                    ),
+                )
+                self._owns_client = True
+        return self._client
+
+    def close(self) -> None:
+        """Close an internally-owned pool; injected clients remain caller-owned."""
+        with self._client_lock:
+            if self._owns_client and self._client is not None:
+                self._client.close()
+                self._client = None
+                self._owns_client = False
 
     def get_bars(
         self,

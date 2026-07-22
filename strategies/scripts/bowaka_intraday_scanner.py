@@ -708,6 +708,50 @@ def _file_mtime(p: Path) -> float:
         return 0.0
 
 
+def _merge_bar_cache(
+    cache: dict[str, pd.DataFrame],
+    fetched: dict[str, pd.DataFrame],
+    symbols: Iterable[str],
+    *,
+    full_replace: bool,
+) -> dict[str, pd.DataFrame]:
+    """Merge fetched bars into the in-memory session cache.
+
+    Incremental updates replace duplicate timestamps so late corrections in
+    the overlap window win. A successful full reconciliation replaces the
+    complete symbol frame. Empty/transient responses never erase a previously
+    healthy frame, and symbols removed from the universe are pruned.
+    """
+    merged: dict[str, pd.DataFrame] = {}
+    for symbol in symbols:
+        previous = cache.get(symbol)
+        update = fetched.get(symbol)
+        previous_ok = previous is not None and not previous.empty
+        update_ok = update is not None and not update.empty
+
+        if full_replace and update_ok:
+            merged[symbol] = update.reset_index(drop=True)
+            continue
+        if not previous_ok:
+            merged[symbol] = (
+                update.reset_index(drop=True) if update_ok else pd.DataFrame()
+            )
+            continue
+        if not update_ok:
+            merged[symbol] = previous
+            continue
+
+        combined = pd.concat([previous, update], ignore_index=True)
+        if "timestamp" in combined.columns:
+            combined = (
+                combined.drop_duplicates(subset=["timestamp"], keep="last")
+                .sort_values("timestamp")
+                .reset_index(drop=True)
+            )
+        merged[symbol] = combined
+    return merged
+
+
 def _run_live(
     cfg: dict, universe: dict, daily_cache, volume_curve, state,
 ) -> int:
@@ -748,6 +792,16 @@ def _run_live(
     bar_source = (scanner_cfg.get("bar_source") or "openalgo").strip().lower()
     alpaca_chunk = int(scanner_cfg.get("alpaca_chunk_size", 200))
     alpaca_conc = max(1, int(scanner_cfg.get("alpaca_fetch_concurrency", 4)))
+    incremental_enabled = bool(
+        scanner_cfg.get("incremental_bars_enabled", True)
+    )
+    overlap_minutes = max(
+        1, int(scanner_cfg.get("incremental_overlap_minutes", 3))
+    )
+    full_reconcile_seconds = max(
+        60,
+        int(scanner_cfg.get("full_reconcile_interval_minutes", 15)) * 60,
+    )
     ad_client = None
     ad_feed = None
     if bar_source == "alpaca_direct":
@@ -768,6 +822,11 @@ def _run_live(
             )
             bar_source = "openalgo"
             ad_client = None
+
+    bars_cache: dict[str, pd.DataFrame] = {}
+    cache_symbols: frozenset[str] = frozenset()
+    last_full_reconcile = 0.0
+    last_fetch_mode = "full"
 
     # Resolved input paths + initial mtimes. Used by the per-tick
     # hot-reload check below.
@@ -810,18 +869,38 @@ def _run_live(
         # session_start → scan_ts. Returns {symbol: DataFrame}. Reads
         # ``universe`` by name so a hot-reload rebind is picked up on
         # the next tick.
+        nonlocal bars_cache, cache_symbols, last_full_reconcile, last_fetch_mode
+
         scan_ts_utc = pd.Timestamp(scan_ts)
         if scan_ts_utc.tzinfo is None:
             scan_ts_utc = scan_ts_utc.tz_localize("UTC")
         start_dt = session_start.tz_convert("UTC").to_pydatetime()
         end_dt = scan_ts_utc.to_pydatetime()
         syms_meta = universe.get("symbols") or []
+        symbols = [s["symbol"] for s in syms_meta]
+        symbol_set = frozenset(symbols)
+        now_mono = time.monotonic()
+        full_fetch = (
+            not incremental_enabled
+            or not bars_cache
+            or symbol_set != cache_symbols
+            or last_full_reconcile == 0.0
+            or now_mono - last_full_reconcile >= full_reconcile_seconds
+        )
+        if full_fetch:
+            fetch_start = start_dt
+            last_fetch_mode = "full"
+        else:
+            overlap_start = end_dt - timedelta(minutes=overlap_minutes)
+            fetch_start = max(start_dt, overlap_start)
+            last_fetch_mode = "incremental"
+
+        fetched: dict[str, pd.DataFrame] | None = None
         if bar_source == "alpaca_direct" and ad_client is not None:
             try:
-                return ad.fetch_bars_multi(
+                fetched = ad.fetch_bars_multi(
                     ad_client, ad_feed,
-                    [s["symbol"] for s in syms_meta],
-                    "1m", start_dt, end_dt,
+                    symbols, "1m", fetch_start, end_dt,
                     chunk_size=alpaca_chunk, concurrency=alpaca_conc,
                 )
             except Exception as e:
@@ -829,19 +908,40 @@ def _run_live(
                     "alpaca_direct prefetch failed (%s); falling back to "
                     "openalgo for this tick", e,
                 )
-        reqs = [
-            {
-                "venue_code": s.get("venue_code", "XNAS"),
-                "symbol": s["symbol"],
-                "interval": "1m",
-                "start": start_dt,
-                "end": end_dt,
-            }
-            for s in syms_meta
-        ]
-        return oa.fetch_bars_concurrent(
-            http, api_key, reqs, concurrency=fetch_concurrency,
+        if fetched is None:
+            reqs = [
+                {
+                    "venue_code": s.get("venue_code", "XNAS"),
+                    "symbol": s["symbol"],
+                    "interval": "1m",
+                    "start": fetch_start,
+                    "end": end_dt,
+                }
+                for s in syms_meta
+            ]
+            fetched = oa.fetch_bars_concurrent(
+                http, api_key, reqs, concurrency=fetch_concurrency,
+            )
+
+        if not incremental_enabled:
+            return fetched
+
+        successful = any(
+            frame is not None and not frame.empty
+            for frame in fetched.values()
         )
+        bars_cache = _merge_bar_cache(
+            bars_cache,
+            fetched,
+            symbols,
+            full_replace=full_fetch and successful,
+        )
+        cache_symbols = symbol_set
+        if full_fetch and successful:
+            last_full_reconcile = now_mono
+        elif full_fetch:
+            last_fetch_mode = "full-retry"
+        return bars_cache
 
     try:
         while not shutdown["flag"]:
@@ -932,9 +1032,9 @@ def _run_live(
                 )
                 LOG.info(
                     "scan @ %s: emitted=%d events "
-                    "(prefetched %d symbols in %.1fs, conc=%d)",
+                    "(prefetched %d symbols in %.1fs, source=%s, mode=%s)",
                     scan_ts.isoformat()[:19], len(emitted),
-                    len(bars_by_sym), fetch_secs, fetch_concurrency,
+                    len(bars_by_sym), fetch_secs, bar_source, last_fetch_mode,
                 )
             except Exception as e:
                 LOG.exception("scan tick raised: %s", e)

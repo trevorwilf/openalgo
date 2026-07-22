@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bowaka v2 — size-based rotation for the watchdog err/out logs.
+"""Size-based rotation for the OpenAlgo/Bowaka watchdog err/out logs.
 
 The strategy/scanner watchdog ``.cmd`` shells redirect stdout/stderr
 into ``logs/bowaka_v2_*.out.log`` / ``.err.log``, which grow without
@@ -53,7 +53,12 @@ import bowaka_v2_paths as paths
 
 DEFAULT_MAX_MB = 50
 DEFAULT_KEEP = 3
-TARGET_GLOBS = ("bowaka_v2_*.err.log", "bowaka_v2_*.out.log")
+TARGET_GLOBS = (
+    "bowaka_v2_*.err.log",
+    "bowaka_v2_*.out.log",
+    "openalgo_*.err.log",
+    "openalgo_*.out.log",
+)
 
 # --data-files mode: the four unbounded session JSONLs. Exactly these —
 # other files in data/bowaka_v2/ (state.json, ledgers, snapshots) must

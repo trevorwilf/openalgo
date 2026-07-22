@@ -128,7 +128,10 @@ scanner:
   # data/bowaka_v2/scanner_gate_dump.jsonl on every scan. Leave on only
   # while triaging "why is nothing emitting"; the file grows ~1KB per
   # symbol per scan (~38KB per scan tick at 38-symbol universe).
-  debug_gate_dump: true
+  # Disabled after the 2026-07-22 CPU/storage investigation. This is
+  # diagnostic telemetry only; signal evaluation and candidate selection
+  # are unchanged. Re-enable temporarily when a gate-level trace is needed.
+  debug_gate_dump: false
   scan_interval_seconds: 60
   # Concurrent minute-bar prefetch fan-out per scan tick. With the
   # universe cap at 600, conc=40 fetches the whole universe in ~10s
@@ -144,11 +147,18 @@ scanner:
   #                   API, bypassing the server (600 names in ~1-2s). Uses
   #                   the same Alpaca creds + ALPACA_DATA_FEED the server
   #                   uses; openalgo is the automatic per-tick fallback.
-  # Stays 'openalgo' until the after-close parity diff confirms the two
-  # paths return identical bars, then flip to 'alpaca_direct'.
-  bar_source: "openalgo"
+  # Full-universe parity validation passed 600/600 symbols. Keep the
+  # multi-symbol direct path enabled to avoid 600 local HTTP/auth/TLS
+  # round trips per scan; the scanner retains an OpenAlgo fallback.
+  bar_source: "alpaca_direct"
   alpaca_chunk_size: 200          # symbols per multi-symbol Alpaca request
   alpaca_fetch_concurrency: 4     # concurrent symbol-chunks
+  # Cache the full session in memory, then fetch a short overlap each tick.
+  # Overlap replaces recent timestamps so late Alpaca bar corrections survive;
+  # a periodic full reconciliation repairs anything older than the overlap.
+  incremental_bars_enabled: true
+  incremental_overlap_minutes: 3
+  full_reconcile_interval_minutes: 15
   max_candidates_per_scan: 25
   max_entries_per_scan: 3
   signal_expiry_seconds: 600

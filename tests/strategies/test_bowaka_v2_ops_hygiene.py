@@ -69,10 +69,11 @@ def test_rotate_all_targets_err_and_out_only(tmp_path):
     big = b"y" * 2000
     (tmp_path / "bowaka_v2_strategy.err.log").write_bytes(big)
     (tmp_path / "bowaka_v2_scanner.out.log").write_bytes(big)
+    (tmp_path / "openalgo_dev.err.log").write_bytes(big)
     (tmp_path / "bowaka_v2_strategy.log").write_bytes(big)   # not a target
     (tmp_path / "unrelated.err.log").write_bytes(big)        # not a target
     n = rot.rotate_all(tmp_path, max_bytes=1000, keep=3)
-    assert n == 2
+    assert n == 3
     assert (tmp_path / "bowaka_v2_strategy.log").stat().st_size == 2000
     assert (tmp_path / "unrelated.err.log").stat().st_size == 2000
 
@@ -188,6 +189,71 @@ def test_cadence_sleep_subtracts_scan_duration():
     # Slow scans floor at 5s — never spin hot, never double the wait.
     assert scanner._cadence_sleep_seconds(60, 58.0) == 5
     assert scanner._cadence_sleep_seconds(60, 120.0) == 5
+
+
+# ---- incremental bar cache --------------------------------------------------
+
+
+def _bars(*rows: tuple[str, float]):
+    import pandas as pd
+    return pd.DataFrame([
+        {
+            "timestamp": pd.Timestamp(ts, tz="UTC"),
+            "open": close,
+            "high": close,
+            "low": close,
+            "close": close,
+            "volume": 1,
+        }
+        for ts, close in rows
+    ])
+
+
+def test_incremental_bar_cache_replaces_overlap_corrections():
+    cache = {
+        "AAA": _bars(
+            ("2026-07-14 13:45", 10.0),
+            ("2026-07-14 13:46", 11.0),
+        )
+    }
+    update = {
+        "AAA": _bars(
+            ("2026-07-14 13:46", 11.5),
+            ("2026-07-14 13:47", 12.0),
+        )
+    }
+
+    merged = scanner._merge_bar_cache(
+        cache, update, ["AAA"], full_replace=False,
+    )["AAA"]
+
+    assert list(merged["close"]) == [10.0, 11.5, 12.0]
+    assert merged["timestamp"].is_monotonic_increasing
+
+
+def test_incremental_bar_cache_preserves_good_data_on_empty_update():
+    import pandas as pd
+    existing = _bars(("2026-07-14 13:45", 10.0))
+    merged = scanner._merge_bar_cache(
+        {"AAA": existing}, {"AAA": pd.DataFrame()}, ["AAA"],
+        full_replace=False,
+    )
+    assert merged["AAA"].equals(existing)
+
+
+def test_full_reconcile_replaces_history_and_prunes_removed_symbols():
+    cache = {
+        "AAA": _bars(("2026-07-14 13:45", 9.0)),
+        "REMOVED": _bars(("2026-07-14 13:45", 1.0)),
+    }
+    full = {"AAA": _bars(("2026-07-14 13:45", 10.0))}
+
+    merged = scanner._merge_bar_cache(
+        cache, full, ["AAA"], full_replace=True,
+    )
+
+    assert list(merged) == ["AAA"]
+    assert list(merged["AAA"]["close"]) == [10.0]
 
 
 # ---- fix Phase 9: --data-files rotation ---------------------------------------
