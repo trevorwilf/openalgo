@@ -208,7 +208,17 @@ KNOWN_KEYS: dict[str, Any] = {
         "max_total_entries_per_day": LEAF,
         "max_lots_per_symbol": LEAF,
         "max_stopouts_per_day": LEAF,
+        # Legacy persistent latch. New deployments should leave this
+        # null and use stopout_breaker below, which has an explicit
+        # session cooldown and probation recovery path.
         "stop_trading_after_consecutive_stopouts": LEAF,
+        "stopout_breaker": {
+            "enabled": LEAF,
+            "threshold": LEAF,
+            "cooldown_sessions": LEAF,
+            "probation_entries": LEAF,
+            "probation_size_multiplier": LEAF,
+        },
         "max_position_as_adv_frac": LEAF,
         "adv_tier_caps": ("list_of", _ADV_TIER_SCHEMA),
         "shadow": {

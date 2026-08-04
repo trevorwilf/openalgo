@@ -166,6 +166,8 @@ def test_canonical_rejection_reasons_complete() -> None:
         # sizing relabel + the wired protected-position block.
         "bankroll_floor_halt", "max_lots_per_symbol",
         "sizing_zero_qty", "protection_violation",
+        "stopout_breaker_cooldown",
+        "stopout_breaker_probation_limit",
     }
     assert set(schemas.CANONICAL_REJECTION_REASONS) == expected
 

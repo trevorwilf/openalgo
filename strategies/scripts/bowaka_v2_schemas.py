@@ -156,6 +156,8 @@ CANONICAL_REJECTION_REASONS: frozenset[str] = frozenset({
     "invalid_signal_price",
     "max_stopouts_per_day",
     "consecutive_stopouts",
+    "stopout_breaker_cooldown",
+    "stopout_breaker_probation_limit",
     "strategy_slice_loss",
     "max_entries_per_scan",
     # Fix Phase 4 — entries blocked while a submit's outcome is

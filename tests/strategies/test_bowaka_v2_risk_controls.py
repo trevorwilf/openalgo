@@ -234,6 +234,221 @@ def test_consecutive_stopouts_blocks_and_survives_rollover(tmp_path):
     assert _decisions(tmp_path)[0]["reason"] == "consecutive_stopouts"
 
 
+def _recovery_breaker_cfg(tmp_path, *, cooldown_sessions=0):
+    cfg = _cfg(tmp_path, risk={
+        "max_total_entries_per_day": 50,
+        "max_gross_exposure_pct": 5.0,
+        "max_stopouts_per_day": 3,
+        "stop_trading_after_consecutive_stopouts": None,
+        "stopout_breaker": {
+            "enabled": True,
+            "threshold": 3,
+            "cooldown_sessions": cooldown_sessions,
+            "probation_entries": 1,
+            "probation_size_multiplier": 0.25,
+        },
+    })
+    cfg["logging"]["emit_entry_decisions"] = True
+    return cfg
+
+
+def test_recovery_breaker_migrates_and_probation_allows_one_small_entry(
+    tmp_path,
+):
+    cfg = _recovery_breaker_cfg(tmp_path)
+    state = _fresh_state()
+    state["session_date"] = "2026-05-15"
+    state["consecutive_stopout_count"] = 3
+    _write(Path(cfg["paths"]["candidate_events_path"]), [
+        _candidate("FIRST", rank=1),
+        _candidate("SECOND", rank=2),
+    ])
+
+    summary = v2.consume_candidate_events(
+        state,
+        cfg,
+        submit_supplier=_ok_submit,
+        today_iso="2026-05-18",
+        now_utc=_NOW,
+    )
+
+    assert summary["accepted"] == 1
+    assert summary["rejected"] == 1
+    breaker = state["stopout_breaker"]
+    assert breaker["phase"] == "probation"
+    assert breaker["tripped_session"] == "2026-05-15"
+    assert breaker["probation_entries_used"] == 1
+    pos = next(iter(state["open_positions"].values()))
+    assert pos["symbol"] == "FIRST"
+    assert pos["stopout_breaker_probation"] is True
+    # Normal qty is 493 shares; final 25% probation sizing is 123.
+    assert pos["qty"] == 123
+    by_symbol = {d["symbol"]: d for d in _decisions(tmp_path)}
+    assert by_symbol["SECOND"]["reason"] == (
+        "stopout_breaker_probation_limit"
+    )
+
+
+def test_recovery_breaker_migration_after_legacy_midnight_roll_is_probation(
+    tmp_path,
+):
+    cfg = _recovery_breaker_cfg(tmp_path)
+    state = _fresh_state()
+    # The legacy process already reset today's daily count, but the
+    # persistent stop streak came from a prior session.
+    state["session_date"] = "2026-05-18"
+    state["daily_stopout_count"] = 0
+    state["consecutive_stopout_count"] = 3
+
+    rolled = v2.roll_session_if_needed(
+        state,
+        datetime(2026, 5, 18, 14, 0, tzinfo=timezone.utc),
+        "2026-05-18",
+        cfg,
+        is_trading_session=True,
+    )
+
+    assert rolled is False
+    assert state["stopout_breaker"]["phase"] == "probation"
+    assert state["stopout_breaker"]["cooldown_sessions_remaining"] == 0
+
+
+def test_recovery_breaker_same_day_migration_with_stopouts_stays_tripped(
+    tmp_path,
+):
+    cfg = _recovery_breaker_cfg(tmp_path)
+    state = _fresh_state()
+    state["session_date"] = "2026-05-18"
+    state["daily_stopout_count"] = 3
+    state["consecutive_stopout_count"] = 3
+
+    v2.roll_session_if_needed(
+        state,
+        datetime(2026, 5, 18, 18, 0, tzinfo=timezone.utc),
+        "2026-05-18",
+        cfg,
+        is_trading_session=True,
+    )
+
+    assert state["stopout_breaker"]["phase"] == "tripped"
+
+
+def test_recovery_breaker_probation_non_stop_closure_clears(tmp_path):
+    cfg = _recovery_breaker_cfg(tmp_path)
+    state = {
+        "session_date": "2026-05-18",
+        "consecutive_stopout_count": 3,
+        "daily_stopout_count": 0,
+        "daily_realized_pnl_strategy": 0.0,
+        "cumulative_realized_pnl_strategy": 0.0,
+        "gross_exposure_dollars": 1000.0,
+        "stopout_breaker": {
+            "phase": "probation",
+            "tripped_session": "2026-05-15",
+            "cooldown_sessions_remaining": 0,
+            "probation_entries_used": 1,
+            "probation_link_ids": ["L-1"],
+        },
+        "open_positions": {
+            "L-1": _closed_lot(
+                "AAA", link_id="L-1", stopout_breaker_probation=True,
+            ),
+        },
+    }
+
+    v2.close_position_v2(
+        "L-1", state, cfg, exit_price=11.5, reason="target_hit",
+    )
+
+    assert state["stopout_breaker"]["phase"] == "normal"
+    assert state["consecutive_stopout_count"] == 0
+
+
+def test_recovery_breaker_probation_stop_retrips(tmp_path):
+    cfg = _recovery_breaker_cfg(tmp_path)
+    state = {
+        "session_date": "2026-05-18",
+        "consecutive_stopout_count": 3,
+        "daily_stopout_count": 0,
+        "daily_realized_pnl_strategy": 0.0,
+        "cumulative_realized_pnl_strategy": 0.0,
+        "gross_exposure_dollars": 1000.0,
+        "stopout_breaker": {
+            "phase": "probation",
+            "tripped_session": "2026-05-15",
+            "cooldown_sessions_remaining": 0,
+            "probation_entries_used": 1,
+            "probation_link_ids": ["L-1"],
+        },
+        "open_positions": {
+            "L-1": _closed_lot(
+                "AAA", link_id="L-1", stopout_breaker_probation=True,
+            ),
+        },
+    }
+
+    v2.close_position_v2(
+        "L-1", state, cfg, exit_price=9.2, reason="stop_hit",
+    )
+
+    assert state["stopout_breaker"]["phase"] == "tripped"
+    assert state["stopout_breaker"]["tripped_session"] == "2026-05-18"
+    assert state["consecutive_stopout_count"] == 4
+
+
+def test_recovery_breaker_can_skip_one_full_trading_session(tmp_path):
+    cfg = _recovery_breaker_cfg(tmp_path, cooldown_sessions=1)
+    state = _fresh_state()
+    state["session_date"] = "2026-05-15"  # Friday
+    state["consecutive_stopout_count"] = 3
+
+    v2.roll_session_if_needed(
+        state,
+        datetime(2026, 5, 18, 14, 0, tzinfo=timezone.utc),
+        "2026-05-18",
+        cfg,
+        is_trading_session=True,
+    )
+    assert state["stopout_breaker"]["phase"] == "cooldown"
+    assert state["stopout_breaker"]["cooldown_sessions_remaining"] == 0
+
+    v2.roll_session_if_needed(
+        state,
+        datetime(2026, 5, 19, 14, 0, tzinfo=timezone.utc),
+        "2026-05-19",
+        cfg,
+        is_trading_session=True,
+    )
+    assert state["stopout_breaker"]["phase"] == "probation"
+
+
+def test_recovery_breaker_does_not_consume_cooldown_on_closed_session(
+    tmp_path,
+):
+    cfg = _recovery_breaker_cfg(tmp_path)
+    state = _fresh_state()
+    state["session_date"] = "2026-05-15"
+    state["consecutive_stopout_count"] = 3
+
+    v2.roll_session_if_needed(
+        state,
+        datetime(2026, 5, 16, 14, 0, tzinfo=timezone.utc),
+        "2026-05-16",
+        cfg,
+        is_trading_session=False,
+    )
+    assert state["stopout_breaker"]["phase"] == "tripped"
+
+    v2.roll_session_if_needed(
+        state,
+        datetime(2026, 5, 18, 14, 0, tzinfo=timezone.utc),
+        "2026-05-18",
+        cfg,
+        is_trading_session=True,
+    )
+    assert state["stopout_breaker"]["phase"] == "probation"
+
+
 # ---- sizing caps -----------------------------------------------------------
 
 
@@ -261,6 +476,25 @@ def test_target_risk_dollars_caps_qty():
     # Without stop_pct the risk cap cannot apply.
     qty2, _ = v2.size_position({}, cfg, current_price=10.0)
     assert qty2 == 400
+
+
+def test_probation_multiplier_applies_after_risk_and_minimum_notional():
+    cfg = {"sizing": {
+        "bankroll_fixed_dollars": 90000,
+        "max_concurrent_positions": 13,
+        "equal_slice_bankroll_fraction": 0.94,
+        "min_order_notional": 500,
+        "max_per_trade_dollars": 750,
+        "target_risk_dollars": 123.5,
+    }}
+    qty, notional = v2.size_position(
+        {}, cfg, current_price=10.0, stop_pct=0.1771,
+        size_multiplier=0.25,
+    )
+    # Risk cap -> 69 normal shares; probation -> 17 shares. The final
+    # $170 notional intentionally sits below the normal $500 minimum.
+    assert qty == 17
+    assert notional == pytest.approx(170.0)
 
 
 # ---- strategy_slice_loss_pct -----------------------------------------------

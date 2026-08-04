@@ -120,6 +120,49 @@ def validate_startup_config(cfg: dict) -> None:
             "distorted. SIP is the validation feed.", feed,
         )
 
+    # The recovery-capable breaker and the legacy persistent latch are
+    # mutually exclusive. Running both would make the legacy latch win
+    # forever even after the new breaker enters probation.
+    risk_cfg = cfg.get("risk") or {}
+    breaker = risk_cfg.get("stopout_breaker") or {}
+    if breaker.get("enabled", False):
+        legacy = risk_cfg.get("stop_trading_after_consecutive_stopouts")
+        if legacy is not None:
+            raise ConfigError(
+                "risk.stopout_breaker.enabled=true requires "
+                "risk.stop_trading_after_consecutive_stopouts=null"
+            )
+        integer_fields = {
+            "threshold": breaker.get("threshold"),
+            "cooldown_sessions": breaker.get("cooldown_sessions"),
+            "probation_entries": breaker.get("probation_entries"),
+        }
+        for key, value in integer_fields.items():
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ConfigError(
+                    f"risk.stopout_breaker.{key} must be an integer"
+                )
+        if int(integer_fields["threshold"]) < 1:
+            raise ConfigError(
+                "risk.stopout_breaker.threshold must be >= 1"
+            )
+        if int(integer_fields["cooldown_sessions"]) < 0:
+            raise ConfigError(
+                "risk.stopout_breaker.cooldown_sessions must be >= 0"
+            )
+        if int(integer_fields["probation_entries"]) < 1:
+            raise ConfigError(
+                "risk.stopout_breaker.probation_entries must be >= 1"
+            )
+        multiplier = breaker.get("probation_size_multiplier")
+        if (isinstance(multiplier, bool)
+                or not isinstance(multiplier, (int, float))
+                or not 0 < float(multiplier) <= 1):
+            raise ConfigError(
+                "risk.stopout_breaker.probation_size_multiplier must "
+                "be > 0 and <= 1"
+            )
+
 
 # ---------------------------------------------------------------- logging streams
 
@@ -313,6 +356,249 @@ def _is_stale_session(ev: dict, today_iso: str) -> bool:
 
 def _today_iso() -> str:
     return pd.Timestamp.now(tz="America/New_York").date().isoformat()
+
+
+# ---- recoverable stop-out breaker -----------------------------------------
+
+_BREAKER_ACTIVE_PHASES = frozenset({"tripped", "cooldown", "probation"})
+
+
+def _stopout_breaker_cfg(cfg: dict) -> dict | None:
+    """Return the enabled recovery-capable breaker config, else None."""
+    breaker = (cfg.get("risk") or {}).get("stopout_breaker") or {}
+    return breaker if breaker.get("enabled", False) else None
+
+
+def _stopout_breaker_phase(state: dict) -> str:
+    breaker = state.get("stopout_breaker") or {}
+    phase = str(breaker.get("phase") or "normal").lower()
+    return phase if phase in _BREAKER_ACTIVE_PHASES else "normal"
+
+
+def _emit_stopout_breaker_transition(
+    state: dict,
+    cfg: dict,
+    *,
+    old_phase: str,
+    new_phase: str,
+    reason: str,
+) -> None:
+    breaker = state.get("stopout_breaker") or {}
+    payload = {
+        "old_phase": old_phase,
+        "new_phase": new_phase,
+        "reason": reason,
+        "session_date": state.get("session_date"),
+        "tripped_session": breaker.get("tripped_session"),
+        "cooldown_sessions_remaining": breaker.get(
+            "cooldown_sessions_remaining",
+        ),
+        "probation_entries_used": breaker.get("probation_entries_used", 0),
+        "consecutive_stopout_count": int(
+            state.get("consecutive_stopout_count", 0) or 0,
+        ),
+    }
+    level = LOG.warning if new_phase in {"tripped", "cooldown"} else LOG.info
+    level(
+        "stopout breaker transition %s -> %s (%s): %s",
+        old_phase, new_phase, reason, payload,
+    )
+    _emit_ledger_v2(cfg, "stopout_breaker_transition", payload)
+
+
+def _trip_stopout_breaker(
+    state: dict,
+    cfg: dict,
+    *,
+    session_date: str | None = None,
+    reason: str = "threshold_reached",
+) -> bool:
+    """Latch the breaker for the rest of the current trading session.
+
+    The next trading-session rollover consumes the configured cooldown
+    and eventually advances to probation. Repeated stop echoes while
+    already tripped/cooling are idempotent.
+    """
+    breaker_cfg = _stopout_breaker_cfg(cfg)
+    if breaker_cfg is None:
+        return False
+    old_phase = _stopout_breaker_phase(state)
+    if old_phase in {"tripped", "cooldown"}:
+        return False
+    state["stopout_breaker"] = {
+        "phase": "tripped",
+        "tripped_session": (
+            session_date or state.get("session_date") or _today_iso()
+        ),
+        "tripped_at": _iso(_now_utc()),
+        "cooldown_sessions_remaining": int(
+            breaker_cfg.get("cooldown_sessions", 0),
+        ),
+        "probation_entries_used": 0,
+        "probation_link_ids": [],
+        "last_transition_at": _iso(_now_utc()),
+        "last_transition_reason": reason,
+    }
+    _emit_stopout_breaker_transition(
+        state, cfg, old_phase=old_phase, new_phase="tripped", reason=reason,
+    )
+    return True
+
+
+def _clear_stopout_breaker(
+    state: dict, cfg: dict, *, reason: str,
+) -> bool:
+    """Return an active probation breaker to its normal phase."""
+    old_phase = _stopout_breaker_phase(state)
+    if old_phase == "normal":
+        return False
+    prior = state.get("stopout_breaker") or {}
+    state["stopout_breaker"] = {
+        "phase": "normal",
+        "cleared_at": _iso(_now_utc()),
+        "cleared_reason": reason,
+        "prior_tripped_session": prior.get("tripped_session"),
+        "probation_entries_used": prior.get("probation_entries_used", 0),
+    }
+    _emit_stopout_breaker_transition(
+        state, cfg, old_phase=old_phase, new_phase="normal", reason=reason,
+    )
+    return True
+
+
+def _sync_stopout_breaker_state(
+    state: dict, cfg: dict, *, session_date: str | None = None,
+) -> bool:
+    """Migrate an already-tripped legacy counter into the new state.
+
+    This is intentionally called before session rollover. It records
+    the prior session as the trip session, allowing a daemon upgraded
+    after the close to enter probation on the very next trading day.
+    Returns True only when a legacy counter was migrated.
+    """
+    breaker_cfg = _stopout_breaker_cfg(cfg)
+    if breaker_cfg is None or _stopout_breaker_phase(state) != "normal":
+        return False
+    threshold = int(breaker_cfg.get("threshold", 1))
+    streak = int(state.get("consecutive_stopout_count", 0) or 0)
+    if streak >= threshold:
+        return _trip_stopout_breaker(
+            state,
+            cfg,
+            session_date=session_date,
+            reason="migrated_threshold_reached",
+        )
+    return False
+
+
+def _advance_stopout_breaker_session(state: dict, cfg: dict) -> None:
+    """Advance a tripped/cooling breaker by one trading session."""
+    if _stopout_breaker_cfg(cfg) is None:
+        return
+    phase = _stopout_breaker_phase(state)
+    if phase not in {"tripped", "cooldown"}:
+        return
+    breaker = state.get("stopout_breaker") or {}
+    remaining = max(0, int(
+        breaker.get("cooldown_sessions_remaining", 0) or 0,
+    ))
+    old_phase = phase
+    if remaining > 0:
+        breaker["phase"] = "cooldown"
+        breaker["cooldown_sessions_remaining"] = remaining - 1
+        new_phase = "cooldown"
+        reason = "cooldown_session_consumed"
+    else:
+        breaker["phase"] = "probation"
+        breaker["cooldown_sessions_remaining"] = 0
+        breaker["probation_entries_used"] = 0
+        breaker["probation_link_ids"] = []
+        new_phase = "probation"
+        reason = "cooldown_complete"
+    breaker["last_transition_at"] = _iso(_now_utc())
+    breaker["last_transition_reason"] = reason
+    state["stopout_breaker"] = breaker
+    _emit_stopout_breaker_transition(
+        state, cfg, old_phase=old_phase, new_phase=new_phase, reason=reason,
+    )
+
+
+def _stopout_breaker_gate(state: dict, cfg: dict) -> str | None:
+    breaker_cfg = _stopout_breaker_cfg(cfg)
+    if breaker_cfg is None:
+        return None
+    phase = _stopout_breaker_phase(state)
+    if phase in {"tripped", "cooldown"}:
+        return "stopout_breaker_cooldown"
+    if phase == "probation":
+        breaker = state.get("stopout_breaker") or {}
+        used = max(
+            int(breaker.get("probation_entries_used", 0) or 0),
+            len(breaker.get("probation_link_ids") or []),
+        )
+        if used >= int(breaker_cfg.get("probation_entries", 1)):
+            return "stopout_breaker_probation_limit"
+    return None
+
+
+def _stopout_breaker_size_multiplier(state: dict, cfg: dict) -> float:
+    breaker_cfg = _stopout_breaker_cfg(cfg)
+    if (breaker_cfg is not None
+            and _stopout_breaker_phase(state) == "probation"):
+        return float(breaker_cfg.get("probation_size_multiplier", 1.0))
+    return 1.0
+
+
+def _reserve_probation_entry(
+    state: dict, cfg: dict, pos: dict,
+) -> None:
+    if (not pos.get("stopout_breaker_probation")
+            or _stopout_breaker_phase(state) != "probation"):
+        return
+    breaker = state.setdefault("stopout_breaker", {})
+    link_id = str(pos.get("link_id") or "")
+    link_ids = list(breaker.get("probation_link_ids") or [])
+    if link_id and link_id not in link_ids:
+        link_ids.append(link_id)
+        breaker["probation_link_ids"] = link_ids
+        breaker["probation_entries_used"] = int(
+            breaker.get("probation_entries_used", 0) or 0,
+        ) + 1
+        breaker["last_transition_at"] = _iso(_now_utc())
+        breaker["last_transition_reason"] = "probation_entry_reserved"
+        LOG.warning(
+            "stopout breaker probation entry reserved: link_id=%s "
+            "used=%s",
+            link_id, breaker["probation_entries_used"],
+        )
+
+
+def _release_probation_entry(
+    state: dict, cfg: dict, pos: dict, *, reason: str,
+) -> None:
+    """Release a probation slot when a parent is proven never filled."""
+    if not pos.get("stopout_breaker_probation"):
+        return
+    breaker = state.get("stopout_breaker") or {}
+    if _stopout_breaker_phase(state) != "probation":
+        return
+    link_id = str(pos.get("link_id") or "")
+    link_ids = list(breaker.get("probation_link_ids") or [])
+    if link_id not in link_ids:
+        return
+    link_ids.remove(link_id)
+    breaker["probation_link_ids"] = link_ids
+    breaker["probation_entries_used"] = max(
+        0, int(breaker.get("probation_entries_used", 0) or 0) - 1,
+    )
+    breaker["last_transition_at"] = _iso(_now_utc())
+    breaker["last_transition_reason"] = reason
+    state["stopout_breaker"] = breaker
+    LOG.warning(
+        "stopout breaker probation slot released without a fill: "
+        "link_id=%s reason=%s",
+        link_id, reason,
+    )
 
 
 def build_rejection_record(
@@ -573,6 +859,9 @@ def _risk_gates(
         if (int(state.get("consecutive_stopout_count", 0) or 0)
                 >= int(max_consecutive)):
             return "consecutive_stopouts"
+    breaker_rejection = _stopout_breaker_gate(state, cfg)
+    if breaker_rejection is not None:
+        return breaker_rejection
 
     # strategy_slice_loss_pct — v1 archive semantics: block new entries
     # once the day's realized PnL crosses -X% of the daily slice
@@ -937,11 +1226,15 @@ def size_position(
     ev: dict, cfg: dict, *, current_price: float,
     state: dict | None = None,
     stop_pct: float | None = None,
+    size_multiplier: float = 1.0,
 ) -> tuple[int, float]:
     """Equal-slice sizing per cfg.sizing. Returns (qty,
     target_notional). Honors min_order_notional, then the
     max_per_trade_dollars notional cap, then the target_risk_dollars
-    qty cap (stop_pct x qty x price <= target_risk_dollars). When
+    qty cap (stop_pct x qty x price <= target_risk_dollars). A final
+    ``size_multiplier`` supports breaker probation sizing; because it
+    is applied last, probation may deliberately fall below the normal
+    minimum order notional. When
     sizing.compounding.enabled the bankroll compounds on cumulative
     realized PnL (clamped to the cap); otherwise it is the fixed base."""
     sizing_cfg = cfg.get("sizing") or {}
@@ -963,6 +1256,14 @@ def size_position(
         risk_per_share = float(stop_pct) * current_price
         if risk_per_share > 0:
             qty = min(qty, int(float(target_risk) // risk_per_share))
+    try:
+        multiplier = float(size_multiplier)
+    except (TypeError, ValueError):
+        multiplier = 0.0
+    # Never let this recovery-only control increase normal sizing even
+    # if a caller bypasses startup validation.
+    multiplier = max(0.0, min(1.0, multiplier))
+    qty = int(qty * multiplier)
     return qty, qty * current_price
 
 
@@ -1085,7 +1386,12 @@ def _supplier_positional_arity(supplier) -> int:
 
 
 def roll_session_if_needed(
-    state: dict, now_utc: datetime, today_iso: str,
+    state: dict,
+    now_utc: datetime,
+    today_iso: str,
+    cfg: dict | None = None,
+    *,
+    is_trading_session: bool | None = None,
 ) -> bool:
     """Session rollover — when the ET date crosses from a recorded
     prior session to today, reset per-day counters so daily caps
@@ -1101,10 +1407,36 @@ def roll_session_if_needed(
     the next session for as long as the flag stayed up. Returns True
     when a rollover happened."""
     prior_session = state.get("session_date")
+    migrated_breaker = False
+    if cfg is not None:
+        migrated_breaker = _sync_stopout_breaker_state(
+            state,
+            cfg,
+            session_date=prior_session or today_iso,
+        )
     if prior_session is None:
         state["session_date"] = today_iso
         return False
     if prior_session == today_iso:
+        # The legacy daemon can roll its daily counters at midnight
+        # before an upgraded daemon is started. If today's stop count
+        # is still zero, the threshold was reached in an earlier
+        # session: consume today as the next recovery session instead
+        # of incorrectly treating today as the trip day. Calendar
+        # truth prevents a weekend/holiday from consuming recovery.
+        if migrated_breaker and not int(
+            state.get("daily_stopout_count", 0) or 0
+        ):
+            today_is_trading_session = is_trading_session
+            if today_is_trading_session is None:
+                try:
+                    today_is_trading_session = (
+                        pd.Timestamp(today_iso).dayofweek < 5
+                    )
+                except Exception:
+                    today_is_trading_session = False
+            if today_is_trading_session:
+                _advance_stopout_breaker_session(state, cfg)
         return False
     state["session_date"] = today_iso
     state["entered_today"] = []
@@ -1124,6 +1456,17 @@ def roll_session_if_needed(
     # session-scoped.
     state.pop("scan_accept_counts", None)
     state.pop("luld_pauses", None)
+    # The recovery-capable breaker advances only on an actual trading
+    # session. Main injects venue-calendar truth when available; tests
+    # and offline tools fall back to weekdays.
+    if cfg is not None and _stopout_breaker_cfg(cfg) is not None:
+        if is_trading_session is None:
+            try:
+                is_trading_session = pd.Timestamp(today_iso).dayofweek < 5
+            except Exception:
+                is_trading_session = False
+        if is_trading_session:
+            _advance_stopout_breaker_session(state, cfg)
     # Gross exposure is NOT a per-day counter — lots held overnight
     # keep their exposure. Recompute from the open lots instead of
     # zeroing (which under-counted risk gates all next session).
@@ -1156,7 +1499,7 @@ def consume_candidate_events(
     now = now_utc or _now_utc()
     today_iso = today_iso or _today_iso()
 
-    roll_session_if_needed(state, now, today_iso)
+    roll_session_if_needed(state, now, today_iso, cfg)
 
     # Normalize open_positions to the link_id-keyed multi-lot shape
     # (idempotent — converts legacy symbol-keyed state on first load).
@@ -1276,9 +1619,16 @@ def consume_candidate_events(
         adv = (ev.get("prior_daily_baselines") or {}).get(
             "avg_dollar_volume_20d"
         )
+        breaker_size_multiplier = _stopout_breaker_size_multiplier(
+            state, cfg,
+        )
+        is_probation_entry = (
+            _stopout_breaker_phase(state) == "probation"
+        )
         qty, target_notional = size_position(
             ev, cfg, current_price=signal_price, state=state,
             stop_pct=(cfg.get("exits") or {}).get("stop_pct"),
+            size_multiplier=breaker_size_multiplier,
         )
         if qty <= 0:
             # Sizing produced no whole share (price above the slice,
@@ -1361,6 +1711,8 @@ def consume_candidate_events(
             "adv_participation_frac": (
                 target_notional / adv if adv and adv > 0 else 0.0
             ),
+            "stopout_breaker_phase": _stopout_breaker_phase(state),
+            "size_multiplier": breaker_size_multiplier,
         }
 
         if rejection is not None:
@@ -1454,6 +1806,7 @@ def consume_candidate_events(
                 target_pct=float(exits_cfg.get("target_pct", 0.15)),
                 max_hold_days=int(exits_cfg.get("max_hold_days", 3)),
                 candidate_event_id=ev.get("event_id"),
+                stopout_breaker_probation=is_probation_entry,
             )
             return state["open_positions"][link_id]
 
@@ -1512,10 +1865,11 @@ def consume_candidate_events(
                 )
                 unresolved_detail = "accepted_no_order_id"
 
+        recorded_pos = None
         if unresolved_detail:
-            pos = _record_lot("")
-            pos["outcome_unresolved"] = True
-            pos["resolver_misses"] = 0
+            recorded_pos = _record_lot("")
+            recorded_pos["outcome_unresolved"] = True
+            recorded_pos["resolver_misses"] = 0
             summary["unresolved"] += 1
             _emit_ledger_v2(cfg, "submit_outcome_unknown", {
                 "symbol": symbol, "link_id": link_id,
@@ -1523,8 +1877,10 @@ def consume_candidate_events(
                 "detail": unresolved_detail,
             })
         else:
-            _record_lot(parent_order_id)
+            recorded_pos = _record_lot(parent_order_id)
             summary["accepted"] += 1
+        if recorded_pos is not None:
+            _reserve_probation_entry(state, cfg, recorded_pos)
         scan_accepts[scan_key] = scan_accepts.get(scan_key, 0) + 1
         # One element per entry (not a set) so
         # same_symbol_entries_per_day > 1 can count correctly.
@@ -1867,6 +2223,7 @@ def record_pending_position(
     recorded_exposure: float | None = None,
     prior_daily_baselines: dict | None = None,
     parent_order_style: str = "market",
+    stopout_breaker_probation: bool = False,
 ) -> dict:
     """Write a pending-fill position dict into state['open_positions'].
     Returns the position dict. Called immediately after a successful
@@ -1906,6 +2263,7 @@ def record_pending_position(
         "bracket_pricing_mode": "actual_fill",
         "candidate_event_id": candidate_event_id,
         "entry_trigger": "forming_daily_bar_scan",
+        "stopout_breaker_probation": bool(stopout_breaker_probation),
         "peak_since_entry": None,
         "trough_since_entry": None,
         "oco_attach_attempts": 0,
@@ -2436,6 +2794,12 @@ def resolve_unknown_submits(
             float(state.get("gross_exposure_dollars", 0.0))
             - float(exposure),
         )
+        _release_probation_entry(
+            state,
+            cfg,
+            pos,
+            reason="unknown_submit_resolved_absent",
+        )
         state["open_positions"].pop(pid, None)
         _emit_ledger_v2(cfg, "unknown_submit_resolved_absent", {
             "symbol": symbol, "link_id": pos.get("link_id"),
@@ -2576,6 +2940,9 @@ def expire_stale_pending_fills(
             0.0,
             float(state.get("gross_exposure_dollars", 0.0))
             - float(exposure),
+        )
+        _release_probation_entry(
+            state, cfg, pos, reason="pending_fill_expired",
         )
         open_positions.pop(pos_id, None)
         _emit_ledger_v2(cfg, "pending_fill_expired", {
@@ -2953,9 +3320,12 @@ def close_position_v2(
     }
     _append_closure_summary(cfg, record)
     _emit_ledger_v2(cfg, "closure", record)
-    # Stop-out circuit-breaker counters (v1 parity): any stop_hit
-    # bumps both counters and starts the post-stopout cooldown; any
-    # non-stop closure resets the consecutive streak.
+    # Stop-out counters: any stop_hit bumps both counters and starts
+    # the per-symbol cooldown. The recovery-capable global breaker
+    # trips at its configured threshold. A probation stop re-trips it;
+    # a non-stop probation closure proves the recovery trade and clears
+    # the breaker.
+    probation_position = bool(pos.get("stopout_breaker_probation"))
     if reason == "stop_hit":
         state["daily_stopout_count"] = int(
             state.get("daily_stopout_count", 0) or 0,
@@ -2971,8 +3341,32 @@ def close_position_v2(
             state.setdefault("cooldowns", {})[symbol] = {
                 "until": _iso(until), "reason": "stop_hit",
             }
+        breaker_cfg = _stopout_breaker_cfg(cfg)
+        threshold = int((breaker_cfg or {}).get("threshold", 1))
+        if probation_position:
+            _trip_stopout_breaker(
+                state,
+                cfg,
+                session_date=state.get("session_date"),
+                reason="probation_stop_hit",
+            )
+        elif (breaker_cfg is not None
+                and int(state.get("consecutive_stopout_count", 0) or 0)
+                >= threshold):
+            _trip_stopout_breaker(
+                state,
+                cfg,
+                session_date=state.get("session_date"),
+                reason="consecutive_stopout_threshold",
+            )
     else:
         state["consecutive_stopout_count"] = 0
+        if probation_position:
+            _clear_stopout_breaker(
+                state,
+                cfg,
+                reason=f"probation_{reason}",
+            )
     # Update strategy-tracked PnL + gross exposure.
     state["daily_realized_pnl_strategy"] = float(
         state.get("daily_realized_pnl_strategy", 0.0)
@@ -4552,7 +4946,29 @@ def main(argv: list[str] | None = None) -> int:
         # consume pass below, but per-day counters must still reset
         # when the ET date advances under an active flag.
         try:
-            roll_session_if_needed(state, _now_utc(), _today_iso())
+            roll_now = _now_utc()
+            roll_today = _today_iso()
+            roll_is_trading_session = None
+            if live_client and oa_module is not None:
+                now_et = pd.Timestamp(roll_now).tz_convert(
+                    "America/New_York",
+                )
+                timings = _session_timings_for_today(
+                    cfg,
+                    oa_client=oa_module,
+                    api_key=api_key,
+                    http=live_client,
+                    now_et=now_et,
+                )
+                if isinstance(timings, dict) and "is_open" in timings:
+                    roll_is_trading_session = bool(timings.get("is_open"))
+            roll_session_if_needed(
+                state,
+                roll_now,
+                roll_today,
+                cfg,
+                is_trading_session=roll_is_trading_session,
+            )
         except Exception:
             LOG.exception("roll_session_if_needed raised")
 
